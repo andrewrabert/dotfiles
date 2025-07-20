@@ -75,7 +75,6 @@ def ffmpeg_merge(path, target, framerate="30", loops=1):
                 "16",
                 tmptarget,
             ],
-            stderr=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             check=True,
         )
