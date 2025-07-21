@@ -72,3 +72,10 @@ autocmd VimResized * wincmd =
 " need to set both + and * else netrw barfs
 let g:clipboard = {'copy': {'*': 'cbcopy', '+': 'cbcopy'}, 'paste': {'*': 'cbpaste', '+': 'cbpaste'}}
 ]])
+
+vim.filetype.add({
+  pattern = {
+    ['.*/*.ASM'] = 'nasm',
+  },
+})
+
