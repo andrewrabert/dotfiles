@@ -189,6 +189,7 @@ async def process_file(path, target_root, dry_run):
     except Exception:
         target_path = target_path.joinpath("unknown", path.name)
 
+    target_path = target_path.with_suffix(target_path.suffix.lower())
     if target_path.exists():
         raise RuntimeError(f"path exists: {path} {target_path}")
     if not dry_run:
