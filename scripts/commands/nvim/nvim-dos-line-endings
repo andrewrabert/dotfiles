@@ -2,5 +2,5 @@
 set -e
 for ARG in "$@"; do
     echo "$ARG"
-    nvim --headless -n -c 'set ff=unix|x' "$ARG" 2> /dev/null
+    nvim --clean --headless -es -n -c ':w ++ff=dos' +':q' "$ARG"
 done

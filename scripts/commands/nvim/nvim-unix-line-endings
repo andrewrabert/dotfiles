@@ -1,0 +1,6 @@
+#!/usr/bin/env sh
+set -e
+for ARG in "$@"; do
+    echo "$ARG"
+    nvim --clean --headless -es -n -c ':w ++ff=unix' +':q' "$ARG"
+done

@@ -1,7 +1,26 @@
 #!/usr/bin/env python3
 import argparse
 import collections
+import json
 import pathlib
+
+
+def _default_json(obj):
+    if isinstance(obj, set):
+        return sorted(obj)
+    elif isinstance(obj, pathlib.Path):
+        return str(obj)
+    elif hasattr(obj, "isoformat"):
+        return obj.isoformat()
+    else:
+        # value will be null without this
+        raise TypeError
+
+
+def pretty_json(data):
+    return json.dumps(
+        data, indent=2, sort_keys=True, default=_default_json, ensure_ascii=False
+    )
 
 
 def all_files(*paths):
@@ -26,7 +45,9 @@ def all_files(*paths):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("-i", "--ignore-case", action="store_true")
-    parser.add_argument("-c", "--count", action="store_true")
+    output_mutex = parser.add_mutually_exclusive_group()
+    output_mutex.add_argument("-c", "--count", action="store_true")
+    output_mutex.add_argument("-j", "--json", action="store_true")
     parser.add_argument("path", type=pathlib.Path, nargs="*")
     args = parser.parse_args()
 
@@ -34,23 +55,22 @@ def main():
     for path in set(args.path or (pathlib.Path(),)):
         files.update(all_files(path))
 
-    suffix_count = collections.Counter()
+    suffix_paths = collections.defaultdict(set)
     for path in files:
         suffix = path.suffix
-        if not suffix:
-            continue
-        if args.ignore_case:
-            suffix = suffix.lower()
-        if not suffix:
-            print(path)
-        suffix_count[suffix] += 1
+        if suffix:
+            if args.ignore_case:
+                suffix = suffix.lower()
+        suffix_paths[suffix].add(path)
 
     if args.count:
-        for suffix, count in sorted(suffix_count.items(), key=lambda x: x[1]):
-            print(count, suffix)
+        for suffix, paths in sorted(suffix_paths.items(), key=lambda x: len(x[1])):
+            print(len(paths), suffix or '""')
+    elif args.json:
+        print(pretty_json(suffix_paths))
     else:
-        for suffix in sorted(suffix_count):
-            print(suffix)
+        for suffix in sorted(suffix_paths):
+            print(suffix or '""')
 
 
 if __name__ == "__main__":

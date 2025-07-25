@@ -76,6 +76,7 @@ let g:clipboard = {'copy': {'*': 'cbcopy', '+': 'cbcopy'}, 'paste': {'*': 'cbpas
 vim.filetype.add({
   pattern = {
     ['.*/*.ASM'] = 'nasm',
+    ['.*/*.MD'] = 'markdown',
   },
 })
 
