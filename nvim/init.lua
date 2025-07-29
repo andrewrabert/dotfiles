@@ -50,6 +50,10 @@ vim.api.nvim_set_keymap("n", "<leader>z", ":Files<CR>", { noremap = true, silent
 vim.api.nvim_set_keymap("n", "<leader>x", ":Notes<CR>", { noremap = true, silent = true })
 vim.api.nvim_set_keymap("n", "<leader>r", ":Rg<CR>", { noremap = true, silent = true })
 
+vim.keymap.set("n", "<leader>dt", function()
+    vim.diagnostic.enable(not vim.diagnostic.is_enabled())
+end)
+
 vim.cmd([[
 
 " relative percentage to screen
