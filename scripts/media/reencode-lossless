@@ -12,6 +12,7 @@ import async_executor
 import mutagen
 
 LOGGER = logging.getLogger("reencode-lossless")
+FLAC_DECODE_THROUGH_ERRORS = False
 
 
 def copy_tags(source, target):
@@ -132,8 +133,17 @@ async def decode_wv(source, fd):
 
 
 async def decode_flac(source, fd):
+    args = [
+        "flac",
+        "--stdout",
+        "--silent",
+        "--decode",
+    ]
+    if FLAC_DECODE_THROUGH_ERRORS:
+        args.append("--decode-through-errors")
+    args.extend(["--", source])
     proc = await asyncio.create_subprocess_exec(
-        "flac", "-csd", source, stderr=asyncio.subprocess.DEVNULL, stdout=fd
+        *args, stderr=asyncio.subprocess.DEVNULL, stdout=fd
     )
 
     async def result():
@@ -290,6 +300,10 @@ def all_files(root):
 async def run(args):
     logging.basicConfig(format="%(levelname)s %(message)s", level=logging.INFO)
 
+    if args.flac_decode_through_errors:
+        global FLAC_DECODE_THROUGH_ERRORS
+        FLAC_DECODE_THROUGH_ERRORS = True
+
     paths = set()
     for path in args.path:
         if path.is_dir():
@@ -369,6 +383,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("-n", dest="numprocs", metavar="NUMPROCS", type=int)
     parser.add_argument("--format", choices=ENCODE_FORMAT, default="flac")
+    parser.add_argument("--flac-decode-through-errors", action="store_true")
     parser.add_argument("path", type=pathlib.Path, nargs="+")
     args = parser.parse_args()
 
