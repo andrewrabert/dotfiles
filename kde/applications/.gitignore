@@ -1,8 +1,9 @@
 *
 !/.gitignore
 !/dotfiles-localhost
-!/ssh-tmux.desktop
+!/ghidra.desktop
 !/maliit-breeze.desktop
 !/neovim-dotfiles.desktop
+!/ssh-tmux.desktop
 !/tmux-scratchpad.desktop
 !/torrent.desktop

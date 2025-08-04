@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Ghidra
+Exec=/usr/bin/ghidra
+Icon=/opt/ghidra/docs/images/GHIDRA_1.png
+Terminal=false
+Categories=Game;
