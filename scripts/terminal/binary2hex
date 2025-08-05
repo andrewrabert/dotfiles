@@ -1,0 +1,11 @@
+#!/usr/bin/env python3
+import argparse
+import math
+
+parser = argparse.ArgumentParser()
+parser.add_argument('bin')
+args = parser.parse_args()
+
+length = math.ceil(len(args.bin) / 4)
+fmt = '{:0' + str(length) + 'x}'
+print(fmt.format(int(args.bin, 2)))
