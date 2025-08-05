@@ -348,10 +348,11 @@ async def main():
     parser.add_argument("path", type=pathlib.Path, nargs="*")
     args = parser.parse_args()
 
-    if len(args.path) > 1:
+    paths = {path.absolute() for path in args.path}
+    if paths:
         common = None
         parent_counts = collections.Counter()
-        for path in args.path:
+        for path in paths:
             path = path.absolute()
             for parent in path.parents:
                 parent_counts[parent] += 1
@@ -359,14 +360,14 @@ async def main():
             parent_counts[path] += 1
 
         for k, v in parent_counts.items():
-            if v == len(args.path):
+            if v == len(paths):
                 if common is None:
                     common = k
                 elif len(k.parts) > len(common.parts):
                     common = k
         await file_hash_recorder_list(common)
 
-    if not args.update and not args.path:
+    if not args.update and not paths:
         parser.error("a path is required")
 
     setup_logging(NAME, level=logging.DEBUG if args.verbose else logging.INFO)
@@ -376,14 +377,14 @@ async def main():
     if args.update or not redump.hashes:
         await redump.download_datfiles()
 
-    if args.update and not args.path:
+    if args.update and not paths:
         parser.exit()
 
     if args.hashes:
         FILE_HASH_RECORDER.update(json.loads(args.hashes.read_text()))
 
     dirs = set()
-    for path in args.path:
+    for path in paths:
         if path.is_dir():
             dirs.update(all_directories(path))
         else:
