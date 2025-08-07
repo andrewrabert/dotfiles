@@ -6,8 +6,9 @@ if ! command -v wezterm > /dev/null; then
     exit
 fi
 
-if [ "$(realpath ~/.config/wezterm)" != "$DOTFILES/wezterm" ]; then
+if [ "$(realpath ~/.config/wezterm 2> /dev/null)" != "$DOTFILES/wezterm" ]; then
     echo 'Linking configuration ...'
     rm -rf ~/.config/wezterm
+    mkdir -p ~/.config
     ln -sT "${DOTFILES}/wezterm" ~/.config/wezterm
 fi

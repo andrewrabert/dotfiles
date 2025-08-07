@@ -11,12 +11,6 @@ if [[ $OSTYPE == darwin* ]]; then
     export LANG=en_US.UTF-8
     export HOMEBREW_NO_ANALYTICS=1
 
-    manpath=(
-        /opt/homebrew/opt/*/libexec/gnuman
-        /usr/share/man
-        "$manpath[@]"
-    )
-
     path=(
         "$DOTFILES/scripts/macos"
         /opt/homebrew/bin
@@ -25,6 +19,12 @@ if [[ $OSTYPE == darwin* ]]; then
         /opt/homebrew/opt/gnu-tar/libexec/gnubin
         /opt/homebrew/opt/curl/bin
         "$path[@]"
+    )
+
+    manpath=(
+        /opt/homebrew/opt/*/libexec/gnuman
+        /usr/share/man
+        "$manpath[@]"
     )
 
     fpath=(

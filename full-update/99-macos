@@ -15,6 +15,7 @@ EXPECTED_PACKAGES = {
     "curlie",
     "dash-shell",
     "fd",
+    "font-hack",
     "fzf",
     "gifsicle",
     "git",
@@ -39,6 +40,7 @@ EXPECTED_PACKAGES = {
     "rsync",
     "ruff",
     "sevenzip",  # aka _the_ 7zip
+    "tree-sitter-cli",
     "tmux",
     "unzip",
     "yazi",
