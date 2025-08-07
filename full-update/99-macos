@@ -3,48 +3,48 @@ import asyncio
 import json
 import platform
 
-if platform.uname().system != 'Darwin':
+if platform.uname().system != "Darwin":
     exit()
 
 EXPECTED_PACKAGES = {
-    'advancecomp',
-    'aria2',
-    'bat',
-    'coreutils',
-    'curl',
-    'curlie',
-    'dash-shell',
-    'fd',
-    'fzf',
-    'gifsicle',
-    'git',
-    'gnu-sed',
-    'gnu-tar',
-    'htop',
-    'hyperfine',
-    'imagemagick',
-    'innoextract',
-    'iperf3',
-    'jpegoptim',
-    'jq',
-    'moreutils',
-    'neovim',
-    'node',
-    'openssh',
-    'oxipng',
-    'pipx',
-    'pyright',
-    'rar',
-    'ripgrep',
-    'rsync',
-    'ruff',
-    'sevenzip',  # aka _the_ 7zip
-    'tmux',
-    'unzip',
-    'yazi',
-    'zip',
-    'zsh',
-    'zstd',
+    "advancecomp",
+    "aria2",
+    "bat",
+    "coreutils",
+    "curl",
+    "curlie",
+    "dash-shell",
+    "fd",
+    "fzf",
+    "gifsicle",
+    "git",
+    "gnu-sed",
+    "gnu-tar",
+    "htop",
+    "hyperfine",
+    "imagemagick",
+    "innoextract",
+    "iperf3",
+    "jpegoptim",
+    "jq",
+    "moreutils",
+    "neovim",
+    "node",
+    "openssh",
+    "oxipng",
+    "pipx",
+    "pyright",
+    "rar",
+    "ripgrep",
+    "rsync",
+    "ruff",
+    "sevenzip",  # aka _the_ 7zip
+    "tmux",
+    "unzip",
+    "yazi",
+    "zip",
+    "zsh",
+    "zstd",
 }
 
 
@@ -52,24 +52,32 @@ class Homebrew:
     @staticmethod
     async def get_installed():
         proc = await asyncio.create_subprocess_exec(
-            'brew', 'info', '--json', '--installed',
+            "brew",
+            "info",
+            "--json=v2",
+            "--installed",
             stdout=asyncio.subprocess.PIPE,
         )
         stdout, _ = await proc.communicate()
         if proc.returncode:
             raise ProcessError(proc)
+        info = json.loads(stdout)
         installed = {}
-        for i in json.loads(stdout):
-            full_name = i['full_name']
+        for i in info["formulae"]:
+            full_name = i["full_name"]
             if full_name in installed:
-                raise RuntimeError('duplicate full_name {full_name}')
+                raise RuntimeError("duplicate full_name {full_name}")
+            installed[full_name] = i
+        for i in info["casks"]:
+            full_name = i["full_token"]
+            if full_name in installed:
+                raise RuntimeError("duplicate full_name {full_name}")
             installed[full_name] = i
         return installed
 
     @staticmethod
     async def install(packages):
-        proc = await asyncio.create_subprocess_exec(
-            'brew', 'install', '--', *packages)
+        proc = await asyncio.create_subprocess_exec("brew", "install", "--", *packages)
         await proc.wait()
         if proc.returncode:
             raise ProcessError(proc)
@@ -83,16 +91,16 @@ class ProcessError(Exception):
     def __str__(self):
         proc = self.process
 
-        text = f'exit {proc.returncode}'
+        text = f"exit {proc.returncode}"
         if self.message is not None:
-            text = f'{text} - {self.message}'
+            text = f"{text} - {self.message}"
 
         try:
-            args = proc._transport._extra['subprocess'].args
+            args = proc._transport._extra["subprocess"].args
         except (AttributeError, KeyError):
             pass
         else:
-            text = f'{text}: {args}'
+            text = f"{text}: {args}"
         return text
 
 
@@ -103,5 +111,5 @@ async def main():
         await Homebrew.install(missing)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     asyncio.run(main())
