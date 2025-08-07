@@ -1,0 +1,13 @@
+#!/usr/bin/env sh
+set -e
+
+if ! command -v wezterm > /dev/null; then
+    rm -rf ~/.config/wezterm
+    exit
+fi
+
+if [ "$(realpath ~/.config/wezterm)" != "$DOTFILES/wezterm" ]; then
+    echo 'Linking configuration ...'
+    rm -rf ~/.config/wezterm
+    ln -sT "${DOTFILES}/wezterm" ~/.config/wezterm
+fi
