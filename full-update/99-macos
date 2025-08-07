@@ -13,7 +13,7 @@ EXPECTED_PACKAGES = {
     'coreutils',
     'curl',
     'curlie',
-    'dash',
+    'dash-shell',
     'fd',
     'fzf',
     'gifsicle',
