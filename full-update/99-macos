@@ -18,6 +18,7 @@ EXPECTED_PACKAGES = {
     'fzf',
     'gifsicle',
     'git',
+    'gnu-sed',
     'gnu-tar',
     'htop',
     'hyperfine',
