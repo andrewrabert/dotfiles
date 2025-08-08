@@ -8,7 +8,7 @@ import subprocess
 PREFIX_ROOT = pathlib.Path(
     os.environ.get("PROTON_PREFIX_ROOT", "~/.local/share/proton-prefixes")
 ).expanduser()
-DEFAULT_PREFIX = PREFIX_ROOT / 'default'
+DEFAULT_PREFIX = PREFIX_ROOT / "default"
 STEAM_ROOT = pathlib.Path("~/.local/share/Steam").expanduser()
 SYSTEM_PROTON = pathlib.Path("/usr/bin/proton")
 
@@ -57,7 +57,7 @@ def case_insensitivty(path):
 
 
 def _parser_prefix(value):
-    if '/' in value:
+    if "/" in value:
         return pathlib.Path(value).absolute()
     else:
         return PREFIX_ROOT / value
@@ -67,7 +67,9 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--versions", action="store_true")
     parser.add_argument("--winearch", choices=["win32", "win64"], default="win64")
-    parser.add_argument("-p", "--prefix", default=DEFAULT_PREFIX, type=_parser_prefix, nargs="?")
+    parser.add_argument(
+        "-p", "--prefix", default=DEFAULT_PREFIX, type=_parser_prefix, nargs="?"
+    )
     parser.add_argument("--use", metavar="VERSION", default="system")
     parser.add_argument("--cd", action="store_true")
     parser.add_argument("args", nargs="*")

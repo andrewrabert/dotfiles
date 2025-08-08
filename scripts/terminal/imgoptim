@@ -953,29 +953,55 @@ async def main_optim():
 
 async def _has_incorrect_colorspace(path):
     proc = await asyncio.create_subprocess_exec(
-        'magick', 'identify', '-quiet', '-format', '%[colorspace]', path,
-        stdout=asyncio.subprocess.PIPE)
+        "magick",
+        "identify",
+        "-quiet",
+        "-format",
+        "%[colorspace]",
+        path,
+        stdout=asyncio.subprocess.PIPE,
+    )
     stdout, _ = await proc.communicate()
     if proc.returncode:
         raise ProcessError(proc)
 
     colorspace = stdout.decode()
-    if colorspace == 'Gray':
+    if colorspace == "Gray":
         return False
 
     proc = await asyncio.create_subprocess_exec(
-        'magick', path, '-colorspace', 'HSB', '-channel', 'green', '-separate', '+channel', '-format', "%[fx:100*mean>0?1:0]", 'info:',
-        stdout=asyncio.subprocess.PIPE)
+        "magick",
+        path,
+        "-colorspace",
+        "HSB",
+        "-channel",
+        "green",
+        "-separate",
+        "+channel",
+        "-format",
+        "%[fx:100*mean>0?1:0]",
+        "info:",
+        stdout=asyncio.subprocess.PIPE,
+    )
     stdout, _ = await proc.communicate()
     if proc.returncode:
         raise ProcessError(proc)
-    return stdout.decode() == '0'
+    return stdout.decode() == "0"
 
 
 async def _fix_colorspace(path):
-    with TempPath(dir=path.parent, prefix='.imgfixcolorspace', suffix='.png') as tmp:
+    with TempPath(dir=path.parent, prefix=".imgfixcolorspace", suffix=".png") as tmp:
         proc = await asyncio.create_subprocess_exec(
-            'magick', path, '-depth', '4', '-colorspace', 'Gray', '-define', 'png:compression-level=0', tmp)
+            "magick",
+            path,
+            "-depth",
+            "4",
+            "-colorspace",
+            "Gray",
+            "-define",
+            "png:compression-level=0",
+            tmp,
+        )
         await proc.wait()
         if proc.returncode:
             raise ProcessError(proc)
@@ -992,11 +1018,11 @@ async def main_fixcolorspace():
 
     fut_to_path = {}
     for path in all_files(*args.paths):
-        if determine_mime(path)[0] == 'image/png':
+        if determine_mime(path)[0] == "image/png":
             fut = executor.submit(_has_incorrect_colorspace, path)
             fut_to_path[fut] = path
 
-    print('Checking for incorrect colorspaces')
+    print("Checking for incorrect colorspaces")
     done = 0
     total = 0
     async for fut in executor:
@@ -1005,15 +1031,14 @@ async def main_fixcolorspace():
             executor2.submit(_fix_colorspace, path)
             total += 1
         done += 1
-        print(f'{done} / {len(fut_to_path)}')
+        print(f"{done} / {len(fut_to_path)}")
 
-    print('Fixing incorrect colorspaces')
+    print("Fixing incorrect colorspaces")
     done = 0
     async for fut in executor2:
         fut.result()
         done += 1
-        print(f'{done} / {total}')
-
+        print(f"{done} / {total}")
 
 
 if __name__ == "__main__":

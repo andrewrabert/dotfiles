@@ -65,7 +65,7 @@ def main():
 
     if args.count:
         for suffix, paths in sorted(suffix_paths.items(), key=lambda x: len(x[1])):
-            print((suffix or '""') + '\t\t' + str(len(paths)))
+            print((suffix or '""') + "\t\t" + str(len(paths)))
     elif args.json:
         print(pretty_json(suffix_paths))
     else:

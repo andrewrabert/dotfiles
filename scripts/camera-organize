@@ -33,7 +33,8 @@ IGNORABLE_EXT = {
 
 async def immich_scan():
     proc = await asyncio.create_subprocess_exec(
-        "immich-sol", "scan",
+        "immich-sol",
+        "scan",
     )
     await proc.wait()
     if proc.returncode:

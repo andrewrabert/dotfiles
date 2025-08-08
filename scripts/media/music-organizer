@@ -86,7 +86,7 @@ def folder_name(tag_value):
         if c in IGNORED_PATH_CHARS:
             continue
         if not c.isprintable():
-            raise ValueError('unprintable character')
+            raise ValueError("unprintable character")
         chars.append(c)
     name = "".join(chars)
     return " ".join(part for part in name.split())
@@ -191,7 +191,9 @@ def fix_metadata(path, metadata):
         for v in (tag, *values):
             for c in v:
                 if not c.isprintable():
-                    LOGGER.error(f'Non-printable character detected in "{tag}": "{path}"')
+                    LOGGER.error(
+                        f'Non-printable character detected in "{tag}": "{path}"'
+                    )
 
 
 def fix_tracknumber(path, metadata):

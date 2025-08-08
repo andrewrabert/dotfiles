@@ -2,9 +2,9 @@
 import argparse
 
 parser = argparse.ArgumentParser()
-parser.add_argument('hex')
+parser.add_argument("hex")
 args = parser.parse_args()
 
 length = 4 * len(args.hex)
-fmt = '{:0' + str(length) + 'b}'
+fmt = "{:0" + str(length) + "b}"
 print(fmt.format(int(args.hex, 16)))
