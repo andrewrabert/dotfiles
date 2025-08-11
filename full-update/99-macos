@@ -40,8 +40,9 @@ EXPECTED_PACKAGES = {
     "rsync",
     "ruff",
     "sevenzip",  # aka _the_ 7zip
-    "tree-sitter-cli",
+    "shellcheck",
     "tmux",
+    "tree-sitter-cli",
     "unzip",
     "yazi",
     "zip",
