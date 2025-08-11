@@ -23,7 +23,6 @@ sudo mount --bind /mnt/frigate/media /srv/nfs4/frigate
 sudo systemctl restart nfs-server.service
 
 echo Starting smb binds ...
-sudo mount --bind /storage/Audio            /srv/smb/audio
 sudo mount --bind /storage/Archival\ Dumps  /srv/smb/storage/Archival\ Dumps
 sudo mount --bind /storage/Audio            /srv/smb/storage/Audio
 sudo mount --bind /storage/Books            /srv/smb/storage/Books
