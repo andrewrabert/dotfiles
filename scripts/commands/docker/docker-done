@@ -1,0 +1,68 @@
+#!/usr/bin/env sh
+YELLOW='\033[1;33m'
+RESET_COLOR='\033[0m'
+
+show_help() {
+    cat << EOF
+usage: docker-done [--help] [--system]
+
+remove all containers, networks, and volumes
+
+    --help          show help and exit
+    --system        also prune images and build cache
+    --volumes       prune anonymous volumes
+EOF
+}
+
+
+PRUNE_SYSTEM=''
+PRUNE_VOLUMES=''
+while true; do
+    case "$1" in
+        --help)
+            show_help
+            exit
+            ;;
+        --system)
+            PRUNE_SYSTEM=1
+            shift
+            ;;
+        --volumes)
+            PRUNE_VOLUMES=1
+            shift
+            ;;
+        --all)
+            PRUNE_SYSTEM=1
+            PRUNE_VOUMES=1
+            shift
+            ;;
+        *)
+            if [ $# -ne 0 ]; then
+                show_help >&2
+                echo error: unexpected arguments >&2
+                exit 1
+            fi
+            break
+    esac
+done
+
+log() {
+    printf "%b%s%b\n" "${YELLOW}" "$@" "${RESET_COLOR}"
+}
+
+log "Removing all containers ..."
+all_containers=$(docker ps -aq)
+if [ -n "$all_containers" ]; then
+    docker kill $all_containers
+    docker rm -f $all_containers
+fi
+
+log "Pruning volumes ..."
+docker volume prune -f
+log "Pruning networks ..."
+docker network prune -f
+
+if [ -n "$PRUNE_SYSTEM" ]; then
+    log "Pruning images and build cache ..."
+    docker system prune -f
+fi
