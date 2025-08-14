@@ -13,6 +13,7 @@ vim.o.hidden = true
 
 vim.wo.foldmethod = 'expr'
 vim.wo.foldexpr = 'v:lua.vim.treesitter.foldexpr()'
+vim.wo.foldlevel = 99
 
 -- case insensitive search
 vim.o.ignorecase = true
