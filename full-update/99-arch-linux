@@ -149,7 +149,6 @@ if HOSTNAME in ('mars', 'phobos', 'lounge-htpc'):
 
 if HOSTNAME in ('mars', 'phobos'):
     EXPECTED_PACKAGES.update({
-        'alacritty',
         'android-tools',
         'android-udev',
         'audacity',
