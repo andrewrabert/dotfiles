@@ -16,6 +16,7 @@ EXPECTED_PACKAGES = {
     "dash-shell",
     "fd",
     "font-hack",
+    "font-hack-nerd-font",
     "fzf",
     "gifsicle",
     "git",

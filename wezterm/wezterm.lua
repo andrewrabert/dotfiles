@@ -10,6 +10,7 @@ config.enable_tab_bar = false
 config.check_for_updates = false
 config.window_close_confirmation = 'NeverPrompt'
 config.force_reverse_video_cursor = true
+config.native_macos_fullscreen_mode = true
 config.window_padding = {
   left = 0,
   right = 0,
