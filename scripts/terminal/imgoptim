@@ -338,6 +338,7 @@ _MIME_OPTIM = {
 _TYPE_TO_MIME = {
     "bmp": "image/bmp",
     "gif": "image/gif",
+    "heic": "image/heif",
     "jpeg": "image/jpeg",
     "jxl": "image/jxl",
     "png": "image/png",
@@ -350,6 +351,7 @@ _TYPE_TO_MIME = {
 _MIME_SUFFIXES = {
     "image/bmp": (".bmp",),
     "image/gif": (".gif",),
+    "image/heif": (".heic",),
     "image/jpeg": (".jpg", ".jpeg"),
     "image/jxl": (".jxl",),
     "image/png": (".png",),
@@ -393,6 +395,8 @@ def determine_mime(path):
             return "image/svg+xml", {}
         elif start[0:12] == b"\x00\x00\x00\x0c\x4a\x58\x4c\x20\x0d\x0a\x87\x0a":
             return "image/jxl", {}
+        elif start[4:12] == b"ftypheic":
+            return "image/heif", {}
 
         # start[4:8] contains the file size
         elif start[0:4] == b"RIFF" and start[8:12] == b"WEBP":
@@ -585,6 +589,7 @@ _SUPPORTED_CONVERT_SUFFIXES = {
         "image/ppm",
     ],
     "image/jxl": [
+        "image/heif",
         "image/jpeg",
         "image/png",
         "image/ppm",
