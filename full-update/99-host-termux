@@ -5,10 +5,6 @@ set -e
 if ! command -v termux-info > /dev/null; then
     exit
 fi
-
-if ! command -v pipx > /dev/null; then
-    pip install pipx
-fi
 if ! command -v pyright > /dev/null; then
-    pipx install pyright
+    uv tool install pyright
 fi

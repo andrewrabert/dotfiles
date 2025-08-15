@@ -294,7 +294,6 @@ EXPECTED_PACKAGE_DEPENDENCIES = {
     'python': {
         'python-setuptools',
         'python-pip',
-        'python-pipx',
         'sqlite',
         'xz',
         'tk',
