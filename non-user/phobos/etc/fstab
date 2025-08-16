@@ -8,6 +8,8 @@ UUID=b5da17db-934d-4d6d-bacb-490a22aec780	/         	ext4      	rw,relatime	0 1
 # /dev/nvme0n1p1
 UUID=2640-B55F      	/boot     	vfat      	rw,relatime,fmask=0022,dmask=0022,codepage=437,iocharset=ascii,shortname=mixed,utf8,errors=remount-ro	0 2
 
+sshfs_sol:/storage /storage fuse.sshfs x-systemd.automount,_netdev,users,idmap=user,allow_other,reconnect 0 0
+sshfs_mars:/home/ar /mnt/mars fuse.sshfs x-systemd.automount,_netdev,users,idmap=user,allow_other,reconnect 0 0
 //epson-v600.nullsum.lan/scans /mnt/epson-v600 cifs _netdev,noauto,password=,uid=1000,gid=1000,iocharset=utf8,file_mode=0666,dir_mode=0777,noperm 0 0
 
 /swapfile none swap defaults 0 0
