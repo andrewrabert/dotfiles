@@ -305,6 +305,30 @@ class exiv2:
                 raise ProcessError(proc)
 
 
+class magick_convert:
+    @staticmethod
+    async def get_number_of_frames(path):
+        proc = await asyncio.create_subprocess_exec(
+            "magick",
+            "convert",
+            path,
+            "-format",
+            "%n\n",
+            "info:",
+            stderr=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await proc.communicate()
+        if proc.returncode:
+            raise ProcessError(proc)
+        # macos dynamic wallpaper SequoiaDynamic.heic results in two lines, each being 2
+        # not sure why
+        stdout = set(int(v) for v in stdout.decode().splitlines())
+        if len(stdout) != 1:
+            raise RuntimeError
+        return stdout.pop()
+
+
 class ProcessError(Exception):
     def __init__(self, process, message=None):
         self.process = process
@@ -324,6 +348,17 @@ class ProcessError(Exception):
         else:
             text = f"{text}: {args}"
         return text
+
+
+class InvalidSourceImage(Exception):
+    """Raised when a source image is not valid"""
+
+    def __init__(self, path, message=None):
+        self.path = path
+        self.message = message
+
+    def __str__(self):
+        return f"{self.message}: {self.path}"
 
 
 _MIME_OPTIM = {
@@ -615,9 +650,14 @@ async def _process_convert(path, source_mimetype, target_mimetype):
     if not has_proper_suffix:
         name = name + target_suffixes[0]
 
-    if source_mimetype == "image/gif":
-        if await is_animated_gif(path):
-            raise NotImplementedError("gif is animated")
+    match source_mimetype:
+        case "image/gif":
+            if await is_animated_gif(path):
+                raise NotImplementedError("gif is animated")
+        case "image/heif":
+            num_frames = await magick_convert.get_number_of_frames(path)
+            if num_frames != 1:
+                raise InvalidSourceImage(path, "heif must contain exactly one frame")
 
     dest = path.parent / name
     with contextlib.ExitStack() as stack:
@@ -882,12 +922,18 @@ async def main_convert():
             target_mimetype=_TYPE_TO_MIME[args.format],
         )
 
+    has_error = False
     async for result in executor:
         try:
             source, dest = result.result()
         except ProcessError as e:
             # TODO give this a competent error message
             print(f"error: {e}", file=sys.stderr)
+            has_error = True
+            continue
+        except InvalidSourceImage as e:
+            print(f"error: {e}", file=sys.stderr)
+            has_error = True
             continue
         print(source, "->", dest)
         try:
@@ -895,6 +941,8 @@ async def main_convert():
                 source.unlink()
         except FileNotFoundError:
             pass
+    if has_error:
+        sys.exit(1)
 
 
 async def main_optim():
