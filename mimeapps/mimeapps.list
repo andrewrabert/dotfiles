@@ -1,6 +1,6 @@
 [Added Associations]
-x-scheme-handler/http=firefox.desktop;
-x-scheme-handler/https=firefox.desktop;
+x-scheme-handler/http=firefox.desktop;chromium.desktop;
+x-scheme-handler/https=firefox.desktop;chromium.desktop;
 
 [Default Applications]
 application/epub+zip=com.github.johnfactotum.Foliate.desktop
@@ -14,8 +14,8 @@ application/x-extension-shtml=firefox.desktop
 application/x-extension-xht=firefox.desktop
 application/x-extension-xhtml=firefox.desktop
 application/xhtml+xml=firefox.desktop
-audio/aac=mpv.desktop
 audio/AMR=mpv.desktop
+audio/aac=mpv.desktop
 audio/flac=mpv.desktop
 audio/mp4=mpv.desktop
 audio/mpeg=mpv.desktop
@@ -59,6 +59,7 @@ x-scheme-handler/about=firefox.desktop
 x-scheme-handler/bitwarden=bitwarden.desktop
 x-scheme-handler/chrome=firefox.desktop
 x-scheme-handler/discord-1074038981802598491=discord-1074038981802598491.desktop
+x-scheme-handler/discord-1352351827206733974=discord-1352351827206733974.desktop
 x-scheme-handler/discord-956262381762261034=discord-956262381762261034.desktop
 x-scheme-handler/element=io.element.Element.desktop
 x-scheme-handler/ftp=firefox.desktop
@@ -71,4 +72,3 @@ x-scheme-handler/sgnl=signal-desktop.desktop
 x-scheme-handler/signalcaptcha=signal-desktop.desktop
 x-scheme-handler/slack=slack.desktop
 x-scheme-handler/unknown=firefox.desktop
-x-scheme-handler/discord-1352351827206733974=discord-1352351827206733974.desktop
