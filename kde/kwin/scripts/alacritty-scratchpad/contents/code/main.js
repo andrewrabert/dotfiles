@@ -154,8 +154,8 @@ function init() {
     }
 
     workspace.windowAdded.connect(setupAlacritty);
-    registerShortcut("Scratchpad Toggle", "Toggle scratchpad.", "Shift+Meta+Return", toggleAlacritty);
-    registerShortcut("Show Window", "Show scratchpad as a normal window.", "Meta+Return", showNormal);
+    registerShortcut("Scratchpad Toggle", "Toggle scratchpad.", "Meta+Return", toggleAlacritty);
+    registerShortcut("Show Window", "Show scratchpad as a normal window.", "Shift+Meta+Return", showNormal);
 }
 
 init();
