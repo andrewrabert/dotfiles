@@ -1,0 +1,22 @@
+#!/usr/bin/env sh
+NVIM_ARGS=""
+WORKING_DIR=~
+case $# in
+    1)
+        NVIM_ARGS="-- \"$1\""
+        if [ -d "$1" ]; then
+            WORKING_DIR="$1"
+        else
+            WORKING_DIR="$(dirname "$1")"
+        fi
+        ;;
+    0)
+        ;;
+    *)
+        echo 'usage: foot-nvim [PATH]' >&2
+        exit 1
+esac
+foot \
+    --working-dir="$WORKING_DIR" \
+    -- zsh -lic ". ~/.base16_theme; nvim ${NVIM_ARGS}" 2> /dev/null > /dev/null &
+disown

@@ -26,6 +26,10 @@ vim.o.relativenumber = true
 
 vim.o.mouse = "a"
 
+vim.opt.title = true
+vim.opt.titlelen = 0 -- do not shorten title
+vim.opt.titlestring = 'nvim %{expand("%:p")}'
+
 do
     -- false so default uses base terminal colors.
     -- true breaks base16 themes
