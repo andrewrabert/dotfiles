@@ -26,9 +26,10 @@ vim.o.relativenumber = true
 
 vim.o.mouse = "a"
 
+-- terminal title
 vim.opt.title = true
-vim.opt.titlelen = 0 -- do not shorten title
-vim.opt.titlestring = 'nvim %{expand("%:p")}'
+vim.opt.titlelen = 0
+vim.opt.titlestring = 'nvim %{&buftype == "" ? expand("%:p") : expand("#:p")}'
 
 do
     -- false so default uses base terminal colors.
@@ -65,28 +66,43 @@ vim.keymap.set("n", "<leader>dt", function()
     vim.diagnostic.enable(not vim.diagnostic.is_enabled())
 end)
 
-vim.cmd([[
+vim.env.FZF_DEFAULT_COMMAND = "fd --type file --ignore-file ~/.config/nvim/fzf_fd_ignore"
+vim.g.fzf_preview_window = {'right,50%,<70(hidden,right,50%)', 'ctrl-/'}
 
-" relative percentage to screen
-let g:lf_width = 1.0
-let g:lf_height = 1.0
+vim.api.nvim_create_autocmd("StdinReadPre", {
+  group = augroup,
+  pattern = "*",
+  callback = function()
+    vim.g.std_in = 1
+  end,
+})
 
-filetype plugin indent on
+vim.api.nvim_create_autocmd("BufWritePost", {
+  group = augroup,
+  pattern = "*",
+  callback = function()
+    vim.fn.system("lmk")
+  end,
+})
 
-let $FZF_DEFAULT_COMMAND = "fd --type file --ignore-file ~/.config/nvim/fzf_fd_ignore"
-let g:fzf_preview_window = ['right,50%,<70(hidden,right,50%)', 'ctrl-/']
+vim.g.markdown_enable_spell_checking = 0
 
-autocmd StdinReadPre * let s:std_in=1
+vim.api.nvim_create_autocmd("VimResized", {
+  group = augroup,
+  pattern = "*",
+  command = "wincmd =",
+})
 
-autocmd BufWritePost * call system("lmk")
-
-let g:markdown_enable_spell_checking = 0
-
-autocmd VimResized * wincmd =
-
-" need to set both + and * else netrw barfs
-let g:clipboard = {'copy': {'*': 'cbcopy', '+': 'cbcopy'}, 'paste': {'*': 'cbpaste', '+': 'cbpaste'}}
-]])
+vim.g.clipboard = {
+  copy = {
+    ['*'] = 'cbcopy',
+    ['+'] = 'cbcopy'
+  },
+  paste = {
+    ['*'] = 'cbpaste',
+    ['+'] = 'cbpaste'
+  }
+}
 
 vim.filetype.add({
   pattern = {
