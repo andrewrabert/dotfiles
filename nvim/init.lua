@@ -34,15 +34,21 @@ do
     -- false so default uses base terminal colors.
     -- true breaks base16 themes
     local colorscheme = 'default'
-    vim.o.termguicolors = false
+
+    vim.g.tinted_italic = 0
+    if vim.env.BASE16_THEME then
+        vim.o.termguicolors = false
+        vim.g.tinted_colorspace = 256
+    else
+        -- eg. running nvim as the command to a gui terminal
+        vim.o.termguicolors = true
+    end
+
     local base16_path = vim.fs.normalize('~/.base16_theme')
     if vim.fn.filereadable(base16_path) then
-        local proc = vim.system({'readlink', base16_path}, { text = true }):wait()
-        if proc.code == 0 then
-            -- remove .sh suffix
-            vim.g.tinted_colorspace = 256
-            vim.g.tinted_italic = 0
-            colorscheme = vim.fs.basename(string.sub(proc.stdout, 0, -5))
+        local base16_path_resolved = vim.fn.resolve(base16_path)
+        if base16_path_resolved ~= "" and base16_path_resolved ~= base16_path then
+            colorscheme = vim.fn.fnamemodify(base16_path_resolved, ":t:r")
         end
     end
     vim.cmd.colorscheme(colorscheme)
