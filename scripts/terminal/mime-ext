@@ -57,8 +57,8 @@ MIME_SUFFIXES = {
         ".heic",
     ],
     "image/jpeg": [
-        ".jpeg",
         ".jpg",
+        ".jpeg",
     ],
     "image/tiff": [
         ".tiff",
@@ -140,7 +140,7 @@ def main():
             else:
                 suffix = ".unknown"
             for path in paths:
-                if path.suffix == suffix:
+                if path.suffix.lower() == suffix.lower():
                     continue
                 sep_count = 0
                 while True:
@@ -186,7 +186,7 @@ def main():
                 suffix = MIME_SUFFIXES[mime][0]
                 for path in paths:
                     path = pathlib.Path(path)
-                    if path.suffix == suffix:
+                    if path.suffix.lower() == suffix.lower():
                         continue
                     sep_cnt = 0
                     while True:
