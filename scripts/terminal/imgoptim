@@ -8,9 +8,22 @@ import pathlib
 import signal
 import sys
 import tempfile
+import types
 
 import async_executor
 import mozjpeg_lossless_optimization
+
+
+CONFIG = types.SimpleNamespace(
+    jpeg=types.SimpleNamespace(
+        quality="90",
+    ),
+    jxl=types.SimpleNamespace(
+        distance="0.0",
+        effort="10",
+        lossless=True,
+    ),
+)
 
 
 @contextlib.contextmanager
@@ -472,6 +485,7 @@ async def is_animated_gif(path):
 async def convert_to_jpeg(source, dest):
     args = [
         "cjpegli",
+        f"--quality={CONFIG.jpeg.quality}",
         "--",
         source,
         dest,
@@ -555,11 +569,10 @@ async def convert_to_jxl(source, dest, fast=False):
     args = [
         "cjxl",
         "--quiet",
-        "--distance=0.0",
-        "--lossless_jpeg=1",
+        f"--distance={CONFIG.jxl.distance}",
+        f"--effort={CONFIG.jxl.effort}",
+        f"--lossless_jpeg={1 if CONFIG.jxl.distance == '0.0' else 0}",
     ]
-    if not fast:
-        args.append("--effort=10")
 
     args.extend(
         [
@@ -635,10 +648,8 @@ _SUPPORTED_CONVERT_SUFFIXES = {
 async def _process_convert(path, source_mimetype, target_mimetype):
     source_suffixes = _MIME_SUFFIXES[source_mimetype]
     name = path.name
-    for suffix in source_suffixes:
-        if name.lower().endswith(suffix):
-            name = name.removesuffix(suffix)
-            break
+    if path.suffix.lower() in source_suffixes:
+        name = path.stem
 
     target_suffixes = _MIME_SUFFIXES[target_mimetype]
     has_proper_suffix = False
@@ -700,6 +711,16 @@ async def _process_convert(path, source_mimetype, target_mimetype):
                 temp_path.rename(dest)
             case "image/jxl":
                 match source_mimetype:
+                    case "image/heif":
+                        temp_path_2 = stack.enter_context(
+                            TempPath(
+                                dir=path.parent,
+                                prefix=".imgconvert_",
+                                suffix=path.name + ".tmp",
+                            )
+                        )
+                        await convert_to_ppm(path, temp_path_2)
+                        await convert_to_jxl(temp_path_2, temp_path)
                     case "image/tiff":
                         metadata = await exiftool.to_json(path)
                         if len(metadata) != 1:
@@ -724,7 +745,7 @@ async def _process_convert(path, source_mimetype, target_mimetype):
                 temp_path.rename(dest)
             case "image/jpeg":
                 match source_mimetype:
-                    case "image/webp":
+                    case "image/heif" | "image/webp":
                         temp_path_2 = stack.enter_context(
                             TempPath(
                                 dir=path.parent,
@@ -887,7 +908,13 @@ async def main_compare():
 
 
 async def main_convert():
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(
+        formatter_class=lambda prog: argparse.HelpFormatter(
+            prog,
+            max_help_position=30,  # Position where help text starts
+            width=80,  # Total width of output
+        )
+    )
     parser.add_argument(
         "-n",
         metavar="NUM",
@@ -904,8 +931,32 @@ async def main_convert():
         choices=("bmp", "jpeg", "jxl", "png", "ppm", "tiff"),
         required=True,
     )
+    parser.add_argument("--fast", action="store_true")
     parser.add_argument("paths", metavar="path", nargs="+", type=_parser_path_file)
+
+    jpeg_group = parser.add_argument_group("JPEG Options")
+    jpeg_group.add_argument(
+        "--jpeg-quality",
+        metavar="[0-100]",
+        type=int,
+        default=CONFIG.jpeg.quality,
+        help="default: %(default)s",
+    )
+
+    jxl_group = parser.add_argument_group("JXL Options")
+    jxl_group.add_argument(
+        "--jxl-lossy", action="store_true", default=False, help="default: %(default)s"
+    )
+
     args = parser.parse_args()
+
+    CONFIG.jpeg.quality = args.jpeg_quality
+
+    if args.jxl_lossy:
+        CONFIG.jxl.distance = "1.0"  # visually lossless
+
+    if args.fast:
+        CONFIG.jxl.effort = "7"
 
     executor = async_executor.AsyncExecutor(args.num_procs)
     for path in args.paths:
@@ -968,6 +1019,7 @@ async def main_optim():
     )
     parser.add_argument("-q", "--quiet", action="store_true")
     parser.add_argument("paths", metavar="path", nargs="+", type=pathlib.Path)
+
     args = parser.parse_args()
 
     mimetypes = set(_TYPE_TO_MIME[t] for t in (args.types or _DEFAULT_TYPES))

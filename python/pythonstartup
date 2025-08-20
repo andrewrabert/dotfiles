@@ -64,6 +64,7 @@ import tempfile
 import textwrap
 import time
 import traceback
+import types
 import typing
 import unicodedata
 import unittest
