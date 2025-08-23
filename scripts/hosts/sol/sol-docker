@@ -25,7 +25,7 @@ def docker_compose(*args, exec=False, **kwargs):
     env.update(
         {
             "COMPOSE_PROJECT_NAME": COMPOSE_PROJECT_NAME,
-            "COMPOSE_FILE": str(SOL_DOCKER_PATH / "docker-compose.yaml"),
+            "COMPOSE_FILE": str(SOL_DOCKER_PATH / "compose.yaml"),
         }
     )
     if exec:
