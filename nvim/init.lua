@@ -32,12 +32,23 @@ vim.opt.titlelen = 0
 vim.opt.titlestring = 'nvim %{&buftype == "" ? expand("%:p") : expand("#:p")}'
 
 do
+    -- Function to check if running in TMUX
+    local function is_tmux()
+        return vim.env.TMUX ~= nil
+    end
+
+    -- Function to check if running over SSH
+    local function is_ssh()
+        return vim.env.SSH_CONNECTION ~= nil or vim.env.SSH_CLIENT ~= nil or vim.env.SSH_TTY ~= nil
+    end
+
+
     -- false so default uses base terminal colors.
     -- true breaks base16 themes
-    local colorscheme = 'default'
+    local colorscheme = 'base16-default-dark'
 
     vim.g.tinted_italic = 0
-    if vim.env.BASE16_THEME then
+    if vim.env.BASE16_THEME or is_tmux() or is_ssh() then
         vim.o.termguicolors = false
         vim.g.tinted_colorspace = 256
     else
