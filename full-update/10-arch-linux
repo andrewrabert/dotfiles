@@ -36,7 +36,6 @@ log 'Updating packages'
 # 6.4.3-1 causes segfaults
 yay -Syu --noconfirm --devel \
     --ignore hsa-rocr  \
-    --ignore python-pytorch-opt-rocm \
     --ignore rocalution \
     --ignore rocblas \
     --ignore rocfft \
