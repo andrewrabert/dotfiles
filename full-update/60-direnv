@@ -1,7 +1,14 @@
 #!/usr/bin/env sh
 if ! command -v direnv > /dev/null; then
     rm -rf ~/.local/share/direnv
+    rm -rf ~/.config/direnv
 else
+    if [ "$(realpath ~/.config/direnv)" != "${DOTFILES}/direnv" ]; then
+        echo "Linking configuration ..."
+        rm -rf ~/.config/direnv
+        ln -sT "${DOTFILES}/direnv" ~/.config/direnv
+    fi
+
     if [ -d ~/.local/share/direnv/allow ]; then
         direnv prune
     fi
