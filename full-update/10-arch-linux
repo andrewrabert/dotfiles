@@ -33,30 +33,7 @@ if ! command -v yay > /dev/null 2>&1; then
 fi
 
 log 'Updating packages'
-# 6.4.3-1 causes segfaults
-yay -Syu --noconfirm --devel \
-    --ignore hsa-rocr  \
-    --ignore rocalution \
-    --ignore rocblas \
-    --ignore rocfft \
-    --ignore rocm-cmake \
-    --ignore rocm-core \
-    --ignore rocm-device-libs \
-    --ignore rocm-hip-libraries \
-    --ignore rocm-hip-runtime \
-    --ignore rocm-hip-sdk \
-    --ignore rocm-language-runtime \
-    --ignore rocm-llvm \
-    --ignore rocm-opencl-runtime \
-    --ignore rocm-smi-lib \
-    --ignore rocminfo \
-    --ignore rocprim \
-    --ignore rocprofiler-register \
-    --ignore rocrand \
-    --ignore rocsolver \
-    --ignore rocsparse \
-    --ignore rocthrust \
-    --ignore roctracer
+yay -Syu --noconfirm --devel
 
 if command -v pkgfile > /dev/null; then
     log 'Updating file cache'
