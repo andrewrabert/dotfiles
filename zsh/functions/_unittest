@@ -1,18 +1,61 @@
 #compdef unittest
 
 _unittest() {
-    local state
+    local state line
 
-    _arguments \
-        '1: :->tests'
+    if [[ $words[1] == "discover" ]]; then
+        _arguments -C \
+            '(-h --help)'{-h,--help}'[show help message and exit]' \
+            '(-v --verbose)'{-v,--verbose}'[verbose output]' \
+            '(-q --quiet)'{-q,--quiet}'[quiet output]' \
+            '--locals[show local variables in tracebacks]' \
+            '--durations[show N slowest test cases]:number of tests:' \
+            '(-f --failfast)'{-f,--failfast}'[stop on first fail or error]' \
+            '(-c --catch)'{-c,--catch}'[catch Ctrl-C and display results so far]' \
+            '(-b --buffer)'{-b,--buffer}'[buffer stdout and stderr during tests]' \
+            '(-k)-k[only run tests matching substring]:test name pattern:' \
+            '(-s --start-directory)'{-s,--start-directory}'[directory to start discovery]:start directory:_directories' \
+            '(-p --pattern)'{-p,--pattern}'[pattern to match tests]:pattern:' \
+            '(-t --top-level-directory)'{-t,--top-level-directory}'[top level directory of project]:top level directory:_directories'
+    else
+        _arguments -C \
+            '(-h --help)'{-h,--help}'[show help message and exit]' \
+            '(-v --verbose)'{-v,--verbose}'[verbose output]' \
+            '(-q --quiet)'{-q,--quiet}'[quiet output]' \
+            '--locals[show local variables in tracebacks]' \
+            '--durations[show N slowest test cases]:number of tests:' \
+            '(-f --failfast)'{-f,--failfast}'[stop on first fail or error]' \
+            '(-c --catch)'{-c,--catch}'[catch Ctrl-C and display results so far]' \
+            '(-b --buffer)'{-b,--buffer}'[buffer stdout and stderr during tests]' \
+            '(-k)-k[only run tests matching substring]:test name pattern:' \
+            '1: :->command_or_tests' \
+            '*: :->tests'
 
-    case $state in
-        (tests)
-            local -a unittests
-            unittests=( $(unittest-findtests) )
-            _multi_parts . unittests -i
-        ;;
-    esac
+        case $state in
+            (command_or_tests)
+                local prefix_arg=""
+                if [[ -n $PREFIX && $PREFIX != "discover" ]]; then
+                    prefix_arg="--prefix $PREFIX"
+                fi
+                local test_results
+                test_results=($(unittest-findtests $prefix_arg 2>/dev/null))
+                _alternative \
+                    'commands:subcommands:((discover\:"test discovery mode"))' \
+                    "tests:test modules:($test_results)"
+            ;;
+            (tests)
+                local prefix_arg=""
+                if [[ -n $PREFIX ]]; then
+                    prefix_arg="--prefix $PREFIX"
+                fi
+                local -a unittests
+                unittests=( $(unittest-findtests $prefix_arg 2>/dev/null) )
+                if [[ ${#unittests[@]} -gt 0 ]]; then
+                    _multi_parts . unittests -i
+                fi
+            ;;
+        esac
+    fi
 }
 
 _unittest "$@"

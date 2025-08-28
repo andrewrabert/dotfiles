@@ -12,10 +12,35 @@ LOGGER = logging.getLogger("unittest-findtests")
 def find_tests(name):
     tests = set()
     try:
-        for suite in unittest.defaultTestLoader.discover(name, top_level_dir=name):
+        name_str = str(name)
+        for suite in unittest.defaultTestLoader.discover(name_str, top_level_dir=name_str):
             LOGGER.debug("suite %r", suite)
             for case in suite:
                 LOGGER.debug("case %r", case)
+                # Handle failed test discovery results
+                if 'unittest.loader._FailedTest' in str(type(case)):
+                    LOGGER.debug("handling failed test %r", case)
+                    # Extract module name from failed test
+                    if hasattr(case, '_testMethodName'):
+                        test_name = case._testMethodName
+                        # test_name is like "acceptance.test_delete_user"
+                        if test_name:
+                            tests.add(test_name)
+                            LOGGER.debug("found failed test %s", test_name)
+                    continue
+                    
+                # Handle single test case
+                if hasattr(case, '_testMethodName') and hasattr(case, '__module__'):
+                    # This is a single test case
+                    fullname = ".".join([
+                        case.__module__,
+                        case.__class__.__qualname__,
+                        case._testMethodName,
+                    ])
+                    LOGGER.debug("found %s", fullname)
+                    tests.add(fullname)
+                    continue
+                    
                 try:
                     iter_case = iter(case)
                 except TypeError as e:
@@ -33,13 +58,20 @@ def find_tests(name):
                     tests.add(fullname)
     except (AssertionError, ImportError) as e:
         LOGGER.debug("loader error %r", e)
-    relative = name.relative_to(pathlib.Path())
-    return {".".join((*relative.parts, test)) for test in tests}
+    try:
+        relative = name.relative_to(pathlib.Path())
+        prefix = ".".join(relative.parts)
+    except ValueError:
+        # Handle absolute paths by using just the directory name
+        prefix = name.name
+    
+    return {f"{prefix}.{test}" if prefix else test for test in tests}
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--verbose", action="store_true")
+    parser.add_argument("--prefix", help="Only show test modules starting with this prefix")
     parser.add_argument("path", type=pathlib.Path, nargs="?")
     args = parser.parse_args()
 
@@ -62,6 +94,18 @@ def main():
         with contextlib.redirect_stderr(subprocess.DEVNULL):
             for path in paths:
                 tests.update(find_tests(path))
+
+    # Filter tests by prefix if provided
+    if args.prefix:
+        filtered_tests = set()
+        for test in tests:
+            # Handle both "test_module" and "test.test_module" patterns
+            test_parts = test.split('.')
+            for i, part in enumerate(test_parts):
+                if part.startswith(args.prefix):
+                    filtered_tests.add(test)
+                    break
+        tests = filtered_tests
 
     print("\n".join(sorted(tests)))
 
