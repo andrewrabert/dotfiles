@@ -41,6 +41,7 @@ import lzma
 import math
 import mimetypes
 import multiprocessing
+import operator
 import os
 import pathlib
 import pickle
