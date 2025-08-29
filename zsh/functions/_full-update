@@ -1,2 +1,16 @@
 #compdef full-update
-_arguments '1:files:_files -W "$DOTFILES/full-update"'
+
+local -a dotfiles_dirs
+local var path
+
+# Get all environment variables starting with DOTFILES
+for var in ${(M)${(k)parameters}:#DOTFILES*}; do
+  path=${(P)var}/full-update
+  if [[ -d "$path" ]]; then
+    dotfiles_dirs+=("$path")
+  fi
+done
+
+# Complete files from all DOTFILES*/full-update directories
+_alternative \
+  "files:files:_path_files -W '(${(j: :)dotfiles_dirs})'"

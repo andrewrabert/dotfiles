@@ -1,4 +1,0 @@
-#!/usr/bin/env sh
-termux-load-settings ~/.termux/termux.properties.notes &
-"$DOTFILES"/scripts/terminal/notes "$@"
-termux-load-settings ~/.termux/termux.properties.normal
