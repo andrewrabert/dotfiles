@@ -19,6 +19,20 @@ syn match mkdCheckboxChecked /\[x\].*/ containedin=htmlH[1-6],mkdNonListItemBloc
 hi def mkdCheckboxUnchecked ctermfg=8
 hi def mkdCheckboxChecked ctermfg=8
 
+" Obsidian Tasks plugin dataview format
+syn match mkdTaskDue /\[due::\s*\d\d\d\d-\d\d-\d\d\]/ containedin=htmlH[1-6],mkdNonListItemBlock,mkdListItemLine
+syn match mkdTaskScheduled /\[scheduled::\s*\d\d\d\d-\d\d-\d\d\]/ containedin=htmlH[1-6],mkdNonListItemBlock,mkdListItemLine
+syn match mkdTaskStart /\[start::\s*\d\d\d\d-\d\d-\d\d\]/ containedin=htmlH[1-6],mkdNonListItemBlock,mkdListItemLine
+syn match mkdTaskCompletion /\[completion::\s*\d\d\d\d-\d\d-\d\d\]/ containedin=htmlH[1-6],mkdNonListItemBlock,mkdListItemLine
+syn match mkdTaskPriority /\[priority::\s*\w\+\]/ containedin=htmlH[1-6],mkdNonListItemBlock,mkdListItemLine
+syn match mkdTaskRepeat /\[repeat::\s*[^\]]\+\]/ containedin=htmlH[1-6],mkdNonListItemBlock,mkdListItemLine
+hi def mkdTaskDue cterm=bold ctermfg=1
+hi def mkdTaskScheduled cterm=bold ctermfg=3
+hi def mkdTaskStart cterm=bold ctermfg=2
+hi def mkdTaskCompletion cterm=bold ctermfg=2
+hi def mkdTaskPriority cterm=bold ctermfg=5
+hi def mkdTaskRepeat cterm=bold ctermfg=6
+
 " bold and italics
 hi mkdItalic        term=italic cterm=italic gui=italic
 hi htmlBold         term=bold cterm=bold gui=bold

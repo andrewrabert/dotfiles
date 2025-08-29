@@ -32,3 +32,24 @@ set formatoptions+=ro
 " markdown folds are horrendouly fucked in neovim.
 " bullshit automatic closing of other folds when doing `c$` on heading level 3, probably others
 set nofoldenable
+
+function! SortByDataviewDate(date_type) range
+    let date_types = empty(a:date_type) ? ['due', 'scheduled', 'start'] : [a:date_type]
+    
+    let line_dates = []
+    for line in getline(a:firstline, a:lastline)
+        let date = '9999-99-99'
+        for type in date_types
+            let match = matchstr(line, '\[' . type . '::\s*\zs\d\d\d\d-\d\d-\d\d\ze\]')
+            if !empty(match)
+                let date = match | break
+            endif
+        endfor
+        call add(line_dates, [line, date])
+    endfor
+    
+    call sort(line_dates, {a, b -> a[1] > b[1] ? 1 : a[1] < b[1] ? -1 : 0})
+    call setline(a:firstline, map(line_dates, 'v:val[0]'))
+endfunction
+
+command! -range -nargs=? SortByDate <line1>,<line2>call SortByDataviewDate(<q-args>)

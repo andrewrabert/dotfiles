@@ -69,16 +69,14 @@ end
 vim.api.nvim_set_keymap("n", "<C-n>", ":set number!<CR>:set relativenumber!<CR>", { noremap = true, silent = true })
 vim.api.nvim_set_keymap("n", "<C-c>", ":set cursorcolumn!<CR>", { noremap = true, silent = true })
 
-vim.api.nvim_set_keymap("n", "<leader>z", ":Files<CR>", { noremap = true, silent = true })
+vim.api.nvim_set_keymap("n", "<leader>z", ":lua require('fzf-lua').files()<CR>", { noremap = true, silent = true })
 vim.api.nvim_set_keymap("n", "<leader>x", ":Notes<CR>", { noremap = true, silent = true })
-vim.api.nvim_set_keymap("n", "<leader>r", ":Rg<CR>", { noremap = true, silent = true })
+vim.api.nvim_set_keymap("n", "<leader>r", ":lua require('fzf-lua').live_grep()<CR>", { noremap = true, silent = true })
 
 vim.keymap.set("n", "<leader>dt", function()
     vim.diagnostic.enable(not vim.diagnostic.is_enabled())
 end)
 
-vim.env.FZF_DEFAULT_COMMAND = "fd --type file --ignore-file ~/.config/nvim/fzf_fd_ignore"
-vim.g.fzf_preview_window = {'right,50%,<70(hidden,right,50%)', 'ctrl-/'}
 
 vim.api.nvim_create_autocmd("StdinReadPre", {
   group = augroup,

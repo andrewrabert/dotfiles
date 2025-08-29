@@ -21,8 +21,25 @@ return {
   {"plasticboy/vim-markdown"},
   {"dhruvasagar/vim-table-mode"},
 
-  {"junegunn/fzf"},
-  {"junegunn/fzf.vim"},
+  {
+    "ibhagwan/fzf-lua",
+    config = function()
+      require("fzf-lua").setup({
+        winopts = {
+          height = 0.85,
+          width = 0.80,
+          preview = {
+            default = "bat",
+            layout = "horizontal",
+            horizontal = "right:50%",
+          },
+        },
+        fzf_opts = {
+          ["--layout"] = "reverse-list",
+        },
+      })
+    end,
+  },
   {"L3MON4D3/LuaSnip"},
 
   {"ledger/vim-ledger"},
