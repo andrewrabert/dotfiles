@@ -128,3 +128,7 @@ pwd_osc_7() {
 }
 add-zsh-hook chpwd pwd_osc_7
 pwd_osc_7
+
+# allows backspace to work properly when exiting vim mode
+bindkey '^?' backward-delete-char
+bindkey '^H' backward-delete-char

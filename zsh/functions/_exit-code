@@ -1,0 +1,4 @@
+#compdef exit-code
+_arguments : \
+    --help \
+    '*::command arguments:_normal'

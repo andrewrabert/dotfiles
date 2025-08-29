@@ -1,113 +1,158 @@
 #!/usr/bin/env python3
 import argparse
-import contextlib
+import ast
+import os
 import logging
 import pathlib
-import subprocess
-import unittest
 
 LOGGER = logging.getLogger("unittest-findtests")
 
 
-def find_tests(name):
-    tests = set()
-    try:
-        name_str = str(name)
-        for suite in unittest.defaultTestLoader.discover(name_str, top_level_dir=name_str):
-            LOGGER.debug("suite %r", suite)
-            for case in suite:
-                LOGGER.debug("case %r", case)
-                # Handle failed test discovery results
-                if 'unittest.loader._FailedTest' in str(type(case)):
-                    LOGGER.debug("handling failed test %r", case)
-                    # Extract module name from failed test
-                    if hasattr(case, '_testMethodName'):
-                        test_name = case._testMethodName
-                        # test_name is like "acceptance.test_delete_user"
-                        if test_name:
-                            tests.add(test_name)
-                            LOGGER.debug("found failed test %s", test_name)
-                    continue
-                    
-                # Handle single test case
-                if hasattr(case, '_testMethodName') and hasattr(case, '__module__'):
-                    # This is a single test case
-                    fullname = ".".join([
-                        case.__module__,
-                        case.__class__.__qualname__,
-                        case._testMethodName,
-                    ])
-                    LOGGER.debug("found %s", fullname)
-                    tests.add(fullname)
-                    continue
-                    
-                try:
-                    iter_case = iter(case)
-                except TypeError as e:
-                    LOGGER.debug("case error %r", e)
-                    continue
-                for test in iter_case:
-                    fullname = ".".join(
-                        [
-                            test.__module__,
-                            test.__class__.__qualname__,
-                            test._testMethodName,
-                        ]
-                    )
-                    LOGGER.debug("found %s", fullname)
-                    tests.add(fullname)
-    except (AssertionError, ImportError) as e:
-        LOGGER.debug("loader error %r", e)
-    try:
-        relative = name.relative_to(pathlib.Path())
-        prefix = ".".join(relative.parts)
-    except ValueError:
-        # Handle absolute paths by using just the directory name
-        prefix = name.name
-    
-    return {f"{prefix}.{test}" if prefix else test for test in tests}
+def find_methods(path):
+    """Find all methods in Python files and output in module.class.method format"""
+    methods = []
+    path_obj = pathlib.Path(path).resolve()
+
+    # Handle both files and directories
+    if path_obj.is_file():
+        if path_obj.suffix == ".py":
+            files_to_process = [path_obj]
+            base_path = path_obj.parent
+        else:
+            print(f"Error: '{path}' is not a Python file")
+            return []
+    elif path_obj.is_dir():
+        files_to_process = []
+        base_path = path_obj
+        for root, dirs, files in os.walk(path):
+            for file in files:
+                if file.endswith(".py"):
+                    files_to_process.append(pathlib.Path(root) / file)
+    else:
+        print(f"Error: '{path}' is not a valid file or directory")
+        return []
+
+    for filepath in files_to_process:
+        try:
+            with open(filepath, "r", encoding="utf-8") as f:
+                content = f.read()
+
+            tree = ast.parse(content)
+
+            # Get module path relative to base directory
+            try:
+                rel_path = filepath.relative_to(base_path)
+                # Normal case - file is within base directory
+                module_parts = list(rel_path.parts[:-1]) + [rel_path.stem]
+
+                # Handle __init__.py files
+                if rel_path.stem == "__init__":
+                    # For __init__.py, use the directory name as the module
+                    module_parts = list(rel_path.parts[:-1])
+
+                # Create the full module path
+                module_name = ".".join(module_parts) if module_parts else rel_path.stem
+
+            except ValueError:
+                # If file is not in base_path, create module name from file path
+                # Remove file extension and convert path separators to dots
+                parts = filepath.parts
+
+                # Find a reasonable starting point (skip system directories)
+                start_idx = 0
+                for i, part in enumerate(parts):
+                    if part in ("src", "tests", "lib", "app") or not part.startswith(
+                        (".", "/")
+                    ):
+                        start_idx = i
+                        break
+
+                if filepath.stem != "__init__":
+                    module_parts = list(parts[start_idx:-1]) + [filepath.stem]
+                else:
+                    module_parts = list(parts[start_idx:-1])
+
+                # Clean up module parts
+                module_parts = [
+                    part
+                    for part in module_parts
+                    if part and not part.startswith(".") and part != "/"
+                ]
+                module_name = ".".join(module_parts) if module_parts else filepath.stem
+
+            # Find all classes and their methods
+            class_methods = find_class_methods(tree, module_name)
+            methods.extend(class_methods)
+
+        except (SyntaxError, UnicodeDecodeError) as e:
+            print(f"Error processing {filepath}: {e}")
+            continue
+
+    return methods
+
+
+def find_class_methods(tree, module_name):
+    """Extract class methods from AST tree"""
+    methods = []
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef):
+            class_name = node.name
+
+            # Find all methods in this class
+            for item in node.body:
+                if isinstance(item, ast.FunctionDef):
+                    method_name = item.name
+                    full_path = f"{module_name}.{class_name}.{method_name}"
+                    methods.append(full_path)
+
+                    # Handle nested classes (if any)
+                elif isinstance(item, ast.ClassDef):
+                    nested_class_name = item.name
+                    for nested_item in item.body:
+                        if isinstance(nested_item, ast.FunctionDef):
+                            nested_method_name = nested_item.name
+                            full_path = f"{module_name}.{class_name}.{nested_class_name}.{nested_method_name}"
+                            methods.append(full_path)
+
+    return methods
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--verbose", action="store_true")
-    parser.add_argument("--prefix", help="Only show test modules starting with this prefix")
+    parser.add_argument("--prefix")
     parser.add_argument("path", type=pathlib.Path, nargs="?")
     args = parser.parse_args()
 
-    if args.verbose:
-        logging.basicConfig(level=logging.DEBUG)
-
-    # fixes discovery when both local tests and unrelated acceptance tests
-    # reside in current directory.
-    if args.path is None:
-        paths = []
+    methods = set()
+    if not args.path:
         for path in pathlib.Path().iterdir():
-            if path.is_dir():
-                paths.append(path)
+            if path.is_dir() and "test" in path.name.lower():
+                methods.update(find_methods(path))
     else:
-        paths = [args.path.absolute()]
+        methods.update(find_methods(args.path))
 
-    tests = set()
-    # redirect output to make loud imports stfu
-    with contextlib.redirect_stdout(subprocess.DEVNULL):
-        with contextlib.redirect_stderr(subprocess.DEVNULL):
-            for path in paths:
-                tests.update(find_tests(path))
-
-    # Filter tests by prefix if provided
+    methods = {m for m in methods if m.split(".")[-1].startswith("test_")}
     if args.prefix:
-        filtered_tests = set()
-        for test in tests:
-            # Handle both "test_module" and "test.test_module" patterns
-            test_parts = test.split('.')
-            for i, part in enumerate(test_parts):
-                if part.startswith(args.prefix):
-                    filtered_tests.add(test)
-                    break
-        tests = filtered_tests
+        methods = {m for m in methods if m.startswith(args.prefix)}
+    parents = set()
 
-    print("\n".join(sorted(tests)))
+    for m in methods:
+        parts = m.split('.')
+        for i in range(1, len(parts)):
+            parent = '.'.join(parts[:i])
+            parents.add(parent)
+    found = set((*parents, *methods))
+    if args.prefix:
+        found = {
+            m
+            for m in found
+            if m.count('.') == args.prefix.count('.')
+            or (m.startswith(args.prefix + '.') and m.count('.') == args.prefix.count('.') + 1)
+        }
+    for m in sorted(found):
+        print(m)
 
 
 if __name__ == "__main__":

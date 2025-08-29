@@ -33,25 +33,33 @@ _unittest() {
 
         case $state in
             (command_or_tests)
-                local prefix_arg=""
-                if [[ -n $PREFIX && $PREFIX != "discover" ]]; then
-                    prefix_arg="--prefix $PREFIX"
-                fi
                 local test_results
-                test_results=($(unittest-findtests $prefix_arg 2>/dev/null))
+                local current="${words[CURRENT]}"
+                if [[ -n "$current" && "$current" != "discover" ]]; then
+                    test_results=($(unittest-findtests --prefix "$current" 2>/dev/null))
+                    if [[ ${#test_results[@]} -eq 1 ]]; then
+                        test_results=($(unittest-findtests --prefix "$test_results[1]" 2>/dev/null))
+                    fi
+                else
+                    test_results=($(unittest-findtests 2>/dev/null))
+                fi
                 _alternative \
                     'commands:subcommands:((discover\:"test discovery mode"))' \
                     "tests:test modules:($test_results)"
             ;;
             (tests)
-                local prefix_arg=""
-                if [[ -n $PREFIX ]]; then
-                    prefix_arg="--prefix $PREFIX"
-                fi
                 local -a unittests
-                unittests=( $(unittest-findtests $prefix_arg 2>/dev/null) )
+                local current="${words[CURRENT]}"
+                if [[ -n "$current" ]]; then
+                    unittests=( $(unittest-findtests --prefix "$current" 2>/dev/null) )
+                    if [[ ${#unittests[@]} -eq 1 ]]; then
+                        unittests=( $(unittest-findtests --prefix "$unittests[1]" 2>/dev/null) )
+                    fi
+                else
+                    unittests=( $(unittest-findtests 2>/dev/null) )
+                fi
                 if [[ ${#unittests[@]} -gt 0 ]]; then
-                    _multi_parts . unittests -i
+                    _multi_parts . unittests
                 fi
             ;;
         esac
