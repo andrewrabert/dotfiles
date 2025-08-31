@@ -1,0 +1,25 @@
+[Colors:Header]
+BackgroundAlternate=32,35,38
+BackgroundNormal=32,35,38
+ForegroundNormal=252,252,252
+
+[Colors:Header][Inactive]
+BackgroundAlternate=32,35,38
+BackgroundNormal=32,35,38
+ForegroundNormal=126,126,126
+
+[General]
+ColorScheme=ApplicationKrita
+Name=Application - Krita
+shadeSortColumn=false
+
+[KDE]
+contrast=4
+
+[WM]
+activeBackground=32,35,38
+activeBlend=32,35,38
+activeForeground=222,222,222
+inactiveBackground=40,44,52
+inactiveBlend=40,44,52
+inactiveForeground=105,105,105
