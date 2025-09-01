@@ -42,8 +42,6 @@ return {
   },
   {"L3MON4D3/LuaSnip"},
 
-  {"ledger/vim-ledger"},
-
   {
     "nvim-treesitter/nvim-treesitter",
     config = function()

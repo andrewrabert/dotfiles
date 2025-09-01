@@ -71,10 +71,10 @@ vim.api.nvim_set_keymap("n", "<C-c>", ":set cursorcolumn!<CR>", { noremap = true
 
 vim.api.nvim_set_keymap("n", "<leader>z", ":lua require('fzf-lua').files()<CR>", { noremap = true, silent = true })
 vim.api.nvim_set_keymap("n", "<leader>x", ":Notes<CR>", { noremap = true, silent = true })
-vim.api.nvim_set_keymap("n", "<leader>r", ":Rg<CR>", { noremap = true, silent = true })
+vim.api.nvim_set_keymap("n", "<leader>r", ":lua require('fzf-lua').live_grep()<CR>", { noremap = true, silent = true })
 vim.keymap.set("n", "<leader>R", function()
     local word = vim.fn.expand("<cword>")
-    vim.cmd("Rg " .. word)
+    require('fzf-lua').live_grep({ search = word })
 end, { noremap = true, silent = true })
 
 vim.keymap.set("n", "<leader>dt", function()
