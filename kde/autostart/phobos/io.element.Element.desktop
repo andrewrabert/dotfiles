@@ -1,0 +1,10 @@
+[Desktop Entry]
+Categories=Network;InstantMessaging;Chat;IRCClient
+Comment=Feature-rich client for Matrix
+Exec=/usr/bin/element-desktop %u
+Icon=io.element.Element
+MimeType=x-scheme-handler/element;x-scheme-handler/io.element.desktop;
+Name=Element
+StartupWMClass=Element
+Terminal=false
+Type=Application
