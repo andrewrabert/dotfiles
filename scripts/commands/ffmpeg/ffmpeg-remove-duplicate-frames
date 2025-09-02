@@ -61,7 +61,7 @@ async def _process_path(path):
         avg_frame_rate = stream.get("avg_frame_rate")
         if avg_frame_rate:
             x, y = avg_frame_rate.split("/")
-            if all((x, y)):
+            if x and y:
                 avg_frame_rate = int(x) / int(y)
                 break
 
