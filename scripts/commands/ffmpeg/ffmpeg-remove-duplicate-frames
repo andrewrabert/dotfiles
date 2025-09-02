@@ -61,7 +61,9 @@ async def _process_path(path):
         avg_frame_rate = stream.get("avg_frame_rate")
         if avg_frame_rate:
             x, y = avg_frame_rate.split("/")
-            avg_frame_rate = int(x) / int(y)
+            if all((x, y)):
+                avg_frame_rate = int(x) / int(y)
+                break
 
     if not avg_frame_rate:
         raise RuntimeError
