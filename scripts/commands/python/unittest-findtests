@@ -128,7 +128,7 @@ def main():
     methods = set()
     if not args.path:
         for path in pathlib.Path().iterdir():
-            if path.is_dir() and "test" in path.name.lower():
+            if path.is_dir() and path.name.lower().startswith(("acceptance", "test")):
                 methods.update(find_methods(path))
     else:
         methods.update(find_methods(args.path))
@@ -139,17 +139,20 @@ def main():
     parents = set()
 
     for m in methods:
-        parts = m.split('.')
+        parts = m.split(".")
         for i in range(1, len(parts)):
-            parent = '.'.join(parts[:i])
+            parent = ".".join(parts[:i])
             parents.add(parent)
     found = set((*parents, *methods))
     if args.prefix:
         found = {
             m
             for m in found
-            if m.count('.') == args.prefix.count('.')
-            or (m.startswith(args.prefix + '.') and m.count('.') == args.prefix.count('.') + 1)
+            if m.count(".") == args.prefix.count(".")
+            or (
+                m.startswith(args.prefix + ".")
+                and m.count(".") == args.prefix.count(".") + 1
+            )
         }
     for m in sorted(found):
         print(m)

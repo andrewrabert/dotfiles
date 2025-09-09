@@ -7,8 +7,7 @@ import subprocess
 import urllib.parse
 
 CODE_ROOT_DIR = pathlib.Path("~/src").expanduser()
-CACHE_PATH = pathlib.Path("~/.cache/gs").expanduser()
-CACHE_ITEM_LIMIT = 1000
+CACHE_PATH = pathlib.Path("~/.cache/git-sync").expanduser()
 
 
 class Git:
@@ -21,7 +20,7 @@ class Git:
         subprocess.run(["git", "-C", str(directory), "fetch", "--all"], check=True)
 
 
-def _find_git_repos(root):
+def _find_git_repos_old(root):
     stack = [root]
     while stack:
         for path in stack.pop().iterdir():
@@ -117,6 +116,7 @@ def parse_repo(repo):
 def main():
     parser = argparse.ArgumentParser("git-sync")
     parser.add_argument("--show-cache", action="store_true")
+    parser.add_argument("--build-cache", action="store_true")
     parser.add_argument("--rm", action="store_true")
     parser.add_argument("repo", nargs="?")
     args = parser.parse_args()
@@ -138,6 +138,8 @@ def main():
             cache_modified = True
 
     if args.show_cache:
+        print("\n".join(cache))
+    elif args.build_cache:
         repos = []
         for repo in _find_git_repos(CODE_ROOT_DIR):
             try:
@@ -148,9 +150,9 @@ def main():
                 repos.append(str(repo))
             else:
                 repos.append(f"{host}:{'/'.join(repo.parts[1:])}")
-        cache_index = {name: index for index, name in enumerate(cache)}
-        repos = sorted(repos, key=lambda x: (cache_index.get(x, -1), x))
-        print("\n".join(repos))
+        CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        CACHE_PATH.write_text("\n".join(repos))
+        print(f"Built cache with {len(repos)} repositories")
     elif args.repo is None:
         for repo_dir in _find_git_repos(pathlib.Path().absolute()):
             print(repo_dir)
@@ -182,7 +184,7 @@ def main():
             print(repo_dir)
 
     if cache_modified:
-        CACHE_PATH.write_text("\n".join(cache[-CACHE_ITEM_LIMIT:]))
+        CACHE_PATH.write_text("\n".join(cache))
 
 
 if __name__ == "__main__":
