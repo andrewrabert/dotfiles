@@ -10,7 +10,7 @@ PREFIX_ROOT = pathlib.Path(
 ).expanduser()
 DEFAULT_PREFIX = PREFIX_ROOT / "default"
 STEAM_ROOT = pathlib.Path("~/.local/share/Steam").expanduser()
-SYSTEM_PROTON = pathlib.Path("/usr/bin/proton")
+SYSTEM_PROTON = pathlib.Path("/usr/bin/proton-ge")
 
 
 def installed_versions():
