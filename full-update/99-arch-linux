@@ -9,461 +9,488 @@ import socket
 import subprocess
 import sys
 
-if not pathlib.Path('/etc/arch-release').is_file():
+if not pathlib.Path("/etc/arch-release").is_file():
     exit()
 
 try:
     import pyalpm
 except ImportError:
-    subprocess.run(['yay', '-S', '--noconfirm', 'pyalpm'], check=True)
+    subprocess.run(["yay", "-S", "--noconfirm", "pyalpm"], check=True)
     import pyalpm
 
 HOSTNAME = socket.gethostname()
 
 EXPECTED_PACKAGES = {
-    'logrotate',
+    "logrotate",
 }
 
-if HOSTNAME in ('sol', 'mars', 'phobos'):
-    EXPECTED_PACKAGES.update({
-        '7zip',
-        'advancecomp',
-        'aria2',
-        'bat',
-        'bchunk',
-        'binmerge',
-        'busybox',
-        'cabextract',
-        'cdemu-client',
-        'cuetools',
-        'curlie',
-        'dash',
-        'devtools',
-        'direnv',
-        'dosfstools',
-        'e2fsprogs',
-        'epub-tools-bin',
-        'exfatprogs',
-        'fd',
-        'ffmpeg',
-        'foot-terminfo',
-        'fzf',
-        'gifsicle',
-        'git',
-        'git-lfs',
-        'guestfs-tools',
-        'htop',
-        'hugo',
-        'hyperfine',
-        'iftop',
-        'inetutils',  # hostname command
-        'innoextract',
-        'iperf3',
-        'ipython',
-        'jpegoptim',
-        'jq',
-        'ledger',
-        'less',
-        'mac',
-        'mediainfo',
-        'moreutils',
-        'mp3val',
-        'mprime-bin',
-        'mpv',
-        'mpv-mpris',
-        'ms-sys',
-        'neovim',
-        'nsz',
-        'ntfs-3g',
-        'openssh',
-        'opus-tools',
-        'oxipng',
-        'pacman-contrib',
-        'pandoc-cli',
-        'pbzip2',
-        'perl-image-exiftool',
-        'pigz',
-        'pixz',
-        'pwgen',
-        'pyalpm',
-        'pyright',
-        'python',
-        'python-async-executor',
-        'python-dbus-fast',
-        'python-httpx',
-        'python-magic',
-        'python-mozjpeg-lossless-optimization',
-        'python-mutagen',
-        'python-numpy',
-        'python-psutil',
-        'python-tqdm',
-        'python-yarl',
-        'rdfind',
-        'reflector',
-        'ripgrep',
-        'rsync',
-        'ruff',
-        'rust-analyzer',
-        'shellcheck',
-        'shntool',
-        'speedtest-go',
-        'sshfs',
-        'sshuttle',
-        'svgo',
-        'syncthing',
-        'tmux',
-        'transmission-cli',
-        'tree-sitter-cli',
-        'typescript-language-server',
-        'unace',
-        'unrar',
-        'unshield',
-        'unzip',
-        'usbutils',
-        'vim',
-        'vorbis-tools',
-        'wl-clipboard',
-        'xsel',
-        'yazi',
-        'yt-dlp',
-        'zip',
-        'zsh',
-    })
+if HOSTNAME in ("sol", "mars", "phobos"):
+    EXPECTED_PACKAGES.update(
+        {
+            "7zip",
+            "advancecomp",
+            "aria2",
+            "bat",
+            "bchunk",
+            "binmerge",
+            "busybox",
+            "cabextract",
+            "cdemu-client",
+            "cuetools",
+            "curlie",
+            "dash",
+            "devtools",
+            "direnv",
+            "dosfstools",
+            "e2fsprogs",
+            "epub-tools-bin",
+            "exfatprogs",
+            "fd",
+            "ffmpeg",
+            "foot-terminfo",
+            "fzf",
+            "gifsicle",
+            "git",
+            "git-lfs",
+            "guestfs-tools",
+            "htop",
+            "hugo",
+            "hyperfine",
+            "iftop",
+            "inetutils",  # hostname command
+            "innoextract",
+            "iperf3",
+            "ipython",
+            "jpegoptim",
+            "jq",
+            "ledger",
+            "less",
+            "mac",
+            "mediainfo",
+            "moreutils",
+            "mp3val",
+            "mprime-bin",
+            "mpv",
+            "mpv-mpris",
+            "ms-sys",
+            "neovim",
+            "nsz",
+            "ntfs-3g",
+            "openbsd-netcat",
+            "openssh",
+            "opus-tools",
+            "oxipng",
+            "pacman-contrib",
+            "pandoc-cli",
+            "pbzip2",
+            "perl-image-exiftool",
+            "pigz",
+            "pixz",
+            "pwgen",
+            "pyalpm",
+            "pyright",
+            "python",
+            "python-async-executor",
+            "python-dbus-fast",
+            "python-httpx",
+            "python-magic",
+            "python-mozjpeg-lossless-optimization",
+            "python-mutagen",
+            "python-numpy",
+            "python-psutil",
+            "python-tqdm",
+            "python-yarl",
+            "rdfind",
+            "reflector",
+            "ripgrep",
+            "rsync",
+            "ruff",
+            "rust-analyzer",
+            "shellcheck",
+            "shntool",
+            "speedtest-go",
+            "sshfs",
+            "sshuttle",
+            "svgo",
+            "syncthing",
+            "tmux",
+            "transmission-cli",
+            "tree-sitter-cli",
+            "typescript-language-server",
+            "unace",
+            "unrar",
+            "unshield",
+            "unzip",
+            "usbutils",
+            "vim",
+            "vorbis-tools",
+            "wl-clipboard",
+            "xsel",
+            "yazi",
+            "yt-dlp",
+            "zip",
+            "zsh",
+        }
+    )
 
-if HOSTNAME in ('mars', 'phobos', 'lounge-htpc'):
-    EXPECTED_PACKAGES.update({
-        'firefox',
-        'gamescope',
-        'gwenview',
-        'haruna',
-        'jellyfin-media-player',
-        'mangohud',
-        'noto-fonts',
-        'noto-fonts-cjk',
-        'noto-fonts-emoji',
-        'noto-fonts-extra',
-        'proton-ge-custom-bin',
-        'steam',
-        'ttf-hack',
-    })
+if HOSTNAME in ("mars", "phobos", "lounge-htpc"):
+    EXPECTED_PACKAGES.update(
+        {
+            "firefox",
+            "gamescope",
+            "gwenview",
+            "haruna",
+            "jellyfin-media-player",
+            "mangohud",
+            "noto-fonts",
+            "noto-fonts-cjk",
+            "noto-fonts-emoji",
+            "noto-fonts-extra",
+            "proton-ge-custom-bin",
+            "steam",
+            "ttf-hack",
+        }
+    )
 
-if HOSTNAME in ('mars', 'phobos'):
-    EXPECTED_PACKAGES.update({
-        'android-tools',
-        'android-udev',
-        'audacity',
-        'base16-shell-preview',
-        'chromium',
-        'discord',
-        'discover',
-        'docker',
-        'docker-compose',
-        'dolphin',
-        'element-desktop',
-        'foliate',
-        'foot',
-        'fooyin',
-        'gifski',
-        'gimp',
-        'gparted',
-        'inkscape',
-        'kcolorchooser',
-        'kdeconnect',
-        'kid3-qt',
-        'krita',
-        'mkvtoolnix-gui',
-        'mtpfs',
-        'obs-studio',
-        'okular',
-        'plasma6-runners-emojirunner',
-        'podman',
-        'rawtherapee',
-        'signal-desktop',
-        'slack-desktop',
-        'spectacle',
-        'tremotesf',
-        'virt-manager',
-        'wine',
-        'xboxdrv',
-    })
+if HOSTNAME in ("mars", "phobos"):
+    EXPECTED_PACKAGES.update(
+        {
+            "android-tools",
+            "android-udev",
+            "audacity",
+            "base16-shell-preview",
+            "chromium",
+            "discord",
+            "discover",
+            "docker",
+            "docker-compose",
+            "dolphin",
+            "element-desktop",
+            "foliate",
+            "foot",
+            "fooyin",
+            "gifski",
+            "gimp",
+            "gparted",
+            "inkscape",
+            "kcolorchooser",
+            "kdeconnect",
+            "kid3-qt",
+            "krita",
+            "mkvtoolnix-gui",
+            "mtpfs",
+            "obs-studio",
+            "okular",
+            "plasma6-runners-emojirunner",
+            "podman",
+            "rawtherapee",
+            "signal-desktop",
+            "slack-desktop",
+            "spectacle",
+            "tremotesf",
+            "virt-manager",
+            "wine",
+            "xboxdrv",
+        }
+    )
 
 EXPECTED_PACKAGE_DEPENDENCIES = {
-    'cdemu-daemon': {
-        'vhba-module-dkms',
+    "cdemu-daemon": {
+        "vhba-module-dkms",
     },
-    'devtools': {
-        'bat',
-        'btrfs-progs',
-        'nvchecker',
+    "devtools": {
+        "bat",
+        "btrfs-progs",
+        "nvchecker",
     },
-    'digikam': {
-        'darktable',
-        'hugin',
-        'qt6-imageformats',
+    "digikam": {
+        "darktable",
+        "hugin",
+        "qt6-imageformats",
     },
-    'dolphin': {
-        'ffmpegthumbs',
-        'kde-cli-tools',
-        'kdegraphics-thumbnailers',
-        'kio-admin',
-        'konsole',
-        'purpose',
+    "dolphin": {
+        "ffmpegthumbs",
+        "kde-cli-tools",
+        "kdegraphics-thumbnailers",
+        "kio-admin",
+        "konsole",
+        "purpose",
     },
-    'gimp': {
-        'alsa-lib',
-        'cfitsio',
-        'ghostscript',
-        'gjs',
-        'gutenprint',
-        'gvfs',
+    "gimp": {
+        "alsa-lib",
+        "cfitsio",
+        "ghostscript",
+        "gjs",
+        "gutenprint",
+        "gvfs",
     },
-    'gwenview': {
-        'kimageformats',
-        'qt6-imageformats',
+    "gwenview": {
+        "kimageformats",
+        "qt6-imageformats",
     },
-    'gparted': {
-        'btrfs-progs',
-        'dosfstools',
-        'exfatprogs',
-        'f2fs-tools',
-        'gpart',
-        'mtools',
-        'ntfs-3g',
-        'polkit',
-        'udftools',
-        'xfsprogs',
-        'xorg-xhost',
+    "gparted": {
+        "btrfs-progs",
+        "dosfstools",
+        "exfatprogs",
+        "f2fs-tools",
+        "gpart",
+        "mtools",
+        "ntfs-3g",
+        "polkit",
+        "udftools",
+        "xfsprogs",
+        "xorg-xhost",
     },
-    'libvirt': {
-        'dmidecode',
-        'dnsmasq',
-        'gettext',
-        'iptables-nft',
-        'lvm2',
-        'qemu-desktop',
-        'swtpm',
+    "libvirt": {
+        "dmidecode",
+        "dnsmasq",
+        "gettext",
+        "iptables-nft",
+        "lvm2",
+        "qemu-desktop",
+        "swtpm",
     },
-    'krita': {
-        'kimageformats5',
-        'krita-plugin-gmic',
-        'kseexpr',
-        'libheif',
-        'libjxl',
-        'libmypaint',
-        'poppler-qt5',
-        'python-pyqt5',
+    "krita": {
+        "kimageformats5",
+        "krita-plugin-gmic",
+        "kseexpr",
+        "libheif",
+        "libjxl",
+        "libmypaint",
+        "poppler-qt5",
+        "python-pyqt5",
     },
-    'lutris': {
-        'fluidsynth',
-        'gamemode',
-        'gvfs',
-        'innoextract',
-        'lib32-gamemode',
-        'lib32-vkd3d',
-        'lib32-vulkan-icd-loader',
-        'python-protobuf',
-        'vkd3d',
-        'vulkan-icd-loader',
-        'vulkan-tools',
-        'wine',
-        'xorg-xgamma',
+    "lutris": {
+        "fluidsynth",
+        "gamemode",
+        "gvfs",
+        "innoextract",
+        "lib32-gamemode",
+        "lib32-vkd3d",
+        "lib32-vulkan-icd-loader",
+        "python-protobuf",
+        "vkd3d",
+        "vulkan-icd-loader",
+        "vulkan-tools",
+        "wine",
+        "xorg-xgamma",
     },
-    'okular': {
-        'ebook-tools',
-        'kdegraphics-mobipocket',
-        'unrar',
+    "okular": {
+        "ebook-tools",
+        "kdegraphics-mobipocket",
+        "unrar",
     },
-    'perl-image-exiftool': {
-        'perl-archive-zip',
-        'perl-io-compress-brotli',
+    "perl-image-exiftool": {
+        "perl-archive-zip",
+        "perl-io-compress-brotli",
     },
-    'print-manager': {
-        'system-config-printer',
+    "print-manager": {
+        "system-config-printer",
     },
-    'proton-ge-custom-bin': {
-        'kdialog',
-        'lib32-vulkan-icd-loader',
-        'python-kivy',
-        'steam',
-        'vulkan-driver',
-        'wine',
-        'winetricks',
-        'xboxdrv',
-        'zenity',
+    "proton-ge-custom-bin": {
+        "kdialog",
+        "lib32-vulkan-icd-loader",
+        "python-kivy",
+        "steam",
+        "vulkan-driver",
+        "wine",
+        "winetricks",
+        "xboxdrv",
+        "zenity",
     },
-    'python': {
-        'python-setuptools',
-        'python-pip',
-        'sqlite',
-        'xz',
-        'tk',
+    "python": {
+        "python-setuptools",
+        "python-pip",
+        "sqlite",
+        "xz",
+        "tk",
     },
-    'python-aiohttp': {
-        'python-aiodns',
+    "python-aiohttp": {
+        "python-aiodns",
     },
-    'steam': {
-        'steam-native-runtime',
+    "steam": {
+        "steam-native-runtime",
     },
-    'udiskie': {
-        'libappindicator-gtk3',
+    "udiskie": {
+        "libappindicator-gtk3",
     },
-    'wine': {
-        'alsa-plugins',
-        'cups',
-        'dosbox',
-        'gnutls',
-        'gst-plugins-bad',
-        'gst-plugins-base',
-        'gst-plugins-base-libs',
-        'gst-plugins-good',
-        'gst-plugins-ugly',
-        'lib32-alsa-lib',
-        'lib32-alsa-plugins',
-        'lib32-gnutls',
-        'lib32-gst-plugins-base',
-        'lib32-gst-plugins-base-libs',
-        'lib32-gst-plugins-good',
-        'lib32-libcups',
-        'lib32-libpulse',
-        'lib32-libxcomposite',
-        'lib32-libxinerama',
-        'lib32-opencl-icd-loader',
-        'lib32-pcsclite',
-        'lib32-sdl2-compat',
-        'lib32-v4l-utils',
-        'libgphoto2',
-        'libpulse',
-        'libxcomposite',
-        'libxinerama',
-        'opencl-icd-loader',
-        'pcsclite',
-        'samba',
-        'sane',
-        'sdl2-compat',
-        'unixodbc',
-        'v4l-utils',
-        'wine-gecko',
-        'wine-mono',
+    "wine": {
+        "alsa-plugins",
+        "cups",
+        "dosbox",
+        "gnutls",
+        "gst-plugins-bad",
+        "gst-plugins-base",
+        "gst-plugins-base-libs",
+        "gst-plugins-good",
+        "gst-plugins-ugly",
+        "lib32-alsa-lib",
+        "lib32-alsa-plugins",
+        "lib32-gnutls",
+        "lib32-gst-plugins-base",
+        "lib32-gst-plugins-base-libs",
+        "lib32-gst-plugins-good",
+        "lib32-libcups",
+        "lib32-libpulse",
+        "lib32-libxcomposite",
+        "lib32-libxinerama",
+        "lib32-opencl-icd-loader",
+        "lib32-pcsclite",
+        "lib32-sdl2-compat",
+        "lib32-v4l-utils",
+        "libgphoto2",
+        "libpulse",
+        "libxcomposite",
+        "libxinerama",
+        "opencl-icd-loader",
+        "pcsclite",
+        "samba",
+        "sane",
+        "sdl2-compat",
+        "unixodbc",
+        "v4l-utils",
+        "wine-gecko",
+        "wine-mono",
     },
-    'xdg-utils': {
+    "xdg-utils": {
         # needed to correctly identify .cbz as application/vnd.comicbook+zip
-        'perl-file-mimeinfo',
+        "perl-file-mimeinfo",
     },
-    'yazi': {
-        '7zip',
-        'chafa',
-        'fd',
-        'ffmpeg',
-        'fzf',
-        'imagemagick',
-        'jq',
-        'poppler',
-        'ripgrep',
-        'zoxide',
+    "yazi": {
+        "7zip",
+        "chafa",
+        "fd",
+        "ffmpeg",
+        "fzf",
+        "imagemagick",
+        "jq",
+        "poppler",
+        "ripgrep",
+        "zoxide",
     },
-    'yt-dlp': {
-        'aria2',
-        'atomicparsley',
-        'ffmpeg',
-        'python-brotli',
-        'python-brotlicffi',
-        'python-mutagen',
-        'python-pycryptodome',
-        'python-pycryptodomex',
-        'python-pyxattr',
-        'python-secretstorage',
-        'python-websockets',
-        'python-xattr',
-        'rtmpdump',
+    "yt-dlp": {
+        "aria2",
+        "atomicparsley",
+        "ffmpeg",
+        "python-brotli",
+        "python-brotlicffi",
+        "python-mutagen",
+        "python-pycryptodome",
+        "python-pycryptodomex",
+        "python-pyxattr",
+        "python-secretstorage",
+        "python-websockets",
+        "python-xattr",
+        "rtmpdump",
     },
 }
 
 EXPECTED_GROUPS = {}
 
 EXPECTED_SERVICES = {
-    'fstrim.timer',
-    'logrotate.timer',
-    'systemd-timesyncd.service',
+    "fstrim.timer",
+    "logrotate.timer",
+    "systemd-timesyncd.service",
 }
 
-EFI_SHELL_HOSTS = ('mars', 'phobos', 'lounge-htpc', 'sol')
+EFI_SHELL_HOSTS = ("mars", "phobos", "lounge-htpc", "sol")
 if HOSTNAME in EFI_SHELL_HOSTS:
-    EXPECTED_PACKAGES.add('edk2-shell')
+    EXPECTED_PACKAGES.add("edk2-shell")
 
-if HOSTNAME in ('lounge-htpc'):
-    EXPECTED_GROUPS.setdefault('lounge-htpc', set())
-    EXPECTED_GROUPS['lounge-htpc'].update({
-        'audio',
-        'games',
-        'nopasswdlogin',
-        'realtime',
-        'video',
-        'wheel',
-    })
+if HOSTNAME in ("lounge-htpc"):
+    EXPECTED_GROUPS.setdefault("lounge-htpc", set())
+    EXPECTED_GROUPS["lounge-htpc"].update(
+        {
+            "audio",
+            "games",
+            "nopasswdlogin",
+            "realtime",
+            "video",
+            "wheel",
+        }
+    )
 
-if HOSTNAME in ('mars', 'phobos'):
-    EXPECTED_PACKAGE_DEPENDENCIES.setdefault('podman', set())
-    EXPECTED_PACKAGE_DEPENDENCIES['podman'].update({
-        'apparmor',
-        'btrfs-progs',
-        'cni-plugins',
-        'fuse-overlayfs',
-        'podman-compose',
-        'slirp4netns',
-    })
+if HOSTNAME in ("mars", "phobos"):
+    EXPECTED_PACKAGE_DEPENDENCIES.setdefault("podman", set())
+    EXPECTED_PACKAGE_DEPENDENCIES["podman"].update(
+        {
+            "apparmor",
+            "btrfs-progs",
+            "cni-plugins",
+            "fuse-overlayfs",
+            "podman-compose",
+            "slirp4netns",
+        }
+    )
 
-    EXPECTED_PACKAGE_DEPENDENCIES.setdefault('docker', set())
-    EXPECTED_PACKAGE_DEPENDENCIES['docker'].update({
-        'btrfs-progs',
-        'docker-buildx',
-        'pigz',
-    })
+    EXPECTED_PACKAGE_DEPENDENCIES.setdefault("docker", set())
+    EXPECTED_PACKAGE_DEPENDENCIES["docker"].update(
+        {
+            "btrfs-progs",
+            "docker-buildx",
+            "pigz",
+        }
+    )
 
-    EXPECTED_GROUPS.setdefault('ar', set())
-    EXPECTED_GROUPS['ar'].update({
-        'games',  # for proton to automatically set niceness
-        'realtime',
-        'libvirt',
-        'libvirt-qemu',
-        'storage',
-        'video',
-        'wheel',
-    })
-    EXPECTED_PACKAGES.update({
-        'python-pytorch-opt-rocm',
-    })
+    EXPECTED_GROUPS.setdefault("ar", set())
+    EXPECTED_GROUPS["ar"].update(
+        {
+            "games",  # for proton to automatically set niceness
+            "realtime",
+            "libvirt",
+            "libvirt-qemu",
+            "storage",
+            "video",
+            "wheel",
+        }
+    )
+    EXPECTED_PACKAGES.update(
+        {
+            "python-pytorch-opt-rocm",
+        }
+    )
 
-if HOSTNAME in ('lounge-htpc', 'mars'):
-    EXPECTED_PACKAGES.update({
-        'linux',
-        'linux-headers',
-    })
+if HOSTNAME in ("lounge-htpc", "mars"):
+    EXPECTED_PACKAGES.update(
+        {
+            "linux",
+            "linux-headers",
+        }
+    )
 
-if HOSTNAME in ('lounge-htpc', 'mars', 'phobos'):
-    EXPECTED_PACKAGES.update({
-        'plymouth',
-    })
+if HOSTNAME in ("lounge-htpc", "mars", "phobos"):
+    EXPECTED_PACKAGES.update(
+        {
+            "plymouth",
+        }
+    )
 
-if HOSTNAME == 'phobos':
-    EXPECTED_PACKAGES.update({
-        'linux-flowx13',
-        'linux-flowx13-headers',
-    })
+if HOSTNAME == "phobos":
+    EXPECTED_PACKAGES.update(
+        {
+            "linux-flowx13",
+            "linux-flowx13-headers",
+        }
+    )
 
-if HOSTNAME in ('lounge-htpc', 'mars', 'phobos', 'sol'):
-    EXPECTED_PACKAGES.update({
-        'linux-lts',
-        'linux-lts-headers',
-    })
-    EXPECTED_SERVICES.update({
-        'smb.service',
-    })
+if HOSTNAME in ("lounge-htpc", "mars", "phobos", "sol"):
+    EXPECTED_PACKAGES.update(
+        {
+            "linux-lts",
+            "linux-lts-headers",
+        }
+    )
+    EXPECTED_SERVICES.update(
+        {
+            "smb.service",
+        }
+    )
 
 
 def sha256sum(path):
     hasher = hashlib.sha256()
     try:
-        with open(path, 'rb') as handle:
+        with open(path, "rb") as handle:
             while data := handle.read(65536):
                 hasher.update(data)
     except OSError:
@@ -473,23 +500,23 @@ def sha256sum(path):
 
 
 async def install_efi_shell():
-    source = pathlib.Path('/usr/share/edk2-shell/x64/Shell_Full.efi')
-    target = pathlib.Path('/boot/shellx64.efi')
+    source = pathlib.Path("/usr/share/edk2-shell/x64/Shell_Full.efi")
+    target = pathlib.Path("/boot/shellx64.efi")
 
     if not target.exists() or sha256sum(source) != sha256sum(target):
-        print('Installing', target)
+        print("Installing", target)
         shutil.copyfile(source, target)
 
 
 async def ensure_using_systemd_resolved():
-    unit = 'systemd-resolved'
+    unit = "systemd-resolved"
     if await is_unit_enabled(unit):
         await enable_unit(unit)
 
-    source = pathlib.Path('/run/systemd/resolve/stub-resolv.conf')
-    target = pathlib.Path('/etc/resolv.conf')
+    source = pathlib.Path("/run/systemd/resolve/stub-resolv.conf")
+    target = pathlib.Path("/etc/resolv.conf")
     if target.resolve() != source:
-        print(f'Linking {target} to {source}')
+        print(f"Linking {target} to {source}")
         try:
             target.unlink()
         except FileNotFoundError:
@@ -499,44 +526,44 @@ async def ensure_using_systemd_resolved():
 
 async def ensure_users_in_expected_groups():
     for user, expected_groups in EXPECTED_GROUPS.items():
-        current_groups = {
-            g.gr_name
-            for g in grp.getgrall()
-            if user in g.gr_mem
-        }
+        current_groups = {g.gr_name for g in grp.getgrall() if user in g.gr_mem}
         for group in expected_groups - current_groups:
             await add_user_to_group(user, group)
 
 
 async def add_user_to_group(user, group):
     # print prior to command so the sudo password prompt as context
-    print(f'Adding user {user} to group {group}')
+    print(f"Adding user {user} to group {group}")
     proc = await asyncio.create_subprocess_exec(
-        'sudo', 'gpasswd', '-a', user, group,
+        "sudo",
+        "gpasswd",
+        "-a",
+        user,
+        group,
         stdout=asyncio.subprocess.DEVNULL,
     )
     await proc.communicate()
     if proc.returncode:
-        raise RuntimeError(f'exit {proc.returncode}')
+        raise RuntimeError(f"exit {proc.returncode}")
 
 
 async def is_unit_enabled(name, user=False):
     proc = await asyncio.create_subprocess_exec(
-        'systemctl',
-        '--user' if user else '--system',
-        'show',
-        '--property=UnitFileState',
-        '--',
+        "systemctl",
+        "--user" if user else "--system",
+        "show",
+        "--property=UnitFileState",
+        "--",
         name,
         stdout=asyncio.subprocess.PIPE,
     )
     if proc.returncode:
-        raise RuntimeError(f'exit {proc.returncode}')
+        raise RuntimeError(f"exit {proc.returncode}")
     stdout, _ = await proc.communicate()
     match stdout.decode().strip():
-        case 'UnitFileState=enabled':
+        case "UnitFileState=enabled":
             return True
-        case 'UnitFileState=disabled':
+        case "UnitFileState=disabled":
             return False
         case _:
             raise RuntimeError
@@ -545,53 +572,52 @@ async def is_unit_enabled(name, user=False):
 async def enable_unit(name, now=False, user=False):
     if await is_unit_enabled(name, user=user):
         return
-    print(f'Enabling unit {name} (user={user}) (now={now})')
+    print(f"Enabling unit {name} (user={user}) (now={now})")
     args = []
     if not user:
-        args.append('sudo')
+        args.append("sudo")
 
-    args.extend([
-        'systemctl',
-        '--user' if user else '--system',
-        'enable',
-    ])
+    args.extend(
+        [
+            "systemctl",
+            "--user" if user else "--system",
+            "enable",
+        ]
+    )
     if now:
-        args.append('--now')
-    args.extend(['--', name])
+        args.append("--now")
+    args.extend(["--", name])
     proc = await asyncio.create_subprocess_exec(*args)
     await proc.communicate()
     if proc.returncode:
-        raise RuntimeError(f'exit {proc.returncode}')
+        raise RuntimeError(f"exit {proc.returncode}")
 
 
 async def install_packages(packages, asdeps=False, asexplicit=False):
     args = [
-        'sudo',
-        'pacman',
-        '-S',
-        '--noconfirm',
+        "sudo",
+        "pacman",
+        "-S",
+        "--noconfirm",
     ]
     if asdeps:
-        args.append('--asdeps')
+        args.append("--asdeps")
     if asexplicit:
-        args.append('--asexplicit')
-    args.extend(['--', *packages])
+        args.append("--asexplicit")
+    args.extend(["--", *packages])
     proc = await asyncio.create_subprocess_exec(*args)
     await proc.communicate()
 
 
 def all_packages():
-    handle = pyalpm.Handle('.', '/var/lib/pacman')
+    handle = pyalpm.Handle(".", "/var/lib/pacman")
     localdb = handle.get_localdb()
     return localdb.pkgcache
 
 
 async def ensure_packages():
     expected_packages = set(EXPECTED_PACKAGES)
-    installed_packages = {
-        package.name: package
-        for package in all_packages()
-    }
+    installed_packages = {package.name: package for package in all_packages()}
 
     missing = set()
     for name in expected_packages:
@@ -601,7 +627,7 @@ async def ensure_packages():
             missing.add(name)
 
     if missing:
-        print('Installing missing packages ...')
+        print("Installing missing packages ...")
         await install_packages(missing, asexplicit=True)
 
 
@@ -622,14 +648,14 @@ async def ensure_package_dependencies():
                 missing.add(dep)
 
     if missing:
-        print('Installing missing dependencies ...')
+        print("Installing missing dependencies ...")
         await install_packages(missing, asdeps=True)
 
 
 async def run_mode(mode):
     args = []
-    if mode == 'root':
-        args.append('sudo')
+    if mode == "root":
+        args.append("sudo")
     args.extend([__file__, mode])
     proc = await asyncio.create_subprocess_exec(*args)
     await proc.wait()
@@ -645,31 +671,31 @@ class ProcessError(Exception):
     def __str__(self):
         proc = self.process
 
-        text = f'exit {proc.returncode}'
+        text = f"exit {proc.returncode}"
         if self.message is not None:
-            text = f'{text} - {self.message}'
+            text = f"{text} - {self.message}"
 
         try:
-            args = proc._transport._extra['subprocess'].args
+            args = proc._transport._extra["subprocess"].args
         except (AttributeError, KeyError):
             pass
         else:
-            text = f'{text}: {args}'
+            text = f"{text}: {args}"
         return text
 
 
 async def main():
-    if not pathlib.Path('/etc/arch-release').exists():
+    if not pathlib.Path("/etc/arch-release").exists():
         return
 
-    modes = ['user', 'root']
+    modes = ["user", "root"]
     parser = argparse.ArgumentParser()
-    parser.add_argument('mode', choices=modes, nargs='?')
+    parser.add_argument("mode", choices=modes, nargs="?")
     args = parser.parse_args()
 
     # TODO: always run as root
     match args.mode:
-        case 'user':
+        case "user":
             await ensure_users_in_expected_groups()
 
             await ensure_packages()
@@ -677,8 +703,8 @@ async def main():
 
             for service in EXPECTED_SERVICES:
                 await enable_unit(service, now=True)
-        case 'root':
-            if HOSTNAME in ('mars', 'phobos'):
+        case "root":
+            if HOSTNAME in ("mars", "phobos"):
                 await ensure_using_systemd_resolved()
             if HOSTNAME in EFI_SHELL_HOSTS:
                 await install_efi_shell()
@@ -687,5 +713,5 @@ async def main():
                 await run_mode(mode)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     asyncio.run(main())
