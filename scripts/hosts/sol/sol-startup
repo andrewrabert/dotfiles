@@ -12,10 +12,6 @@ sudo systemctl start zfs-share.service
 sudo systemctl start zpool-check-health-storage.service
 sudo zpool status -v
 
-echo Starting Docker ...
-sudo systemctl enable --now docker
-sol-docker up -d
-
 echo Starting NFS binds ...
 sudo mount --bind ~ar /srv/nfs4/ar
 sudo mount --bind /storage /srv/nfs4/storage
@@ -45,8 +41,12 @@ systemctl --user enable --now sol-fix-permissions.timer
 systemctl --user enable --now sol-update-remotes.timer
 systemctl --user enable --now sol-ytdl-sub.timer
 
-echo Starting podman ...
-podman system migrate || true
-
 echo Starting wireguard ...
 sudo wg-quick up sol
+
+echo Starting Docker ...
+sudo systemctl enable --now docker
+sol-docker up -d
+
+echo Starting podman ...
+podman system migrate || true
