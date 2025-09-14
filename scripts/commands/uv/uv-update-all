@@ -2,29 +2,43 @@
 """Update all PEP 723 scripts managed by uv in a directory."""
 
 import asyncio
-import os
 import pathlib
 import sys
 from typing import List, Tuple
+
+
+def all_files(*paths):
+    stack = []
+    files = set()
+    for path in paths:
+        if not path.exists():
+            raise ValueError(f"path does not exist: {path}")
+        elif path.is_file():
+            files.add(path)
+        elif path.is_dir():
+            stack.append(path)
+    while stack:
+        for path in stack.pop().iterdir():
+            if path.is_dir():
+                stack.append(path)
+            else:
+                files.add(path)
+    return sorted(files)
 
 
 async def find_uv_scripts(directory: pathlib.Path) -> List[pathlib.Path]:
     """Find all executable files with uv run shebang."""
     uv_scripts = []
 
-    for file_path in directory.rglob("*"):
-        if not file_path.is_file() or not os.access(file_path, os.X_OK):
-            continue
-
-        try:
-            with open(file_path, "r", encoding="utf-8") as f:
-                first_line = f.readline().strip()
-                if first_line == "#!/usr/bin/env -S uv run":
-                    uv_scripts.append(file_path)
-        except (UnicodeDecodeError, PermissionError):
-            continue
-
-    return sorted(uv_scripts)
+    for file_path in all_files(directory):
+        with open(file_path, "r") as handle:
+            try:
+                parts = handle.readline().strip().split()
+            except UnicodeDecodeError:
+                continue
+            if parts[0] == "#!/usr/bin/env" and "uv" in parts and "run" in parts:
+                uv_scripts.append(file_path.resolve().absolute())
+    return sorted(set(uv_scripts))
 
 
 async def update_script(script_path: pathlib.Path) -> bool:
@@ -114,4 +128,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-

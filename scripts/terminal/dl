@@ -10,7 +10,7 @@ Download tool with support for multiple protocols and clipboard integration.
 """
 import argparse
 import asyncio
-import cgi
+import email.message
 import re
 import shutil
 import sys
@@ -75,7 +75,9 @@ async def get_filename(url):
         response = await client.head(url, follow_redirects=True)
     try:
         content_disposition = response.headers["content-disposition"]
-        return cgi.parse_header(content_disposition)[1]["filename"]
+        msg = email.message.Message()
+        msg['content-disposition'] = content_disposition
+        return msg.get_filename()
     except Exception:
         return
 
