@@ -122,6 +122,7 @@ if HOSTNAME in ("sol", "mars", "phobos"):
             "unshield",
             "unzip",
             "usbutils",
+            "uv",
             "vim",
             "vorbis-tools",
             "wl-clipboard",
