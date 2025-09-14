@@ -1,4 +1,4 @@
-#!/usr/bin/env -S uv run
+#!/usr/bin/env -S uv --quiet run --script
 """
 A friendly tool to download all binaries of the latest version of VueScan.
 

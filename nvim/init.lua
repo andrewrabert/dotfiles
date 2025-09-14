@@ -124,6 +124,17 @@ vim.filetype.add({
   },
 })
 
+vim.api.nvim_create_autocmd({ "BufRead", "BufNewFile" }, {
+  group = vim.api.nvim_create_augroup("UvShebangDetection", {}),
+  desc = "Set filetype to python for uv script files",
+  callback = function()
+    local line = vim.fn.getline(1)
+    if line:match("^#!/usr/bin/env.*uv.*run") then
+      vim.api.nvim_set_option_value("filetype", "python", { buf = 0 })
+    end
+  end,
+})
+
 vim.keymap.set('n', '<leader>td', function()
   vim.diagnostic.enable(not vim.diagnostic.is_enabled())
 end, { desc = 'Toggle diagnostics' })

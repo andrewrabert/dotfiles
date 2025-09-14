@@ -1,4 +1,4 @@
-#!/usr/bin/env -S uv run
+#!/usr/bin/env -S uv --quiet run --script
 """
 File hash recording tool with SQLite database and progress tracking.
 
