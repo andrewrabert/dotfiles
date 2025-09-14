@@ -1,3 +1,0 @@
-#!/usr/bin/env sh
-export PIP_USER=0
-exec "$(which -a "${0##*/}" | grep -m 1 -v "^$0$")" "$@"
