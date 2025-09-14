@@ -134,7 +134,7 @@ function init() {
     }
 
     workspace.windowAdded.connect(setupObsidian);
-    registerShortcut("Obsidian Toggle", "Toggle Obsidian.", "Shift+Meta+Return", toggleObsidian);
+    registerShortcut("Obsidian Toggle", "Toggle Obsidian.", "Meta+n", toggleObsidian);
 }
 
 init();
