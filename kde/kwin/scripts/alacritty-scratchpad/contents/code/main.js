@@ -41,7 +41,7 @@ function activate(client) {
 }
 
 function setupClient(client) {
-    configure_as_floating_window(client);
+    configure_as_normal_window(client);
     hide(client);
     client.activeChanged.connect(function() {
         if (!isNormal && !client.active) {
@@ -52,12 +52,9 @@ function setupClient(client) {
 
 const maxAspect = 1.6;
 const scaleFactor = 0.8;
-let isNormal = false;
 
 
 function configure_as_normal_window(client) {
-    isNormal = true;
-
     client.onAllDesktops = false;
     client.skipTaskbar = false;
     client.skipSwitcher = false;
@@ -94,18 +91,6 @@ function set_geometry_and_screen(client) {
     workspace.sendClientToScreen(client, activeScreen);
 }
 
-function configure_as_floating_window(client) {
-    isNormal = false;
-
-    client.noBorder = true;
-    client.skipTaskbar = true;
-    client.skipSwitcher = true;
-    client.skipPager = true;
-    client.onAllDesktops = true;
-    client.fullScreen = false;
-    client.keepAbove = true;
-}
-
 function hide(client) {
     client.minimized = true;
     client.keepAbove = false;
@@ -113,13 +98,9 @@ function hide(client) {
 
 function toggleAlacritty() {
     let alacritty = findAlacritty();
-    if ( alacritty ) {
-        if ( isNormal ) {
-            set_geometry_and_screen(alacritty);
-            configure_as_floating_window(alacritty);
-            activate(alacritty);
-        } else if ( isVisible(alacritty) ) {
-            if ( isActive(alacritty) ) {
+    if (alacritty) {
+        if (isVisible(alacritty)) {
+            if (isActive(alacritty)) {
                 hide(alacritty);
             } else {
                 set_geometry_and_screen(alacritty);
@@ -127,7 +108,6 @@ function toggleAlacritty() {
             }
         } else {
             set_geometry_and_screen(alacritty);
-            configure_as_floating_window(alacritty);
             activate(alacritty);
         }
     }
@@ -135,27 +115,26 @@ function toggleAlacritty() {
 
 function showNormal() {
     let alacritty = findAlacritty();
-    if ( alacritty ) {
+    if (alacritty) {
         configure_as_normal_window(alacritty);
         activate(alacritty);
     }
 }
 
 function setupAlacritty(client) {
-    if ( isAlacritty(client) ) {
+    if (isAlacritty(client)) {
         setupClient(client);
     }
 }
 
 function init() {
     let alacritty = findAlacritty();
-    if ( alacritty ) {
+    if (alacritty) {
         setupClient(alacritty);
     }
 
     workspace.windowAdded.connect(setupAlacritty);
     registerShortcut("Scratchpad Toggle", "Toggle scratchpad.", "Meta+Return", toggleAlacritty);
-    registerShortcut("Show Window", "Show scratchpad as a normal window.", "Shift+Meta+Return", showNormal);
 }
 
 init();
