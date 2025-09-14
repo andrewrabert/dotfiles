@@ -1,0 +1,6 @@
+[Desktop Entry]
+Exec=/home/ar/.dotfiles/public/scripts/toggle-obsidian
+Icon=application-x-shellscript
+Name=Toggle Obsidian
+Type=Application
+X-KDE-AutostartScript=true

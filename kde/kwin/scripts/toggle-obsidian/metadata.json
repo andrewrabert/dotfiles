@@ -1,0 +1,26 @@
+{
+	"KPlugin": {
+		"Name": "Toggle Obsidian",
+		"Description": "Toggle visibility of Obsidian.",
+		"Icon": "preferences-system-windows",
+
+		"Authors" : [
+			{
+				"Email": "vgobbo@gmail.com",
+				"Name": "Vinicius Gobbo Antunes de Oliveira"
+			},
+			{
+				"Email": "ar@nullsum.net",
+				"Name": "Andrew Rabert"
+			}
+		],
+		"Id": "toggle-obsidian",
+		"Version": "0.0.0",
+		"License": "GPL",
+		"Website": "https://github.com/nvllsvm/dotfiles"
+	},
+
+	"X-Plasma-API": "javascript",
+	"X-Plasma-MainScript": "code/main.js",
+	"KPackageStructure": "KWin/Script"
+}
