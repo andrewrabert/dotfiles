@@ -1,4 +1,13 @@
-#!/usr/bin/env python
+#!/usr/bin/env -S uv run
+"""
+MIME type and file extension detection tool.
+
+# /// script
+# dependencies = [
+#     "python-magic",
+# ]
+# ///
+"""
 import argparse
 import collections
 import itertools

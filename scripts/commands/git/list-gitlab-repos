@@ -1,4 +1,13 @@
-#!/usr/bin/env python
+#!/usr/bin/env -S uv run
+"""
+GitLab repository listing tool using requests library.
+
+# /// script
+# dependencies = [
+#     "requests",
+# ]
+# ///
+"""
 import argparse
 import os
 import urllib.parse

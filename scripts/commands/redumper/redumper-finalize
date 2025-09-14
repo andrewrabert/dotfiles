@@ -1,4 +1,13 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run
+"""
+Redumper finalization tool with async processing.
+
+# /// script
+# dependencies = [
+#     "async_executor",
+# ]
+# ///
+"""
 import argparse
 import asyncio
 import pathlib

@@ -1,0 +1,117 @@
+#!/usr/bin/env python3
+"""Update all PEP 723 scripts managed by uv in a directory."""
+
+import asyncio
+import os
+import pathlib
+import sys
+from typing import List, Tuple
+
+
+async def find_uv_scripts(directory: pathlib.Path) -> List[pathlib.Path]:
+    """Find all executable files with uv run shebang."""
+    uv_scripts = []
+
+    for file_path in directory.rglob("*"):
+        if not file_path.is_file() or not os.access(file_path, os.X_OK):
+            continue
+
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                first_line = f.readline().strip()
+                if first_line == "#!/usr/bin/env -S uv run":
+                    uv_scripts.append(file_path)
+        except (UnicodeDecodeError, PermissionError):
+            continue
+
+    return sorted(uv_scripts)
+
+
+async def update_script(script_path: pathlib.Path) -> bool:
+    """Update dependencies for a single PEP 723 script."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "uv",
+            "run",
+            "--script",
+            "--upgrade",
+            "--quiet",
+            str(script_path),
+            "--help",
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        await proc.wait()
+        return proc.returncode == 0
+    except Exception:
+        return False
+
+
+async def update_all_scripts(scripts: List[pathlib.Path]) -> Tuple[int, List[str]]:
+    """Update all scripts concurrently."""
+    tasks = []
+    for script in scripts:
+        task = asyncio.create_task(update_script(script))
+        tasks.append((script, task))
+
+    updated_count = 0
+    failed_scripts = []
+
+    for script, task in tasks:
+        script_name = script.name
+        print(f"📦 Updating dependencies for: {script_name}")
+
+        try:
+            success = await task
+            if success:
+                print(f"✅ Successfully updated: {script_name}")
+                updated_count += 1
+            else:
+                print(f"❌ Failed to update: {script_name}")
+                failed_scripts.append(script_name)
+        except Exception:
+            print(f"❌ Failed to update: {script_name}")
+            failed_scripts.append(script_name)
+        print()
+
+    return updated_count, failed_scripts
+
+
+async def main():
+    """Main function."""
+    script_dir = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else ".")
+
+    print(f"🔍 Scanning for PEP 723 scripts in: {script_dir}")
+    print()
+
+    scripts = await find_uv_scripts(script_dir)
+
+    if not scripts:
+        print("No PEP 723 scripts found with uv run shebang.")
+        return
+
+    print(f"Found {len(scripts)} PEP 723 scripts:")
+    for script in scripts:
+        print(f"  - {script.name}")
+    print()
+
+    updated_count, failed_scripts = await update_all_scripts(scripts)
+
+    print("📊 Update Summary:")
+    print(f"   ✅ Successfully updated: {updated_count} scripts")
+    print(f"   ❌ Failed to update: {len(failed_scripts)} scripts")
+
+    if failed_scripts:
+        print("   Failed scripts:")
+        for script_name in failed_scripts:
+            print(f"      - {script_name}")
+
+    print()
+    print(
+        "💡 Tip: Individual scripts can be updated with 'uv run --upgrade script_name'"
+    )
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+

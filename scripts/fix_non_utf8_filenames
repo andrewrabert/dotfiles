@@ -1,4 +1,13 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run
+"""
+Fix non-UTF8 filename encoding issues.
+
+# /// script
+# dependencies = [
+#     "charset_normalizer",
+# ]
+# ///
+"""
 import argparse
 import os
 import pathlib

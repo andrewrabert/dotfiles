@@ -1,9 +1,16 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run
 """
 A friendly tool to download all binaries of the latest version of VueScan.
 
 This tool exists for archival purposes and can be used to ensure one has
 the latest version to use with a year-based subscription license.
+
+# /// script
+# dependencies = [
+#     "async_executor",
+#     "httpx",
+# ]
+# ///
 """
 
 import argparse

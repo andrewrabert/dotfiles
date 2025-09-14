@@ -1,4 +1,17 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run
+"""
+iTunes cover art downloader with async processing and image handling.
+
+# /// script
+# dependencies = [
+#     "async_executor",
+#     "httpx",
+#     "Pillow",
+#     "tqdm",
+#     "yarl",
+# ]
+# ///
+"""
 import argparse
 import asyncio
 import enum

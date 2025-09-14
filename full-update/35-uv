@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if command -v uv >/dev/null 2>&1; then
+    echo "Updating uv PEP 723 scripts in dotfiles..."
+    uv-update-all "$DOTFILES/public/scripts"
+else
+    echo "uv not installed, skipping uv script updates"
+fi
