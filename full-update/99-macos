@@ -14,6 +14,7 @@ EXPECTED_PACKAGES = {
     "curl",
     "curlie",
     "dash-shell",
+    "exiv2",
     "fd",
     "font-hack",
     "font-hack-nerd-font",
