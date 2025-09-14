@@ -1,5 +1,22 @@
 #!/usr/bin/env sh
 cd ~ || exit 1
+
+# Update GUI environment variables for Wayland/X11 if available
+# Only run on appropriate hosts (not Termux or macOS)
+update_gui_env() {
+    if [ -n "$WAYLAND_DISPLAY" ] || [ -n "$DISPLAY" ]; then
+        tmux set-environment -g WAYLAND_DISPLAY "$WAYLAND_DISPLAY" 2>/dev/null || true
+        tmux set-environment -g XDG_RUNTIME_DIR "$XDG_RUNTIME_DIR" 2>/dev/null || true
+        tmux set-environment -g DISPLAY "$DISPLAY" 2>/dev/null || true
+
+        # Update all existing panes with new environment
+        tmux list-panes -a -F '#{session_name}:#{window_index}.#{pane_index}' 2>/dev/null | \
+        while IFS= read pane; do
+            tmux send-keys -t "$pane" "export WAYLAND_DISPLAY='$WAYLAND_DISPLAY' XDG_RUNTIME_DIR='$XDG_RUNTIME_DIR' DISPLAY='$DISPLAY'" Enter 2>/dev/null || true
+        done
+    fi
+}
+
 SESSIONS="$(tmux list-sessions 2> /dev/null | head -n 1)"
 if [ -n "$SESSIONS" ]; then
     case "$SESSIONS" in
@@ -10,6 +27,7 @@ if [ -n "$SESSIONS" ]; then
             fi
             ;;
     esac
+    update_gui_env
     exec tmux a -d
 else
     exec tmux
