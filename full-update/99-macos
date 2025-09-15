@@ -9,6 +9,7 @@ if platform.uname().system != "Darwin":
 EXPECTED_PACKAGES = {
     "advancecomp",
     "aria2",
+    "ast-grep",
     "bat",
     "coreutils",
     "curl",
@@ -45,6 +46,7 @@ EXPECTED_PACKAGES = {
     "tmux",
     "tree-sitter-cli",
     "unzip",
+    "uv",
     "yazi",
     "zip",
     "zsh",
