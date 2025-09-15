@@ -1,5 +1,15 @@
 #compdef find-dupes
-_arguments : \
-    '(-u --unique)'{-u,--unique}'[]' \
+
+typeset -A opt_args
+
+_find-dupes() {
+  _arguments \
     '(-h --help)'{-h,--help}'[show this help message and exit]' \
-    '*:: :_files'
+    '--dryrun[dry run mode]' \
+    '(--unique --rm --mv)'{-u,--unique}'[show unique files]' \
+    '(--unique --rm --mv)'--rm'[remove duplicates (keeps first match)]' \
+    '(--unique --rm --mv)'--mv'[move duplicates to directory]:directory:_files -/' \
+    '*:path:_files -/'
+}
+
+_find-dupes

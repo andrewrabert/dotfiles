@@ -1,0 +1,17 @@
+#compdef imgconvert
+
+typeset -A opt_args
+
+_imgconvert() {
+  _arguments \
+    '(-h --help)'{-h,--help}'[show this help message and exit]' \
+    '-n[number of parallel jobs]:number:' \
+    '--rm[remove original files]' \
+    '(-f --format)'{-f,--format}'[output format]:format:(bmp jpeg jxl png ppm tiff)' \
+    '--fast[use fast mode]' \
+    '--jpeg-quality[JPEG quality]:quality:(0 10 20 30 40 50 60 70 80 90 100)' \
+    '--jxl-lossy[use lossy JXL compression]' \
+    '*:file:_files'
+}
+
+_imgconvert

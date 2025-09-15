@@ -3,12 +3,14 @@
 typeset -A opt_args
 
 _imgoptim() {
-
-  # Global flags (i.e. ones not associated with a subcommand)
   _arguments \
     '(-h --help)'{-h,--help}'[show this help message and exit]' \
-    '(-s --strip)'{-s,--strip}'[]' \
-    '*:: :_files'
-
+    '(-s --strip)'{-s,--strip}'[strip metadata]' \
+    '(-t --type)'{-t,--type}'[filetypes to process]:filetype:(bmp gif heic jpeg jxl png ppm svg tiff)' \
+    '--fast[use fast mode]' \
+    '-n[number of parallel jobs]:number:' \
+    '(-q --quiet)'{-q,--quiet}'[quiet mode]' \
+    '*:file:_files'
 }
+
 _imgoptim

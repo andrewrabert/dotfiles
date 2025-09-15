@@ -1,0 +1,14 @@
+#compdef find-file-exts
+
+typeset -A opt_args
+
+_find-file-exts() {
+  _arguments \
+    '(-h --help)'{-h,--help}'[show this help message and exit]' \
+    '(-i --ignore-case)'{-i,--ignore-case}'[ignore case]' \
+    '(--count --json)'{-c,--count}'[show count]' \
+    '(--count --json)'{-j,--json}'[output as JSON]' \
+    '*:path:_files -/'
+}
+
+_find-file-exts

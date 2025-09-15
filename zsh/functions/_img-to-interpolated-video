@@ -1,0 +1,18 @@
+#compdef img-to-interpolated-video
+
+typeset -A opt_args
+
+_img-to-interpolated-video() {
+  _arguments \
+    '(-h --help)'{-h,--help}'[show this help message and exit]' \
+    '(-o --output)'{-o,--output}'[output file]:output file:_files' \
+    '(-l --loops)'{-l,--loops}'[number of loops (default 3)]:number:' \
+    '(-r --rife-iterations)'{-r,--rife-iterations}'[RIFE iterations (default 0)]:number:' \
+    '--rife-model[RIFE model]:model:' \
+    '--fps[frames per second (default 30)]:fps:' \
+    '(-m --mode)'{-m,--mode}'[animation mode]:mode:(bounce cycle oneshot)' \
+    '(-f --format)'{-f,--format}'[output format]:format:(gif mp4 png)' \
+    ':source:_files'
+}
+
+_img-to-interpolated-video

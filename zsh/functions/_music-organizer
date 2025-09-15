@@ -1,0 +1,13 @@
+#compdef music-organizer
+
+typeset -A opt_args
+
+_music-organizer() {
+  _arguments \
+    '(-h --help)'{-h,--help}'[show this help message and exit]' \
+    '--library[library mode]' \
+    '(-t --check-tags)'{-t,--check-tags}'[check tags]' \
+    ':directory:_files -/'
+}
+
+_music-organizer
