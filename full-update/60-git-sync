@@ -1,0 +1,6 @@
+#!/usr/bin/env sh
+set -e
+
+if command -v git-sync > /dev/null; then
+    git-sync --build-cache
+fi
