@@ -2,8 +2,7 @@
 """Show Python module filesystem paths"""
 
 import argparse
-import os.path
-import pkgutil
+import importlib.util
 
 
 def main():
@@ -11,18 +10,14 @@ def main():
     parser.add_argument("module")
     args = parser.parse_args()
 
-    loader = pkgutil.get_loader(args.module)
-    if loader is None:
+    spec = importlib.util.find_spec(args.module)
+    if spec is None:
         parser.error("module not found")
 
-    # Use get_filename for Python 2 compatibility
-    try:
-        path = loader.get_filename(args.module)
-    except AttributeError:
-        path = None
-
-    if path is None:
+    if spec.origin is None:
         parser.error("built-in module")
+
+    path = spec.origin
 
     print(path)
 
