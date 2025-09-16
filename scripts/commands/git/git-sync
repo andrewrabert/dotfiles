@@ -121,6 +121,9 @@ def main():
     parser.add_argument("repo", nargs="?")
     args = parser.parse_args()
 
+    if not CODE_ROOT_DIR.is_dir():
+        return
+
     CACHE_PATH.touch()
 
     cache = []
