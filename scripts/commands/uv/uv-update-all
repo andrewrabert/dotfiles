@@ -4,7 +4,6 @@
 import asyncio
 import pathlib
 import sys
-from typing import List, Tuple
 
 
 def all_files(*paths):
@@ -26,7 +25,7 @@ def all_files(*paths):
     return sorted(files)
 
 
-async def find_uv_scripts(directory: pathlib.Path) -> List[pathlib.Path]:
+async def find_uv_scripts(directory: pathlib.Path) -> list[pathlib.Path]:
     """Find all executable files with uv run shebang."""
     uv_scripts = []
 
@@ -61,7 +60,7 @@ async def update_script(script_path: pathlib.Path) -> bool:
         return False
 
 
-async def update_all_scripts(scripts: List[pathlib.Path]) -> Tuple[int, List[str]]:
+async def update_all_scripts(scripts: list[pathlib.Path]) -> tuple[int, list[str]]:
     """Update all scripts concurrently."""
     tasks = []
     for script in scripts:
@@ -119,11 +118,6 @@ async def main():
         print("   Failed scripts:")
         for script_name in failed_scripts:
             print(f"      - {script_name}")
-
-    print()
-    print(
-        "💡 Tip: Individual scripts can be updated with 'uv run --upgrade script_name'"
-    )
 
 
 if __name__ == "__main__":

@@ -1,0 +1,6 @@
+#!/usr/bin/env sh
+ruff format "$@"
+if ! ruff check --fix --unsafe-fixes "$@"; then
+    ruff format "$@"
+    ruff check --fix --unsafe-fixes "$@"
+fi
