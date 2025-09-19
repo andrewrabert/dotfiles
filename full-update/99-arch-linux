@@ -177,7 +177,7 @@ if HOSTNAME in ("mars", "phobos"):
             "inkscape",
             "kcolorchooser",
             "kdeconnect",
-            "kid3-qt",
+            "kid3",
             "krita",
             "mkvtoolnix-gui",
             "mtpfs",
