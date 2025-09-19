@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 
 # Parse flags
-ENABLE_TMUX_CHECK=false
+DISABLE_TMUX_CHECK=false
 while [ $# -gt 0 ]; do
     case "$1" in
         -h|--help)
@@ -11,23 +11,17 @@ while [ $# -gt 0 ]; do
             echo "    ssh-tmux-attach [OPTIONS] SSH_HOST"
             echo ""
             echo "OPTIONS:"
-            echo "    -n, --new-tab        Create new tmux tab (when in tmux session)"
+            echo "    -c, --current-pane   Open in current tmux pane (when in tmux session)"
             echo "    -h, --help           Show this help message"
-            echo ""
-            echo "DESCRIPTION:"
-            echo "    Connects directly via SSH by default."
-            echo "    When run with -n flag inside a tmux session, creates a new tab named 'ssh <host>'."
-            echo ""
-            echo "    Special hosts (mars, phobos, lounge-htpc) use systemd-inhibit."
             exit 0
             ;;
-        -n|--new-tab)
-            ENABLE_TMUX_CHECK=true
+        -c|--current-pane)
+            DISABLE_TMUX_CHECK=true
             shift
             ;;
         -*)
             echo "Unknown option: $1" >&2
-            echo 'usage: [-n|--new-tab] [-h|--help] SSH_HOST' >&2
+            echo 'usage: [-c|--current-pane] [-h|--help] SSH_HOST' >&2
             exit 1
             ;;
         *)
@@ -37,13 +31,13 @@ while [ $# -gt 0 ]; do
 done
 
 if [ $# -ne 1 ]; then
-    echo 'usage: [-n|--new-tab] [-h|--help] SSH_HOST' >&2
+    echo 'usage: [-c|--current-pane] [-h|--help] SSH_HOST' >&2
     exit 1
 fi
 SSH_HOST="$1"
 
 # Check if we're inside a tmux session and tmux handling is enabled
-if [ -n "$TMUX" ] && [ "$ENABLE_TMUX_CHECK" = true ]; then
+if [ -n "$TMUX" ] && [ "$DISABLE_TMUX_CHECK" = true ]; then
     # Create new tab with name "ssh <host>" and set @renamed
     case "$SSH_HOST" in
         mars|phobos|lounge-htpc)
