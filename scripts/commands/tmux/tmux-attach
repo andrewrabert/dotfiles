@@ -1,6 +1,24 @@
 #!/usr/bin/env sh
 cd ~ || exit 1
 
+# Parse command line arguments
+SHOW_PANE_TITLES=false
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --pane-titles)
+            SHOW_PANE_TITLES=true
+            shift
+            ;;
+        --prompt)
+            PROMPT=true
+            shift
+            ;;
+        *)
+            shift
+            ;;
+    esac
+done
+
 # Update GUI environment variables for Wayland/X11 if available
 # Only run on appropriate hosts (not Termux or macOS)
 update_gui_env() {
@@ -21,14 +39,24 @@ SESSIONS="$(tmux list-sessions 2> /dev/null | head -n 1)"
 if [ -n "$SESSIONS" ]; then
     case "$SESSIONS" in
         *"(attached)")
-            if [ "$1" = '--prompt' ]; then
+            if [ "$PROMPT" = true ]; then
                 echo 'Press enter to attach to tmux session ...'
                 head -n 1 > /dev/null
             fi
             ;;
     esac
     update_gui_env
-    exec tmux a -d
+    if [ "$SHOW_PANE_TITLES" = true ]; then
+        tmux a -d
+        tmux set -g pane-border-status top
+    else
+        exec tmux a -d
+    fi
 else
-    exec tmux
+    if [ "$SHOW_PANE_TITLES" = true ]; then
+        tmux
+        tmux set -g pane-border-status top
+    else
+        exec tmux
+    fi
 fi
