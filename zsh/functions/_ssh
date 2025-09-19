@@ -1,0 +1,11 @@
+#compdef ssh
+
+# Override _ssh_hosts to use our custom parsing
+_ssh_hosts() {
+    local hosts
+    hosts=(${(f)"$(grep "^Host " ~/.ssh/config 2>/dev/null | awk '{for(i=2;i<=NF;i++) if($i !~ /[*?]/) print $i}')"})
+    _describe 'SSH hosts' hosts "$@"
+}
+
+# Use the original ssh completion but with our overridden _ssh_hosts
+source /usr/share/zsh/functions/Completion/Unix/_ssh

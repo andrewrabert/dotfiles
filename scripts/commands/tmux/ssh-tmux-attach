@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 
 # Parse flags
-DISABLE_TMUX_CHECK=false
+ENABLE_TMUX_CHECK=false
 while [ $# -gt 0 ]; do
     case "$1" in
         -h|--help)
@@ -11,23 +11,23 @@ while [ $# -gt 0 ]; do
             echo "    ssh-tmux-attach [OPTIONS] SSH_HOST"
             echo ""
             echo "OPTIONS:"
-            echo "    -d, --disable-tmux    Disable tmux tab creation (use original behavior)"
+            echo "    -n, --new-tab        Create new tmux tab (when in tmux session)"
             echo "    -h, --help           Show this help message"
             echo ""
             echo "DESCRIPTION:"
-            echo "    When run inside a tmux session, creates a new tab named 'ssh <host>'."
-            echo "    When run outside tmux or with -d flag, connects directly via SSH."
+            echo "    Connects directly via SSH by default."
+            echo "    When run with -n flag inside a tmux session, creates a new tab named 'ssh <host>'."
             echo ""
             echo "    Special hosts (mars, phobos, lounge-htpc) use systemd-inhibit."
             exit 0
             ;;
-        -d|--disable-tmux)
-            DISABLE_TMUX_CHECK=true
+        -n|--new-tab)
+            ENABLE_TMUX_CHECK=true
             shift
             ;;
         -*)
             echo "Unknown option: $1" >&2
-            echo 'usage: [-d|--disable-tmux] [-h|--help] SSH_HOST' >&2
+            echo 'usage: [-n|--new-tab] [-h|--help] SSH_HOST' >&2
             exit 1
             ;;
         *)
@@ -37,13 +37,13 @@ while [ $# -gt 0 ]; do
 done
 
 if [ $# -ne 1 ]; then
-    echo 'usage: [-d|--disable-tmux] [-h|--help] SSH_HOST' >&2
+    echo 'usage: [-n|--new-tab] [-h|--help] SSH_HOST' >&2
     exit 1
 fi
 SSH_HOST="$1"
 
-# Check if we're inside a tmux session and tmux handling is not disabled
-if [ -n "$TMUX" ] && [ "$DISABLE_TMUX_CHECK" = false ]; then
+# Check if we're inside a tmux session and tmux handling is enabled
+if [ -n "$TMUX" ] && [ "$ENABLE_TMUX_CHECK" = true ]; then
     # Create new tab with name "ssh <host>" and set @renamed
     case "$SSH_HOST" in
         mars|phobos|lounge-htpc)
@@ -55,7 +55,7 @@ if [ -n "$TMUX" ] && [ "$DISABLE_TMUX_CHECK" = false ]; then
             tmux set-window-option @renamed on
     esac
 else
-    # Original behavior when not in tmux
+    # Default behavior - direct SSH connection
     case "$SSH_HOST" in
         mars|phobos|lounge-htpc)
             exec ssh -t "${SSH_HOST}" -- systemd-inhibit --who='ssh-tmux-attach' --what=idle --mode=block zsh -lic tmux-attach

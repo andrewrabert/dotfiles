@@ -1,0 +1,12 @@
+#compdef ssh-tmux-attach
+
+_ssh_hosts() {
+    local hosts
+    hosts=(${(f)"$(grep "^Host " ~/.ssh/config 2>/dev/null | awk '{for(i=2;i<=NF;i++) if($i !~ /[*?]/) print $i}')"})
+    _describe 'SSH hosts' hosts "$@"
+}
+
+_arguments : \
+    '(-n --new-tab)'{-n,--new-tab}'[Create new tmux tab]' \
+    '(-h --help)'{-h,--help}'[Show help message]' \
+    '1:SSH host:_ssh_hosts'
