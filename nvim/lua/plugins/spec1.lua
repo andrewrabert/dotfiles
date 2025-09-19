@@ -77,7 +77,6 @@ return {
         })
     end,
   },
-  {"dense-analysis/ale"},
   {
     "stevearc/conform.nvim",
     event = { "BufWritePre" },
