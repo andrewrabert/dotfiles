@@ -1,5 +1,3 @@
-local nvim_lsp = require("lspconfig")
-
 -- Use an on_attach function to only map the following keys
 -- after the language server attaches to the current buffer
 local on_attach = function(client, bufnr)
@@ -36,20 +34,21 @@ local on_attach = function(client, bufnr)
     buf_set_keymap("n", "<space>f", "<cmd>lua vim.lsp.buf.formatting()<CR>", opts)
 end
 
--- Use a loop to conveniently call 'setup' on multiple servers and
+-- Use a loop to conveniently call vim.lsp.config on multiple servers and
 -- map buffer local keybindings when the language server attaches
-local servers = { "rust_analyzer", "ts_ls", "pyright", "ruff" }
+local servers = { "rust_analyzer", "ts_ls", "ruff" }
 for _, lsp in ipairs(servers) do
-    nvim_lsp[lsp].setup({
+    vim.lsp.config[lsp] = {
         on_attach = on_attach,
         flags = {
             debounce_text_changes = 150,
         },
-    })
+    }
 end
-nvim_lsp.pyright.setup{
+
+-- Configure pyright with specific settings
+vim.lsp.config.pyright = {
   on_attach = on_attach,
-  flags = lsp_flags,
   settings = {
     pyright = {
       -- Using Ruff's import organizer
@@ -59,7 +58,7 @@ nvim_lsp.pyright.setup{
       analysis = {
         -- Ignore all files for analysis to exclusively use Ruff for linting
         ignore = { '*' },
-        -- pyright's type checking is often wrong 
+        -- pyright's type checking is often wrong
         typeCheckingMode = "off"
       }
     }
