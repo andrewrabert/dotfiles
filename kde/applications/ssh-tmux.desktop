@@ -1,6 +1,0 @@
-[Desktop Entry]
-Name=ssh-tmux
-Comment=ssh-tmux
-Type=Application
-Icon=foot
-Exec=foot-ssh-tmux

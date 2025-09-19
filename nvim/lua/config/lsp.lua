@@ -1,3 +1,5 @@
+-- Modern LSP setup using vim.lsp.start instead of deprecated lspconfig
+
 -- Use an on_attach function to only map the following keys
 -- after the language server attaches to the current buffer
 local on_attach = function(client, bufnr)
@@ -27,40 +29,64 @@ local on_attach = function(client, bufnr)
     buf_set_keymap("n", "<space>rn", "<cmd>lua vim.lsp.buf.rename()<CR>", opts)
     buf_set_keymap("n", "<space>ca", "<cmd>lua vim.lsp.buf.code_action()<CR>", opts)
     buf_set_keymap("n", "gr", "<cmd>lua vim.lsp.buf.references()<CR>", opts)
-    buf_set_keymap("n", "<space>e", "<cmd>lua vim.lsp.diagnostic.show_line_diagnostics()<CR>", opts)
-    buf_set_keymap("n", "[d", "<cmd>lua vim.lsp.diagnostic.goto_prev()<CR>", opts)
-    buf_set_keymap("n", "]d", "<cmd>lua vim.lsp.diagnostic.goto_next()<CR>", opts)
-    buf_set_keymap("n", "<space>q", "<cmd>lua vim.lsp.diagnostic.set_loclist()<CR>", opts)
-    buf_set_keymap("n", "<space>f", "<cmd>lua vim.lsp.buf.formatting()<CR>", opts)
+    buf_set_keymap("n", "<space>e", "<cmd>lua vim.diagnostic.open_float()<CR>", opts)
+    buf_set_keymap("n", "[d", "<cmd>lua vim.diagnostic.goto_prev()<CR>", opts)
+    buf_set_keymap("n", "]d", "<cmd>lua vim.diagnostic.goto_next()<CR>", opts)
+    buf_set_keymap("n", "<space>q", "<cmd>lua vim.diagnostic.setloclist()<CR>", opts)
+    buf_set_keymap("n", "<space>f", "<cmd>lua vim.lsp.buf.format()<CR>", opts)
 end
 
--- Use a loop to conveniently call vim.lsp.config on multiple servers and
--- map buffer local keybindings when the language server attaches
-local servers = { "rust_analyzer", "ts_ls", "pyright", "ruff" }
-for _, lsp in ipairs(servers) do
-    vim.lsp.config[lsp] = {
-        on_attach = on_attach,
-        flags = {
-            debounce_text_changes = 150,
-        },
-    }
-end
-
--- Configure pyright with specific settings
-vim.lsp.config.pyright = {
-  on_attach = on_attach,
-  settings = {
-    pyright = {
-      -- Using Ruff's import organizer
-      disableOrganizeImports = true,
-    },
-    python = {
-      analysis = {
-        -- Ignore all files for analysis to exclusively use Ruff for linting
-        ignore = { '*' },
-        -- pyright's type checking is often wrong
-        typeCheckingMode = "off"
+-- LSP server configurations
+local servers = {
+  rust_analyzer = {
+    cmd = { 'rust-analyzer' },
+    filetypes = { 'rust' },
+    root_patterns = { 'Cargo.toml', 'rust-project.json' }
+  },
+  ts_ls = {
+    cmd = { 'typescript-language-server', '--stdio' },
+    filetypes = { 'javascript', 'javascriptreact', 'typescript', 'typescriptreact' },
+    root_patterns = { 'package.json', 'tsconfig.json', 'jsconfig.json' }
+  },
+  ruff = {
+    cmd = { 'ruff', 'server' },
+    filetypes = { 'python' },
+    root_patterns = { 'pyproject.toml', 'setup.py', 'setup.cfg', 'requirements.txt', 'Pipfile' }
+  },
+  pyright = {
+    cmd = { 'pyright-langserver', '--stdio' },
+    filetypes = { 'python' },
+    root_patterns = { 'pyproject.toml', 'setup.py', 'setup.cfg', 'requirements.txt', 'Pipfile', 'pyrightconfig.json' },
+    settings = {
+      pyright = {
+        -- Using Ruff's import organizer
+        disableOrganizeImports = true,
+      },
+      python = {
+        analysis = {
+          -- Ignore all files for analysis to exclusively use Ruff for linting
+          ignore = { '*' },
+          -- pyright's type checking is often wrong
+          typeCheckingMode = "off"
+        }
       }
     }
   }
 }
+
+-- Setup LSP servers using modern vim.lsp API
+for server_name, config in pairs(servers) do
+  vim.api.nvim_create_autocmd('FileType', {
+    pattern = config.filetypes,
+    callback = function(args)
+      vim.lsp.start(vim.tbl_deep_extend('force', {
+        name = server_name,
+        cmd = config.cmd,
+        root_dir = vim.fs.root(args.buf, config.root_patterns),
+        on_attach = function(client, bufnr)
+          on_attach(client, bufnr)
+        end,
+      }, config))
+    end,
+  })
+end
