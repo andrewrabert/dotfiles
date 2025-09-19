@@ -1,3 +1,6 @@
+; focused = [Colors:Header].BackgoundNormal
+; unfocused = [Colors:Header][Inactive].BackgoundNormal
+
 [ColorEffects:Disabled]
 Color=56,56,56
 ColorAmount=0
@@ -47,8 +50,8 @@ ForegroundPositive=39,174,96
 ForegroundVisited=155,89,182
 
 [Colors:Header]
-BackgroundAlternate=24,28,32
-BackgroundNormal=40,44,52
+BackgroundAlternate=33,33,33
+BackgroundNormal=33,33,33
 DecorationFocus=61,174,233
 DecorationHover=61,174,233
 ForegroundActive=61,174,233
@@ -61,8 +64,8 @@ ForegroundPositive=39,174,96
 ForegroundVisited=155,89,182
 
 [Colors:Header][Inactive]
-BackgroundAlternate=41,44,48
-BackgroundNormal=24,28,32
+BackgroundAlternate=33,33,33
+BackgroundNormal=33,33,33
 DecorationFocus=61,174,233
 DecorationHover=61,174,233
 ForegroundActive=61,174,233
