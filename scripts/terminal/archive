@@ -1,4 +1,42 @@
 #!/usr/bin/env python3
+"""
+Archive extraction and creation tool supporting multiple formats.
+
+System commands executed by this script:
+- 7z/7zz: 7-Zip for various archive formats (7z, zip, rar, etc.)
+- advzip: Advanced ZIP optimization
+- bchunk: Convert CD image/cue files to tracks
+- binmerge: Merge multiple binary files for CD images
+- brotli: Brotli compression/decompression
+- bzip2: Bzip2 compression/decompression
+- cabextract: Extract Microsoft CAB files
+- cpio: Archive and extract CPIO files
+- dolphin-tool: GameCube/Wii disc image manipulation
+- gzip: Gzip compression/decompression
+- innoextract: Extract Inno Setup installers
+- lsar: List archive contents (part of The Unarchiver)
+- lz4: LZ4 compression/decompression
+- mkisofs: Create ISO 9660 filesystem images
+- mount: Mount filesystems
+- nsz: Nintendo Switch compression/decompression
+- pbzip2: Parallel bzip2 implementation
+- pigz: Parallel gzip implementation
+- pixz: Parallel xz implementation
+- tar: Archive and extract tar files
+- unar: Extract archives (part of The Unarchiver)
+- unace: Extract ACE archives
+- unrar: Extract RAR archives
+- unshield: Extract InstallShield archives
+- unsquashfs: Extract SquashFS filesystems
+- unzip: Extract ZIP archives
+- udisksctl: Disk and filesystem management
+- umount: Unmount filesystems
+- xorriso: ISO 9660 rock ridge filesystem manipulator
+- xz: XZ compression/decompression
+- zip: Create ZIP archives
+- zstd: Zstandard compression/decompression
+"""
+
 import argparse
 import asyncio
 import base64
@@ -1106,10 +1144,6 @@ class udisksctl:
         proc = subprocess.run(args, stdout=subprocess.PIPE, check=True)
         output = proc.stdout.decode().strip()
 
-        backing_file = None
-        mount_point = None
-        partitions = []
-        prev_is_partitions = False
         data = None
         current_section = None
         current_key = None

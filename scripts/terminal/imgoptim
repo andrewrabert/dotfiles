@@ -2,6 +2,22 @@
 """
 Image optimization tool with support for multiple formats.
 
+System commands executed by this script:
+- cjpegli: JPEG XL to JPEG conversion with high quality
+- cjxl: Encode images to JPEG XL format
+- djxl: Decode JPEG XL images
+- exiftool: Read and write EXIF metadata
+- exiv2: Read, write, and manipulate EXIF metadata
+- gifsicle: GIF optimization and manipulation
+- jpegoptim: JPEG optimization
+- magick: ImageMagick for various image operations
+- oxipng: PNG optimization
+- sha256sum: Calculate SHA-256 checksums
+- svgo: SVG optimization
+- tiffcp: TIFF image copying and compression
+- vips: VIPS image processing library operations
+- vipsheader: Extract metadata from images using VIPS
+
 # /// script
 # dependencies = [
 #     "async_executor",
@@ -9,6 +25,7 @@ Image optimization tool with support for multiple formats.
 # ]
 # ///
 """
+
 import argparse
 import asyncio
 import contextlib

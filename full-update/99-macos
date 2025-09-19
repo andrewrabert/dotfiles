@@ -47,6 +47,7 @@ EXPECTED_PACKAGES = {
     "tree-sitter-cli",
     "unzip",
     "uv",
+    "vips",
     "yazi",
     "zip",
     "zsh",
