@@ -17,15 +17,6 @@ update_gui_env() {
     fi
 }
 
-# Detect SSH connection and set tmux environment variable
-detect_ssh() {
-    if [ -n "$SSH_CLIENT" ] || [ -n "$SSH_TTY" ] || [ -n "$SSH_CONNECTION" ]; then
-        tmux set-environment -g TMUX_SSH_SESSION "1" 2>/dev/null || true
-    else
-        tmux set-environment -g TMUX_SSH_SESSION "0" 2>/dev/null || true
-    fi
-}
-
 SESSIONS="$(tmux list-sessions 2> /dev/null | head -n 1)"
 if [ -n "$SESSIONS" ]; then
     case "$SESSIONS" in
@@ -37,9 +28,7 @@ if [ -n "$SESSIONS" ]; then
             ;;
     esac
     update_gui_env
-    detect_ssh
     exec tmux a -d
 else
-    detect_ssh
     exec tmux
 fi
