@@ -1,0 +1,44 @@
+{
+  "disable_ai": true,
+  "telemetry": {
+    "diagnostics": false,
+    "metrics": false
+  },
+  "vim_mode": true,
+  "icon_theme": {
+    "mode": "system",
+    "light": "Zed (Default)",
+    "dark": "Zed (Default)"
+  },
+  "ui_font_size": 16,
+  "buffer_font_size": 15,
+  "theme": {
+    "mode": "system",
+    "light": "Ayu Dark",
+    "dark": "JetBrains New Dark"
+  },
+  "languages": {
+    "JSON": {
+      "format_on_save": "on",
+      "tab_size": 2
+    },
+    "Python": {
+      "formatter": "language_server",
+      "language_servers": [
+        "ruff",
+        "pyright"
+      ],
+      "preferred_line_length": 79,
+      "tab_size": 4,
+      "wrap_guides": [
+        79
+      ],
+      "venv": {
+        "directories": [".venv", "env"]
+      }
+    },
+    "SQL": {
+      "tab_size": 2
+    }
+  }
+}

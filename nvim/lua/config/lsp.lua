@@ -57,20 +57,42 @@ local servers = {
     cmd = { 'pyright-langserver', '--stdio' },
     filetypes = { 'python' },
     root_patterns = { 'pyproject.toml', 'setup.py', 'setup.cfg', 'requirements.txt', 'Pipfile', 'pyrightconfig.json' },
-    settings = {
-      pyright = {
-        -- Using Ruff's import organizer
-        disableOrganizeImports = true,
-      },
-      python = {
-        analysis = {
-          -- Ignore all files for analysis to exclusively use Ruff for linting
-          ignore = { '*' },
-          -- pyright's type checking is often wrong
-          typeCheckingMode = "off"
+    settings = function(root_dir, bufnr)
+      local python_path = nil
+      -- Start from the current file's directory and search up
+      local current_dir = vim.fn.expand('#' .. bufnr .. ':p:h')
+      local venv_names = { '.venv', 'env' }
+
+      local function find_venv(dir)
+        for _, venv_name in ipairs(venv_names) do
+          local venv_python = dir .. '/' .. venv_name .. '/bin/python'
+          if vim.fn.filereadable(venv_python) == 1 then
+            return venv_python
+          end
+        end
+        -- Check parent directory
+        local parent = vim.fn.fnamemodify(dir, ':h')
+        if parent ~= dir and parent ~= '/' then
+          return find_venv(parent)
+        end
+        return nil
+      end
+
+      python_path = find_venv(current_dir)
+
+      return {
+        pyright = {
+          disableOrganizeImports = true,
+        },
+        python = {
+          pythonPath = python_path,
+          analysis = {
+            ignore = { '*' },
+            typeCheckingMode = "off"
+          }
         }
       }
-    }
+    end
   }
 }
 
@@ -79,14 +101,24 @@ for server_name, config in pairs(servers) do
   vim.api.nvim_create_autocmd('FileType', {
     pattern = config.filetypes,
     callback = function(args)
-      vim.lsp.start(vim.tbl_deep_extend('force', {
+      local root_dir = vim.fs.root(args.buf, config.root_patterns)
+      local settings = config.settings
+      if type(settings) == 'function' then
+        settings = settings(root_dir, args.buf)
+      end
+
+      local client_config = vim.tbl_deep_extend('force', config, {
         name = server_name,
-        cmd = config.cmd,
-        root_dir = vim.fs.root(args.buf, config.root_patterns),
+        root_dir = root_dir,
+        settings = settings,
         on_attach = function(client, bufnr)
           on_attach(client, bufnr)
         end,
-      }, config))
+      })
+      -- Remove the function version of settings to avoid conflicts
+      client_config.settings = settings
+
+      vim.lsp.start(client_config)
     end,
   })
 end

@@ -1,0 +1,12 @@
+#!/usr/bin/env sh
+set -e
+
+if ! command -v zeditor > /dev/null; then
+    rm -rf ~/.config/zed
+    exit
+fi
+
+if [ "$(realpath ~/.config/zed)" != "$DOTFILES/zed" ]; then
+    rm -rf ~/.config/zed
+    ln -sT "${DOTFILES}/zed" ~/.config/zed
+fi

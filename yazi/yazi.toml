@@ -4,3 +4,11 @@ show_symlink = false
 
 [tasks]
 suppress_preload = true
+
+[plugin]
+preloaders = []
+prepend_previewers = [
+    { mime = "audio/*", run = "audio-preview" },
+    { mime = "image/*", run = "image-preview" },
+    { mime = "video/*", run = "video-preview" },
+]

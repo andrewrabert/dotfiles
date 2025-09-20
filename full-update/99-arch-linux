@@ -193,6 +193,7 @@ if HOSTNAME in ("mars", "phobos"):
             "virt-manager",
             "wine",
             "xboxdrv",
+            "zed",
         }
     )
 
