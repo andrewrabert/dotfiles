@@ -8,13 +8,13 @@ function M:peek(job)
 
 	ya.sleep(math.max(0, rt.preview.image_delay / 1000 + start - os.clock()))
 
-	-- Calculate areas - reserve space for preview command output
-	local text_lines = 5
+	-- Calculate areas - split 50%/50% between image and preview text
+	local half_height = math.floor(job.area.h / 2)
 	local image_area = ui.Rect {
 		x = job.area.x,
 		y = job.area.y,
 		w = job.area.w,
-		h = job.area.h - text_lines - 1
+		h = half_height
 	}
 
 	-- Show the image in the reduced area
@@ -32,9 +32,10 @@ function M:peek(job)
 		local output = child:wait_with_output()
 		if output and output.status.success and output.stdout and output.stdout ~= "" then
 			local lines = {}
+			local max_lines = job.area.h - half_height - 2  -- Use remaining space minus separator
 			for line in output.stdout:gmatch("[^\r\n]+") do
 				table.insert(lines, line)
-				if #lines >= text_lines - 1 then break end
+				if #lines >= max_lines then break end
 			end
 			
 			if #lines > 0 then
@@ -48,9 +49,9 @@ function M:peek(job)
 	if preview_text ~= "" then
 		local text_area = ui.Rect {
 			x = job.area.x,
-			y = job.area.y + image_area.h + 1,
+			y = job.area.y + half_height,
 			w = job.area.w,
-			h = text_lines
+			h = job.area.h - half_height
 		}
 		
 		ya.preview_widgets(job, {
