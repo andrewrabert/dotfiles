@@ -5,6 +5,7 @@ force-window=immediate
 audio-channels=stereo
 screenshot-format=png
 screenshot-png-compression=0
+autofit-larger=50%x50%
 
 [deinterlace]
 profile-cond=p["video-frame-info/interlaced"]
