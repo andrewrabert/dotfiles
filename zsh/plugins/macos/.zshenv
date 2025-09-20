@@ -6,6 +6,7 @@ if [[ $OSTYPE == darwin* ]]; then
     path=(
         "$path[@]"
         /Library/Apple/usr/bin
+        /usr/local/bin
     )
 
     export LANG=en_US.UTF-8
