@@ -1,7 +1,6 @@
 #!/usr/bin/env sh
 set -e
 cd ~/src/github/comfyanonymous/comfyui || exit 1
-. ./venv_system/bin/activate
 
 # 2025-05-12 fixes miopen-hip >= 6.3.3
 #export MIOPEN_FIND_MODE=1
@@ -9,4 +8,4 @@ cd ~/src/github/comfyanonymous/comfyui || exit 1
 # 2025-05-12 maybe needed when miopen-hip permission issues
 #export MIOPEN_DISABLE_CACHE=1
 
-exec python main.py --listen 0.0.0.0
+exec ./.venv/bin/python main.py --listen 0.0.0.0
