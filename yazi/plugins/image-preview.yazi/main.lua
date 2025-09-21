@@ -6,6 +6,26 @@ function M:peek(job)
 		url = job.file.url
 	end
 
+	-- Convert HEIF/HEIC/TIFF files to JPEG using vips
+	local temp_file_to_cleanup = nil
+	local file_ext = tostring(job.file.url):match("%.([^%.]+)$")
+	if file_ext and (file_ext:lower() == "heic" or file_ext:lower() == "heif" or file_ext:lower() == "tiff" or file_ext:lower() == "tif") then
+		local temp_file = "/tmp/yazi-convert-" .. ya.hash(tostring(job.file.url)) .. ".jpg"
+
+		-- Convert to JPEG using vips
+		local convert_cmd = Command("vips")
+			:arg("jpegsave")
+			:arg(tostring(job.file.url))
+			:arg(temp_file)
+			:stderr(Command.PIPED)
+
+		local convert_result = convert_cmd:spawn()
+		if convert_result and convert_result:wait().success then
+			url = Url(temp_file)
+			temp_file_to_cleanup = temp_file
+		end
+	end
+
 	ya.sleep(math.max(0, rt.preview.image_delay / 1000 + start - os.clock()))
 
 	-- Calculate areas - split 50%/50% between image and preview text
@@ -60,6 +80,11 @@ function M:peek(job)
 	else
 		ya.preview_widget(job, err)
 	end
+
+	-- Clean up temp file if created
+	if temp_file_to_cleanup then
+		Command("rm"):arg(temp_file_to_cleanup):spawn()
+	end
 end
 
 function M:seek() end
@@ -68,6 +93,27 @@ function M:preload(job)
 	local cache = ya.file_cache(job)
 	if not cache or fs.cha(cache) then
 		return true
+	end
+
+	-- Convert HEIF/HEIC/TIFF files to JPEG for preloading
+	local file_ext = tostring(job.file.url):match("%.([^%.]+)$")
+	if file_ext and (file_ext:lower() == "heic" or file_ext:lower() == "heif" or file_ext:lower() == "tiff" or file_ext:lower() == "tif") then
+		local temp_file = "/tmp/yazi-convert-" .. ya.hash(tostring(job.file.url)) .. ".jpg"
+
+		-- Convert to JPEG using vips
+		local convert_cmd = Command("vips")
+			:arg("jpegsave")
+			:arg(tostring(job.file.url))
+			:arg(temp_file)
+			:stderr(Command.PIPED)
+
+		local convert_result = convert_cmd:spawn()
+		if convert_result and convert_result:wait().success then
+			local result = ya.image_precache(Url(temp_file), cache)
+			-- Clean up temp file after caching
+			Command("rm"):arg(temp_file):spawn()
+			return result
+		end
 	end
 
 	return ya.image_precache(job.file.url, cache)
