@@ -7,5 +7,18 @@ _ssh_hosts() {
     _describe 'SSH hosts' hosts "$@"
 }
 
-# Use the original ssh completion but with our overridden _ssh_hosts
-source /usr/share/zsh/functions/Completion/Unix/_ssh
+# Find and source the original _ssh completion
+local ssh_completion
+for dir in "$fpath[@]"; do
+    if [[ -f "$dir/_ssh" && "$dir/_ssh" != "${(%):-%x}" ]]; then
+        ssh_completion="$dir/_ssh"
+        break
+    fi
+done
+
+if [[ -n "$ssh_completion" ]]; then
+    source "$ssh_completion"
+else
+    # Fallback if no original found
+    return 1
+fi
