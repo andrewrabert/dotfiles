@@ -75,7 +75,7 @@ function M:peek(job)
 		}
 		
 		ya.preview_widgets(job, {
-			ui.Text.parse(preview_text):area(text_area)
+			ui.Text.parse(preview_text):area(text_area):wrap(rt.preview.wrap == "yes" and ui.Wrap.YES or ui.Wrap.NO)
 		})
 	else
 		ya.preview_widget(job, err)

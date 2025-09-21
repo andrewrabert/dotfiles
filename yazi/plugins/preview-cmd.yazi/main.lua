@@ -37,7 +37,7 @@ function M:peek(job)
 		end
 	end
 
-	ya.preview_widget(job, text:area(job.area):wrap(ui.Wrap.YES))
+	ya.preview_widget(job, text:area(job.area):wrap(rt.preview.wrap == "yes" and ui.Wrap.YES or ui.Wrap.NO))
 end
 
 function M:seek() end

@@ -78,7 +78,7 @@ function M:peek(job)
 	
 	-- ALWAYS show this widget to completely overwrite the area
 	ya.preview_widgets(job, {
-		ui.Text.parse(full_text):area(text_area)
+		ui.Text.parse(full_text):area(text_area):wrap(rt.preview.wrap == "yes" and ui.Wrap.YES or ui.Wrap.NO)
 	})
 end
 

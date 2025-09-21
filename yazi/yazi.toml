@@ -12,6 +12,9 @@ preview_with_nvim = [
 	{ run = 'sh -c "preview \"$1\" | nvim -"', desc = "Preview with nvim", block = true },
 ]
 
+[preview]
+wrap = "no"
+
 [plugin]
 # too slow - especially on network mounts
 # this can also result in processes lingering after exit
