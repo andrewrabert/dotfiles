@@ -20,12 +20,17 @@ EOF
 }
 
 USE_COLOR=1
+FULL_PREVIEW=
 
 while [ $# -gt 0 ]; do
     case "$1" in
         -h|--help)
             show_help
             exit 0
+            ;;
+        --full)
+            FULL_PREVIEW=1
+            shift
             ;;
         --no-color)
             USE_COLOR=
@@ -210,7 +215,7 @@ if [ $# -gt 1 ]; then
     MULTI_PREVIEW=1
 fi
 while [ $# -gt 0 ]; do
-    if [ -n "$MULTI_PREVIEW" ]; then
+    if [ -n "$MULTI_PREVIEW" ] || [ -n "$FULL_PREVIEW" ]; then
         printf '#### preview: %s\n' "$1"
     fi
     preview_file "$1"
