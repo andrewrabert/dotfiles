@@ -27,7 +27,7 @@ if [ -n "$SESSIONS" ]; then
             fi
             ;;
     esac
-    update_gui_env
+    #update_gui_env
     exec tmux a -d
 else
     exec tmux
