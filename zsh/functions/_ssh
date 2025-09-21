@@ -11,7 +11,15 @@ _ssh_hosts() {
     #
     [[ -f ~/.ssh/config ]] || return
     config_lines=(${(f)"$(<~/.ssh/config)"})
-    hosts=(${${${${(M)config_lines:#[Hh]ost *}#*[[:space:]]}//[[:space:]]/ }:#*[*?]*})
+
+    # Match lines starting with "Host" or "host"
+    hosts=(${(M)config_lines:#[Hh]ost *})
+    # Remove "Host" keyword and leading whitespace
+    hosts=(${hosts#*[[:space:]]})
+    # Convert all whitespace to single spaces (flattens multiple hosts per line)
+    hosts=(${hosts//[[:space:]]/ })
+    # Remove entries containing wildcards
+    hosts=(${hosts:#*[*?]*})
 
     _describe 'SSH hosts' hosts "$@"
 }
