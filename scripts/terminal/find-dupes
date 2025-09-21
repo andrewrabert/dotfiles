@@ -62,7 +62,6 @@ def _pretty_json(data):
         indent=2,
         sort_keys=True,
         default=_default_json,
-        ensure_ascii=False,
     )
 
 

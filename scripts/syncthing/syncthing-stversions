@@ -1,0 +1,218 @@
+#!/usr/bin/env python3
+"""
+The stversions naming convention examples. All examples have a stversioned datetime of 20250921-021118:
+    thing -> thing~20250921-021118
+    .DS_Store -> ~20250921-021118.DS_Store
+    stuff~20250918-223004.json -> stuff~20250918-223004~20250921-021118.json
+    package.tar.gz -> package.tar~20250921-021118.gz
+"""
+
+import argparse
+import datetime
+import json
+import pathlib
+import re
+import shutil
+
+STVERSION_DATETIME_PATTERN = re.compile(r"~(\d{8}-\d{6})(?:(\..+))?$")
+
+
+def all_paths(*paths):
+    stack = []
+    found = set()
+    for path in paths:
+        if not path.exists():
+            raise ValueError(f"path does not exist: {path}")
+        elif path.is_file():
+            found.add(path)
+        elif path.is_dir():
+            stack.append(path)
+    while stack:
+        for path in stack.pop().iterdir():
+            found.add(path)
+            if path.is_dir():
+                stack.append(path)
+    return sorted(found)
+
+
+def process_path(stversions_path, keep_latest=False, before=None, after=None):
+    """Group stversion files by their original name and return as dict"""
+    by_original_path = {}
+
+    for path in all_paths(stversions_path):
+        path = path.relative_to(stversions_path)
+        filename = path.name
+
+        if match := STVERSION_DATETIME_PATTERN.search(filename):
+            dt = datetime.datetime.strptime(match.group(1), "%Y%m%d-%H%M%S")
+
+            if before and dt >= before:
+                continue
+            if after and dt <= after:
+                continue
+
+            original_name = filename[: match.start()] + (match.group(2) or "")
+            original_path = path.parent / original_name
+            by_original_path.setdefault(original_path, {})
+            by_original_path[original_path][path] = dt
+
+    if keep_latest:
+        for original_path, versions in by_original_path.items():
+            by_date = sorted(versions, key=lambda x: versions[x])
+            for file_path in by_date[:-1]:
+                versions.pop(file_path)
+                print("Deleted:", file_path)
+
+    return by_original_path
+
+
+def pretty_json(data):
+    """Return a pretty JSON string"""
+    return json.dumps(data, indent=2, sort_keys=True, default=_default_json, ensure_ascii=False)
+
+
+def _default_json(obj):
+    if isinstance(obj, set):
+        return sorted(obj)
+    elif isinstance(obj, pathlib.Path):
+        return str(obj)
+    elif hasattr(obj, "isoformat"):
+        return obj.isoformat()
+    else:
+        raise TypeError
+
+
+def add_common_args(parser):
+    """Add common arguments to subcommand parsers"""
+    parser.add_argument("path", type=pathlib.Path, help="Path to sync directory")
+    parser.add_argument(
+        "--before",
+        type=datetime.datetime.fromisoformat,
+        help="Filter stversion files created before this datetime (ISO format)",
+    )
+    parser.add_argument(
+        "--after",
+        type=datetime.datetime.fromisoformat,
+        help="Filter stversion files created after this datetime (ISO format)",
+    )
+
+
+def cmd_list(args):
+    """List stversion files grouped by original name"""
+    path_stver = args.path / ".stversions"
+    results = process_path(path_stver, before=args.before, after=args.after)
+
+    # Convert Path keys to strings for JSON serialization
+    json_results = {}
+    for original_path, versions in results.items():
+        json_results[str(original_path)] = {str(path): dt for path, dt in versions.items()}
+
+    print(pretty_json({str(path_stver): json_results}))
+
+
+def cmd_rm_keep_latest(args):
+    """Remove all stversion files except the latest one for each original file"""
+    path_stver = args.path / ".stversions"
+    results = process_path(path_stver, keep_latest=True, before=args.before, after=args.after)
+
+    # Convert Path keys to strings for JSON serialization
+    json_results = {}
+    for original_path, versions in results.items():
+        json_results[str(original_path)] = {str(path): dt for path, dt in versions.items()}
+
+    print(pretty_json({str(path_stver): json_results}))
+
+
+def cmd_restore_newest(args):
+    """Restore the newest version of each file to the output directory"""
+    path_stver = args.path / ".stversions"
+    results = process_path(path_stver, before=args.before, after=args.after)
+
+    for original_path, versions in results.items():
+        if versions:
+            # Find newest version by datetime
+            newest_path = max(versions.keys(), key=lambda p: versions[p])
+            source = path_stver / newest_path
+            dest = args.output / original_path
+
+            # Check if target exists and force is not specified
+            if dest.exists() and not args.force:
+                print(f"Error: {dest} already exists. Use -f/--force to overwrite.")
+                continue
+
+            # Create parent directories if needed
+            dest.parent.mkdir(parents=True, exist_ok=True)
+
+            # Copy the file
+            shutil.copy2(source, dest)
+            print(f"Restored: {source} -> {dest}")
+
+
+def cmd_restore_oldest(args):
+    """Restore the oldest version of each file to the output directory"""
+    path_stver = args.path / ".stversions"
+    results = process_path(path_stver, before=args.before, after=args.after)
+
+    for original_path, versions in results.items():
+        if versions:
+            # Find oldest version by datetime
+            oldest_path = min(versions.keys(), key=lambda p: versions[p])
+            source = path_stver / oldest_path
+            dest = args.output / original_path
+
+            # Check if target exists and force is not specified
+            if dest.exists() and not args.force:
+                print(f"Error: {dest} already exists. Use -f/--force to overwrite.")
+                continue
+
+            # Create parent directories if needed
+            dest.parent.mkdir(parents=True, exist_ok=True)
+
+            # Copy the file
+            shutil.copy2(source, dest)
+            print(f"Restored: {source} -> {dest}")
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Syncthing stversions management tool")
+    subparsers = parser.add_subparsers(dest="command", help="Available commands")
+
+    # list subcommand
+    list_parser = subparsers.add_parser("list", help="List stversion files grouped by original name")
+    add_common_args(list_parser)
+    list_parser.set_defaults(func=cmd_list)
+
+    # rm-keep-latest subcommand
+    rm_parser = subparsers.add_parser("rm-keep-latest", help="Remove all stversion files except the latest")
+    add_common_args(rm_parser)
+    rm_parser.set_defaults(func=cmd_rm_keep_latest)
+
+    # restore-newest subcommand
+    restore_newest_parser = subparsers.add_parser("restore-newest", help="Restore newest versions to output directory")
+    add_common_args(restore_newest_parser)
+    restore_newest_parser.add_argument("-o", "--output", type=pathlib.Path, required=True,
+                                      help="Output directory for restored files")
+    restore_newest_parser.add_argument("-f", "--force", action="store_true",
+                                      help="Overwrite existing files")
+    restore_newest_parser.set_defaults(func=cmd_restore_newest)
+
+    # restore-oldest subcommand
+    restore_oldest_parser = subparsers.add_parser("restore-oldest", help="Restore oldest versions to output directory")
+    add_common_args(restore_oldest_parser)
+    restore_oldest_parser.add_argument("-o", "--output", type=pathlib.Path, required=True,
+                                      help="Output directory for restored files")
+    restore_oldest_parser.add_argument("-f", "--force", action="store_true",
+                                      help="Overwrite existing files")
+    restore_oldest_parser.set_defaults(func=cmd_restore_oldest)
+
+    args = parser.parse_args()
+
+    if not hasattr(args, 'func'):
+        parser.print_help()
+        return
+
+    args.func(args)
+
+
+if __name__ == "__main__":
+    main()
