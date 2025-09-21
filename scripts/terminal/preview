@@ -1,9 +1,60 @@
 #!/usr/bin/env sh
 set -e
+
+show_help() {
+    cat << 'EOF'
+Usage: preview [OPTIONS] FILE...
+
+Preview files with syntax highlighting and metadata extraction.
+
+OPTIONS:
+  --no-color     Disable color output
+  -h, --help     Show this help message
+  --             End of options
+
+EXAMPLES:
+  preview file.txt
+  preview --no-color file.py
+  preview file1.txt file2.py file3.md
+EOF
+}
+
+USE_COLOR=1
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -h|--help)
+            show_help
+            exit 0
+            ;;
+        --no-color)
+            USE_COLOR=
+            shift
+            ;;
+        --)
+            shift
+            break
+            ;;
+        -*)
+            echo "error: unknown option '$1'" >&2
+            echo "Use -h or --help for usage information." >&2
+            exit 1
+            ;;
+        *)
+            break
+            ;;
+    esac
+done
+
 default_preview() {
     # set line count to avoid unnecessary page length.
     # 1024 is overkill, but using $(tput lines) is not reliable.
-    bat -r :1024 --color=always --plain -- "$1"
+    if [ -n "$USE_COLOR" ]; then
+        color_arg='always'
+    else
+        color_arg='never'
+    fi
+    bat --color="$color_arg" -r :1024 --plain -- "$1"
 }
 
 identify_without_filename() {
@@ -20,13 +71,18 @@ print_delimiter() {
 if [ $# -eq 0 ]; then
     echo 'error: missing argument' >&2
     exit 1
-elif [ -d "$1" ]; then
-    cd "$1" || exit 1
-    fd --color=always --maxdepth=1
-else
-    mimetype=''
-    USE_XDG_MIME=1
-    case "$1" in
+fi
+
+preview_file() {
+    local file="$1"
+    if [ -d "$file" ]; then
+        cd "$file" || exit 1
+        fd --color=always --maxdepth=1
+        return
+    fi
+    local mimetype=''
+    local USE_XDG_MIME=1
+    case "$file" in
         # xdg-mime incorrectly identifies all files ending with this as
         # application/x-trash
         # lf appends this when copying to a target that already exists.
@@ -39,9 +95,9 @@ else
         # on headless system.
         export XDG_CURRENT_DESKTOP="${XDG_CURRENT_DESKTOP:=kde}"
 
-        mimetype="$(xdg-mime query filetype "$1")"
+        mimetype="$(xdg-mime query filetype "$file")"
     else
-        mimetype="$(file --brief --mime-type "$1")"
+        mimetype="$(file --brief --mime-type "$file")"
     fi
     case "$mimetype" in
         application/gzip|\
@@ -69,63 +125,63 @@ else
         application/x-zstd-compressed-tar|\
         application/zip|\
         application/zstd)
-            extract -l -- "$1"
+            extract -l -- "$file"
             ;;
         application/x-cue)
-            extract -l -- "$1" 2>/dev/null || true
+            extract -l -- "$file" 2>/dev/null || true
             print_delimiter
-            cat -- "$1"
+            cat -- "$file"
             ;;
         application/java-archive)
-            extract --stdout -- "$1" 'META-INF/MANIFEST.MF'
+            extract --stdout -- "$file" 'META-INF/MANIFEST.MF'
             ;;
         audio/x-mod)
             # xdg-mime reports go.mod files as this
-            default_preview "$1"
+            default_preview "$file"
             ;;
         audio/x-mpegurl)
-            default_preview "$1"
+            default_preview "$file"
             ;;
         video/x-matroska)
-            mkv-preview "$1"
+            mkv-preview "$file"
             ;;
         audio/*|\
         video/*)
-            ffprobe -hide_banner -- "$1" 2>&1
+            ffprobe -hide_banner -- "$file" 2>&1
             ;;
         application/epub+zip)
-            epubmeta -- "$1"
+            epubmeta -- "$file"
             ;;
         application/vnd.microsoft.portable-executable|\
         application/x-dosexec|\
         application/x-ms-dos-executable|\
         application/x-msdownload)
-            exiftool -- "$1" || true
-            extract -l -- "$1"
+            exiftool -- "$file" || true
+            extract -l -- "$file"
             ;;
         application/pdf|\
         image/gif|\
         image/x-canon-cr2|\
         image/x-canon-cr3)
-            exiftool -- "$1"
+            exiftool -- "$file"
             ;;
         application/vnd.iccprofile)
-            iccdump -t desc "$1"
+            iccdump -t desc "$file"
             ;;
         image/jxl)
-            jxlinfo --verbose "$1"
+            jxlinfo --verbose "$file"
             ;;
         image/tiff)
-            tiffinfo -- "$1"
+            tiffinfo -- "$file"
             ;;
         image/x-portable-pixmap|\
         image/vnd.microsoft.icon)
-            identify_without_filename "$1"
+            identify_without_filename "$file"
             ;;
         image/*)
-            #chafa -f sixel -s "$2x$3" --animate off --polite on "$1"
-            identify_without_filename "$1"
-            exiv2 "$1" 2> /dev/null | grep -v \
+            #chafa -f sixel -s "$2x$3" --animate off --polite on "$file"
+            identify_without_filename "$file"
+            exiv2 "$file" 2> /dev/null | grep -v \
                 -e '^File name       : ' \
                 -e '^Image size      : ' \
                 -e '^File size       : ' \
@@ -133,18 +189,33 @@ else
                 || true
             ;;
         application/octet-stream|'')
-            case "$(printf %s "$1" | tr '[:upper:]' '[:lower:]')" in
+            case "$(printf %s "$file" | tr '[:upper:]' '[:lower:]')" in
                 *.rvz)
-                    extract -l -- "$1"
+                    extract -l -- "$file"
                     ;;
                 *.umx)
-                    ffprobe -hide_banner -- "$1" 2>&1
+                    ffprobe -hide_banner -- "$file" 2>&1
                     ;;
                 *)
-                    default_preview "$1"
+                    default_preview "$file"
             esac
             ;;
         *)
-            default_preview "$1"
+            default_preview "$file"
     esac
+}
+
+MULTI_PREVIEW=
+if [ $# -gt 1 ]; then
+    MULTI_PREVIEW=1
 fi
+while [ $# -gt 0 ]; do
+    if [ -n "$MULTI_PREVIEW" ]; then
+        printf '#### preview: %s\n' "$1"
+    fi
+    preview_file "$1"
+    shift
+    if [ $# -gt 0 ]; then
+        echo
+    fi
+done

@@ -42,6 +42,7 @@ function M:peek(job)
 	
 	-- Get preview command output
 	local cmd = Command("preview")
+		:arg("--")
 		:arg(tostring(job.file.url))
 		:stdout(Command.PIPED)
 		:stderr(Command.PIPED)

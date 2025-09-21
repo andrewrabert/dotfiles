@@ -19,7 +19,8 @@ function M:peek(job)
 		text = ui.Text(cached_content)
 	else
 		-- Run preview command and cache result
-		local output, err = Command("preview"):arg({ tostring(job.file.url) }):stdout(Command.PIPED):output()
+        -- colors break wrapping
+		local output, err = Command("preview"):arg({ "--no-color", "--", tostring(job.file.url) }):stdout(Command.PIPED):output()
 
 		if output and output.stdout then
 			text = ui.Text(output.stdout)
@@ -49,7 +50,7 @@ function M:preload(job)
 	end
 
 	-- Preload by running preview command and caching result
-	local output, err = Command("preview"):arg({ tostring(job.file.url) }):stdout(Command.PIPED):output()
+	local output, err = Command("preview"):arg({ "--", tostring(job.file.url) }):stdout(Command.PIPED):output()
 
 	if output and output.stdout then
 		local file = io.open(tostring(cache_file), "w")

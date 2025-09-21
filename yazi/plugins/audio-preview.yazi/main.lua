@@ -5,6 +5,7 @@ function M:peek(job)
     
     -- Run your preview command for audio files
     local cmd = Command("preview")
+        :arg("--")
         :arg(tostring(file))
         :stdout(Command.PIPED)
         :stderr(Command.PIPED)
