@@ -16,10 +16,8 @@ _ssh_hosts() {
     hosts=(${(M)${config_lines##[[:space:]]#}:#[Hh]ost *})
     # Remove "Host" keyword and following whitespace
     hosts=(${hosts#[Hh]ost[[:space:]]})
-    # Convert all whitespace to single spaces (flattens multiple hosts per line)
-    hosts=(${hosts//[[:space:]]/ })
-    # Trim trailing whitespace from each hostname
-    hosts=(${hosts%%[[:space:]]#})
+    # Split multiple hosts per line into separate array elements (handles multiple spaces/tabs)
+    hosts=(${(z)hosts})
     # Remove entries containing wildcards
     hosts=(${hosts:#*[*?]*})
 
