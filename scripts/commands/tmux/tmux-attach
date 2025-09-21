@@ -9,11 +9,6 @@ update_gui_env() {
         tmux set-environment -g XDG_RUNTIME_DIR "$XDG_RUNTIME_DIR" 2>/dev/null || true
         tmux set-environment -g DISPLAY "$DISPLAY" 2>/dev/null || true
 
-        # Update all existing panes with new environment
-        tmux list-panes -a -F '#{session_name}:#{window_index}.#{pane_index}' 2>/dev/null | \
-        while IFS= read pane; do
-            tmux send-keys -t "$pane" "export WAYLAND_DISPLAY='$WAYLAND_DISPLAY' XDG_RUNTIME_DIR='$XDG_RUNTIME_DIR' DISPLAY='$DISPLAY'" Enter 2>/dev/null || true
-        done
     fi
 }
 
@@ -27,7 +22,7 @@ if [ -n "$SESSIONS" ]; then
             fi
             ;;
     esac
-    #update_gui_env
+    update_gui_env
     exec tmux a -d
 else
     exec tmux
