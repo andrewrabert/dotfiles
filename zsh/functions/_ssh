@@ -11,8 +11,7 @@ _ssh_hosts() {
     #
     [[ -f ~/.ssh/config ]] || return
     config_lines=(${(f)"$(<~/.ssh/config)"})
-    hosts=(${${${(M)config_lines:#[Hh]ost *}#*[[:space:]]}//[[:space:]]/ })
-    hosts=(${hosts:#*[*?]*})
+    hosts=(${${${${(M)config_lines:#[Hh]ost *}#*[[:space:]]}//[[:space:]]/ }:#*[*?]*})
 
     _describe 'SSH hosts' hosts "$@"
 }
@@ -28,7 +27,7 @@ _source_parent_completion() {
         [[ -f "$candidate" ]] || continue
         if [[ "$candidate" == "$current_file" ]]; then
             found_current=true
-        elif [[ "$found_current" == true ]]; then
+        elif $found_current; then
             source "$candidate"
             return
         fi
