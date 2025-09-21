@@ -68,7 +68,9 @@ def process_path(stversions_path, keep_latest=False, before=None, after=None):
 
 def pretty_json(data):
     """Return a pretty JSON string"""
-    return json.dumps(data, indent=2, sort_keys=True, default=_default_json, ensure_ascii=False)
+    return json.dumps(
+        data, indent=2, sort_keys=True, default=_default_json, ensure_ascii=False
+    )
 
 
 def _default_json(obj):
@@ -105,7 +107,9 @@ def cmd_list(args):
     # Convert Path keys to strings for JSON serialization
     json_results = {}
     for original_path, versions in results.items():
-        json_results[str(original_path)] = {str(path): dt for path, dt in versions.items()}
+        json_results[str(original_path)] = {
+            str(path): dt for path, dt in versions.items()
+        }
 
     print(pretty_json({str(path_stver): json_results}))
 
@@ -113,12 +117,16 @@ def cmd_list(args):
 def cmd_rm_keep_latest(args):
     """Remove all stversion files except the latest one for each original file"""
     path_stver = args.path / ".stversions"
-    results = process_path(path_stver, keep_latest=True, before=args.before, after=args.after)
+    results = process_path(
+        path_stver, keep_latest=True, before=args.before, after=args.after
+    )
 
     # Convert Path keys to strings for JSON serialization
     json_results = {}
     for original_path, versions in results.items():
-        json_results[str(original_path)] = {str(path): dt for path, dt in versions.items()}
+        json_results[str(original_path)] = {
+            str(path): dt for path, dt in versions.items()
+        }
 
     print(pretty_json({str(path_stver): json_results}))
 
@@ -178,36 +186,56 @@ def main():
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
     # list subcommand
-    list_parser = subparsers.add_parser("list", help="List stversion files grouped by original name")
+    list_parser = subparsers.add_parser(
+        "list", help="List stversion files grouped by original name"
+    )
     add_common_args(list_parser)
     list_parser.set_defaults(func=cmd_list)
 
     # rm-keep-latest subcommand
-    rm_parser = subparsers.add_parser("rm-keep-latest", help="Remove all stversion files except the latest")
+    rm_parser = subparsers.add_parser(
+        "rm-keep-latest", help="Remove all stversion files except the latest"
+    )
     add_common_args(rm_parser)
     rm_parser.set_defaults(func=cmd_rm_keep_latest)
 
     # restore-newest subcommand
-    restore_newest_parser = subparsers.add_parser("restore-newest", help="Restore newest versions to output directory")
+    restore_newest_parser = subparsers.add_parser(
+        "restore-newest", help="Restore newest versions to output directory"
+    )
     add_common_args(restore_newest_parser)
-    restore_newest_parser.add_argument("-o", "--output", type=pathlib.Path, required=True,
-                                      help="Output directory for restored files")
-    restore_newest_parser.add_argument("-f", "--force", action="store_true",
-                                      help="Overwrite existing files")
+    restore_newest_parser.add_argument(
+        "-o",
+        "--output",
+        type=pathlib.Path,
+        required=True,
+        help="Output directory for restored files",
+    )
+    restore_newest_parser.add_argument(
+        "-f", "--force", action="store_true", help="Overwrite existing files"
+    )
     restore_newest_parser.set_defaults(func=cmd_restore_newest)
 
     # restore-oldest subcommand
-    restore_oldest_parser = subparsers.add_parser("restore-oldest", help="Restore oldest versions to output directory")
+    restore_oldest_parser = subparsers.add_parser(
+        "restore-oldest", help="Restore oldest versions to output directory"
+    )
     add_common_args(restore_oldest_parser)
-    restore_oldest_parser.add_argument("-o", "--output", type=pathlib.Path, required=True,
-                                      help="Output directory for restored files")
-    restore_oldest_parser.add_argument("-f", "--force", action="store_true",
-                                      help="Overwrite existing files")
+    restore_oldest_parser.add_argument(
+        "-o",
+        "--output",
+        type=pathlib.Path,
+        required=True,
+        help="Output directory for restored files",
+    )
+    restore_oldest_parser.add_argument(
+        "-f", "--force", action="store_true", help="Overwrite existing files"
+    )
     restore_oldest_parser.set_defaults(func=cmd_restore_oldest)
 
     args = parser.parse_args()
 
-    if not hasattr(args, 'func'):
+    if not hasattr(args, "func"):
         parser.print_help()
         return
 
