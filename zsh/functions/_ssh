@@ -7,8 +7,6 @@ zstyle ':completion:*:ssh:argument-1:*' tag-order hosts
 _ssh_hosts() {
     local hosts config_lines
 
-    #hosts=(${(f)"$(grep "^Host " ~/.ssh/config 2>/dev/null | awk '{for(i=2;i<=NF;i++) if($i !~ /[*?]/) print $i}')"})
-    #
     [[ -f ~/.ssh/config ]] || return
     config_lines=(${(f)"$(<~/.ssh/config)"})
 
