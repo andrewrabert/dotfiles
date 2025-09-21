@@ -6,4 +6,6 @@ prepend_keymap = [
     { on = "j", run = "arrow 1", description = "Next task" },
     { on = "<Space>", run = [ "toggle", "arrow 1" ], desc = "Toggle the current selection state" },
     { on = "r",         run = "rename --hovered=no --cursor=end",  desc = "Rename selected file(s)" },
+    { on = "<Tab>", run = "shell --block 'preview \"$@\" | nvim -M -n -c \"set buftype=nofile\" -'", desc = "Preview with nvim" },
+    { on = "e", run = "shell --block '$EDITOR \"$@\"'", desc = "Edit with $EDITOR" },
 ]

@@ -7,6 +7,11 @@ suppress_preload = true
 macro_workers = 1
 micro_workers = 1
 
+[opener]
+preview_with_nvim = [
+	{ run = 'sh -c "preview \"$1\" | nvim -"', desc = "Preview with nvim", block = true },
+]
+
 [plugin]
 # too slow - especially on network mounts
 # this can also result in processes lingering after exit
