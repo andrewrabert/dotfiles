@@ -5,12 +5,23 @@ _file-hash-recorder() {
 
   _arguments \
     '(-h --help)'{-h,--help}'[show this help message and exit]' \
-    '-o=[output json file]: :_files' \
-    '--no-progress' \
-    '--absolute-paths' \
-    '--archive-contents' \
-    '--show-dupes' \
-    '*:: :_files'
+    '--no-progress[disable progress display]' \
+    '--verbose[enable verbose output]' \
+    '--absolute-paths[use absolute paths]' \
+    '(-l --list)'{-l,--list}'[list mode]' \
+    '--verify[verify mode]' \
+    '--multihash[multihash mode]' \
+    '(-f --force)'{-f,--force}'[force operation]' \
+    '--mkdb[create the database if one does not already exist]' \
+    '(-c --compact)'{-c,--compact}'[output compact json]' \
+    '(-o --output)'{-o,--output}'[output file]:output file:_files' \
+    '(-n --num-procs)'{-n,--num-procs}'[number of processes]:number:' \
+    '--no-archive-contents[disable archive contents processing]' \
+    '--skip-errors[skip errors during processing]' \
+    '--dump-pickle[dump pickle data]' \
+    '--show-dupes[show duplicate files]' \
+    '--no-tmpdir[extract to tempdir when hashing archive contents]' \
+    '*:path:_files'
 
 }
 _file-hash-recorder
