@@ -1,0 +1,19 @@
+#autoload 
+
+_ssh_hosts() {
+    local hosts config_lines
+
+    [[ -f ~/.ssh/config ]] || return
+    config_lines=(${(f)"$(<~/.ssh/config)"})
+
+    # Strip leading whitespace and match lines starting with "Host" or "host"
+    hosts=(${(M)${config_lines##[[:space:]]#}:#[Hh]ost *})
+    # Remove "Host" keyword and following whitespace
+    hosts=(${hosts#[Hh]ost[[:space:]]})
+    # Split multiple hosts per line into separate array elements (handles multiple spaces/tabs)
+    hosts=(${(z)hosts})
+    # Remove entries containing wildcards
+    hosts=(${hosts:#*[*?]*})
+
+    _describe 'SSH hosts' hosts "$@"
+}

@@ -3,25 +3,6 @@
 # Limit ssh completions to hosts only
 zstyle ':completion:*:ssh:argument-1:*' tag-order hosts
 
-# Override _ssh_hosts to use our custom parsing
-_ssh_hosts() {
-    local hosts config_lines
-
-    [[ -f ~/.ssh/config ]] || return
-    config_lines=(${(f)"$(<~/.ssh/config)"})
-
-    # Strip leading whitespace and match lines starting with "Host" or "host"
-    hosts=(${(M)${config_lines##[[:space:]]#}:#[Hh]ost *})
-    # Remove "Host" keyword and following whitespace
-    hosts=(${hosts#[Hh]ost[[:space:]]})
-    # Split multiple hosts per line into separate array elements (handles multiple spaces/tabs)
-    hosts=(${(z)hosts})
-    # Remove entries containing wildcards
-    hosts=(${hosts:#*[*?]*})
-
-    _describe 'SSH hosts' hosts "$@"
-}
-
 # Generic function to source the parent completion in fpath
 _source_parent_completion() {
     local completion_name="$1"
