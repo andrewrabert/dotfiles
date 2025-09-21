@@ -41,7 +41,6 @@ if HOSTNAME in ("sol", "mars", "phobos"):
             "curlie",
             "dash",
             "devtools",
-            "direnv",
             "dosfstools",
             "e2fsprogs",
             "epub-tools-bin",

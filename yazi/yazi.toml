@@ -4,11 +4,22 @@ show_symlink = false
 
 [tasks]
 suppress_preload = true
+macro_workers = 1
+micro_workers = 1
 
 [plugin]
-preloaders = []
-prepend_previewers = [
-    { mime = "audio/*", run = "audio-preview" },
-    { mime = "image/*", run = "image-preview" },
-    { mime = "video/*", run = "video-preview" },
+# too slow - especially on network mounts
+# this can also result in processes lingering after exit
+fetchers = [
+	{ id = "mime", name = "*", run = "dummy-mime", prio = "high" },
 ]
+preloaders = []
+previewers = [
+	{ name = "*/", run = "folder" },
+    { mime = "*", run = "preview-cmd" },
+]
+#prepend_previewers = [
+#    { mime = "audio/*", run = "audio-preview" },
+#    { mime = "image/*", run = "image-preview" },
+#    { mime = "video/*", run = "video-preview" },
+#]
