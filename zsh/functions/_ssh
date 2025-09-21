@@ -1,5 +1,8 @@
 #compdef ssh
 
+# Limit ssh completions to hosts only
+zstyle ':completion:*:ssh:argument-1:*' tag-order hosts
+
 # Override _ssh_hosts to use our custom parsing
 _ssh_hosts() {
     local hosts
