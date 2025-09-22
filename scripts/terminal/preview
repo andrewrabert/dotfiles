@@ -202,7 +202,8 @@ preview_file() {
                     ffprobe -hide_banner -- "$file" 2>&1
                     ;;
                 *)
-                    default_preview "$file"
+                    echo "binary file $file"
+                    xxd -l 65536 -- "$file"
             esac
             ;;
         *)
