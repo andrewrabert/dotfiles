@@ -923,7 +923,9 @@ class cli_7zip:
                     if parts and parts[0] == b"D":
                         current["is_dir"] = True
                 case "Size":
-                    current["size"] = int(value)
+                    # empty for .dmg files
+                    if value:
+                        current["size"] = int(value)
                 case "Modified":
                     dt = value.decode()
                     if not dt:
