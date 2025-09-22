@@ -90,7 +90,6 @@ def get_url(path, lines):
         url = remote_url
     elif ":" in remote_url:
         host, urlpath = remote_url.split(":", maxsplit=1)
-        print(host, urlpath)
         try:
             hostname = ssh_hostmap()[host]
         except KeyError:
