@@ -19,7 +19,7 @@ fetchers = [
 preloaders = []
 previewers = [
 	{ name = "*/", run = "folder" },
-    { mime = "*", run = "piper -- preview $1" },
+    { mime = "*", run = 'piper -- preview "$1"' },
 ]
 #prepend_previewers = [
 #    { mime = "audio/*", run = "audio-preview" },
