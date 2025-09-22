@@ -86,6 +86,7 @@ if HOSTNAME in ("sol", "mars", "phobos"):
             "perl-image-exiftool",
             "pigz",
             "pixz",
+            "prettier",
             "pwgen",
             "pyalpm",
             "pyright",

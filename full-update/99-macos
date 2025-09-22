@@ -37,6 +37,7 @@ EXPECTED_PACKAGES = {
     "node",
     "openssh",
     "oxipng",
+    "prettier",
     "pyright",
     "rar",
     "ripgrep",
