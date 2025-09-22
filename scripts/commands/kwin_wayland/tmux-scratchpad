@@ -1,7 +1,7 @@
 #!/bin/sh
 while true; do 
     START="$(date +%s)"
-    foot --title tmux-scratchpad --app-id tmux-scratchpad -- zsh -ic 'tmux-attach --prompt'
+    foot --title tmux --app-id tmux-scratchpad -- zsh -ic 'tmux-attach --prompt'
     END="$(date +%s)"
     if [ "${START}" = "${END}" ]; then
         echo 'warning: application exited immediately' >&2
