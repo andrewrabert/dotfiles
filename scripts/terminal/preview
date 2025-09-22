@@ -129,6 +129,7 @@ preview_file() {
         application/x-xz-compressed-tar|\
         application/x-zstd-compressed-tar|\
         application/zip|\
+        application/zlib|\
         application/zstd)
             extract -l -- "$file"
             ;;
