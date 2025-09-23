@@ -1,14 +1,13 @@
-; focused = [Colors:Header].BackgoundNormal
-; unfocused = [Colors:Header][Inactive].BackgoundNormal
-
+; focused titlebar
 [Colors:Header]
-BackgroundNormal=67,76,94
+BackgroundNormal=52,52,52
 ForegroundNormal=252,252,252
 
+; unfocused titlebar
 [Colors:Header][Inactive]
-BackgroundNormal=59,66,82
+BackgroundNormal=37,37,37
 ForegroundNormal=126,126,126
 
 [General]
-ColorScheme=ApplicationKrita
-Name=Application - Krita
+ColorScheme=ApplicationObsidian
+Name=Application - Obsidian
