@@ -1,11 +1,11 @@
 ; focused titlebar
 [Colors:Header]
-BackgroundNormal=52,52,52
+BackgroundNormal=54,54,54
 ForegroundNormal=252,252,252
 
 ; unfocused titlebar
 [Colors:Header][Inactive]
-BackgroundNormal=37,37,37
+BackgroundNormal=38,38,38
 ForegroundNormal=126,126,126
 
 [General]
