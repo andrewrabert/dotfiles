@@ -20,6 +20,8 @@ EOF
 }
 
 USE_COLOR=1
+USE_CACHE=1
+USE_ENV=
 FULL_PREVIEW=
 
 while [ $# -gt 0 ]; do
@@ -36,6 +38,14 @@ while [ $# -gt 0 ]; do
             USE_COLOR=
             shift
             ;;
+        --no-cache)
+            USE_CACHE=
+            shift
+            ;;
+        --use-env)
+            USE_ENV=1
+            shift
+            ;;
         --)
             shift
             break
@@ -50,6 +60,11 @@ while [ $# -gt 0 ]; do
             ;;
     esac
 done
+
+if [ -n "$USE_ENV" ]; then
+    USE_COLOR="$PREVIEW_USE_COLOR"
+    FULL_PREVIEW="$PREVIEW_FULL_PREVIEW"
+fi
 
 default_preview() {
     # set line count to avoid unnecessary page length.
@@ -220,7 +235,20 @@ while [ $# -gt 0 ]; do
     if [ -n "$MULTI_PREVIEW" ] || [ -n "$FULL_PREVIEW" ]; then
         printf '#### preview: %s\n' "$1"
     fi
-    preview_file "$1"
+    if [ -n "$USE_CACHE" ]; then
+        name="preview"
+        if [ -n "$USE_COLOR" ]; then
+            name="${name}-color"
+        fi
+        if [ -n "$FULL_PREVIEW" ]; then
+            name="${name}-full"
+        fi
+        export PREVIEW_FULL_PREVIEW="$FULL_PREVIEW"
+        export PREVIEW_USE_COLOR="$USE_COLOR"
+        pathcacher --path "$1" --name "$name" -- preview --no-cache -- "$1"
+    else
+        preview_file "$1"
+    fi
     shift
     if [ $# -gt 0 ]; then
         echo

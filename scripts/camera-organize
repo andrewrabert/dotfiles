@@ -9,6 +9,7 @@ Camera file organization tool with async processing.
 # ]
 # ///
 """
+
 import argparse
 import asyncio
 import datetime
@@ -39,6 +40,8 @@ DELETABLE_EXT = {
 IGNORABLE_EXT = {
     ".sh",
 }
+
+BY_MONTH = False
 
 
 async def immich_scan():
@@ -194,13 +197,20 @@ async def process_file(path, target_root, dry_run):
 
     try:
         dt = await parse_date(path)
-        target_path = target_path.joinpath(
-            str(dt.year), str(dt.month).zfill(2), str(dt.day).zfill(2), path.name
-        )
+        if BY_MONTH:
+            target_path = target_path.joinpath(
+                str(dt.year), str(dt.month).zfill(2), path.name
+            )
+        else:
+            target_path = target_path.joinpath(
+                str(dt.year), str(dt.month).zfill(2), str(dt.day).zfill(2), path.name
+            )
     except Exception:
         target_path = target_path.joinpath("unknown", path.name)
 
     target_path = target_path.with_suffix(target_path.suffix.lower())
+    while target_path.exists():
+        target_path = target_path.with_name(target_path.stem + "_" + target_path.suffix)
     if target_path.exists():
         raise RuntimeError(f"path exists: {path} {target_path}")
     if not dry_run:
