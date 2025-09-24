@@ -67,46 +67,53 @@ class SrcName(enum.StrEnum):
 
 def parse_repo(repo):
     repo = repo.lower()
-    parsed = urllib.parse.urlparse(repo)
-    path = parsed.path.strip("/")
-    if parsed.scheme in ("http", "https"):
-        # TODO: parse .ssh/config for HostName
-        match parsed.netloc:
-            case "codeberg.org":
-                host = SrcName.CODEBERG
-                parts = path.split("/")
-                if len(parts) < 2:
-                    raise RuntimeError("invalid codeberg url")
-                path = "/".join(parts[0:])
-            case "github.com" | "www.github.com":
-                host = SrcName.GITHUB
-                parts = path.split("/")
-                if len(parts) < 2:
-                    raise RuntimeError("invalid github url")
-                path = "/".join(parts[0:2])
-            case "gitlab.com" | "www.gitlab.com":
-                host = SrcName.GITLAB
-                parts = path.split("/")
-                if len(parts) < 2:
-                    raise RuntimeError("invalid gitlab url")
-                path = "/".join(parts[0:])
-            case "aur.archlinux.org":
-                host = SrcName.ARCH_LINUX_AUR
-                parts = path.split("/")
-                if parts[0] == "packages":
-                    path = parts[1]
-            case "git.nullsum.net":
-                host = SrcName.NULLSUM_NET
-                parts = path.split("/")
-                if len(parts) < 2:
-                    raise RuntimeError("invalid git.nullsum.net url")
-                path = "/".join(parts)
-            case _:
-                raise NotImplementedError(f"unhandled netloc: {parsed.netloc}")
-    elif parsed.scheme:
-        host = parsed.scheme
+    if ":" not in repo:
+        parts = repo.split("/")
+        if len(parts) < 3:
+            raise ValueError("invalid repo")
+        host = parts[0]
+        path = "/".join(parts[1:])
     else:
-        raise ValueError("missing git host")
+        parsed = urllib.parse.urlparse(repo)
+        path = parsed.path.strip("/")
+        if parsed.scheme in ("http", "https"):
+            # TODO: parse .ssh/config for HostName
+            match parsed.netloc:
+                case "codeberg.org":
+                    host = SrcName.CODEBERG
+                    parts = path.split("/")
+                    if len(parts) < 2:
+                        raise RuntimeError("invalid codeberg url")
+                    path = "/".join(parts[0:])
+                case "github.com" | "www.github.com":
+                    host = SrcName.GITHUB
+                    parts = path.split("/")
+                    if len(parts) < 2:
+                        raise RuntimeError("invalid github url")
+                    path = "/".join(parts[0:2])
+                case "gitlab.com" | "www.gitlab.com":
+                    host = SrcName.GITLAB
+                    parts = path.split("/")
+                    if len(parts) < 2:
+                        raise RuntimeError("invalid gitlab url")
+                    path = "/".join(parts[0:])
+                case "aur.archlinux.org":
+                    host = SrcName.ARCH_LINUX_AUR
+                    parts = path.split("/")
+                    if parts[0] == "packages":
+                        path = parts[1]
+                case "git.nullsum.net":
+                    host = SrcName.NULLSUM_NET
+                    parts = path.split("/")
+                    if len(parts) < 2:
+                        raise RuntimeError("invalid git.nullsum.net url")
+                    path = "/".join(parts)
+                case _:
+                    raise NotImplementedError(f"unhandled netloc: {parsed.netloc}")
+        elif parsed.scheme:
+            host = parsed.scheme
+        else:
+            raise ValueError("missing git host")
 
     repo_path = path
     repo_dir = CODE_ROOT_DIR / host.lower() / repo_path.lower()
