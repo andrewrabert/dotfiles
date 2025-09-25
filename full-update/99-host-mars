@@ -1,22 +1,25 @@
 #!/usr/bin/env python3
-import socket
+import os
 import subprocess
 
 
 def is_unit_enabled(name, user=False):
     proc = subprocess.run(
-        ['systemctl',
-         '--user' if user else '--system',
-         'show',
-         '--property=UnitFileState',
-         '--',
-         name],
+        [
+            "systemctl",
+            "--user" if user else "--system",
+            "show",
+            "--property=UnitFileState",
+            "--",
+            name,
+        ],
         stdout=subprocess.PIPE,
-        check=True)
+        check=True,
+    )
     match proc.stdout.decode().strip():
-        case 'UnitFileState=enabled':
+        case "UnitFileState=enabled":
             return True
-        case 'UnitFileState=disabled':
+        case "UnitFileState=disabled":
             return False
         case _:
             raise RuntimeError
@@ -25,28 +28,30 @@ def is_unit_enabled(name, user=False):
 def enable_unit(name, now=False, user=False):
     if is_unit_enabled(name, user=user):
         return
-    print(f'Enabling unit {name} (user={user})')
+    print(f"Enabling unit {name} (user={user})")
     args = []
     if not user:
-        args.append('sudo')
+        args.append("sudo")
 
-    args.extend([
-        'systemctl',
-        '--user' if user else '--system',
-        'enable',
-    ])
+    args.extend(
+        [
+            "systemctl",
+            "--user" if user else "--system",
+            "enable",
+        ]
+    )
     if now:
-        args.append('--now')
-    args.extend(['--', name])
+        args.append("--now")
+    args.extend(["--", name])
     subprocess.run(args, check=True)
 
 
 def main():
-    if socket.gethostname() != 'mars':
+    if os.environ["HOST"] != "mars":
         return
 
-    enable_unit('syncthing', user=True)
+    enable_unit("syncthing", user=True)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

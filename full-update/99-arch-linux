@@ -3,9 +3,9 @@ import argparse
 import asyncio
 import grp
 import hashlib
+import os
 import pathlib
 import shutil
-import socket
 import subprocess
 import sys
 
@@ -18,7 +18,7 @@ except ImportError:
     subprocess.run(["yay", "-S", "--noconfirm", "pyalpm"], check=True)
     import pyalpm
 
-HOSTNAME = socket.gethostname()
+HOSTNAME = os.environ["HOST"]
 
 EXPECTED_PACKAGES = {
     "logrotate",

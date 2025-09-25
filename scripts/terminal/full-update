@@ -17,6 +17,8 @@ usage: full-update [script ...]
 EOF
 }
 
+export HOST="$(zsh -lic 'if [ -f ~/.zshenv.local ]; then . ~/.zshenv.local; fi && echo "$HOST"')"
+
 BREW_GNUBIN='/opt/homebrew/opt/coreutils/libexec/gnubin'
 if [ -d "$BREW_GNUBIN" ]; then
 	export PATH="$BREW_GNUBIN:$PATH"

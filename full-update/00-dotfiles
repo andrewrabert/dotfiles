@@ -57,12 +57,6 @@ YELLOW='\033[1;34m'
 RESET='\033[0m'
 BOLD='\033[1m'
 
-HOSTNAME="$(hostname)"
-if [ -z "$HOSTNAME" ]; then
-    echo 'error: hostname not installed' >&2
-    exit 1
-fi
-
 update_non_user() {
     dotfiles_root="$1"
     tag="$2"
@@ -93,7 +87,7 @@ update_repo() {
     if [ -n "$INSTALL_SYSTEM" ]; then
         printf "%bUpdating non-user files %s (%s)...%b\n" "$MAGENTA" "$1" "$dotfiles_root" "$RESET"
         if command -v sudo > /dev/null; then
-            update_non_user "$dotfiles_root" "$HOSTNAME"
+            update_non_user "$dotfiles_root" "$HOST"
 
             if command -v pacman > /dev/null; then
                 update_non_user "$dotfiles_root" _archlinux

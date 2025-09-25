@@ -1,17 +1,12 @@
-#!/usr/bin/env sh
-if ! command -v discord > /dev/null; then
-    exit
-fi
-
-python << EOF
+#!/usr/bin/env python3
 import json
 import pathlib
+import shutil
 
-path = pathlib.Path('~/.config/discord/settings.json').expanduser()
-if path.exists():
-    settings = json.loads(path.read_text())
-    if settings.get('SKIP_HOST_UPDATE') != True:
-        settings['SKIP_HOST_UPDATE'] = True
-        path.write_text(json.dumps(settings))
-
-EOF
+if shutil.which("discord"):
+    path = pathlib.Path("~/.config/discord/settings.json").expanduser()
+    if path.exists():
+        settings = json.loads(path.read_text())
+        if not settings.get("SKIP_HOST_UPDATE"):
+            settings["SKIP_HOST_UPDATE"] = True
+            path.write_text(json.dumps(settings))

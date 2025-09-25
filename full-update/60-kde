@@ -2,55 +2,52 @@
 import os
 import pathlib
 import shutil
-import socket
 import subprocess
 
 
-HOSTNAME = socket.gethostname().strip()
+HOSTNAME = os.environ["HOST"]
 
-HOME = pathlib.Path('~').expanduser()
-CONFIG = HOME / '.config'
-LOCAL_SHARE = HOME / '.local' / 'share'
+HOME = pathlib.Path("~").expanduser()
+CONFIG = HOME / ".config"
+LOCAL_SHARE = HOME / ".local" / "share"
 
-DOTFILES = pathlib.Path(os.environ['DOTFILES'])
+DOTFILES = pathlib.Path(os.environ["DOTFILES"])
 
-if DOTFILES_PRIVATE := os.environ.get('DOTFILES_PRIVATE', None):
+if DOTFILES_PRIVATE := os.environ.get("DOTFILES_PRIVATE", None):
     DOTFILES_PRIVATE = pathlib.Path(DOTFILES_PRIVATE)
 
 LINKS = {
-    CONFIG / 'kdesurc':
-        DOTFILES / 'kde' / 'kdesurc',
-    CONFIG / 'kuriikwsfilterrc':
-        DOTFILES / 'kde' / 'kuriikwsfilterrc',
-
-    LOCAL_SHARE / 'icons':
-        DOTFILES / 'kde' / 'icons',
-    LOCAL_SHARE / 'applications':
-        DOTFILES / 'kde' / 'applications',
-    LOCAL_SHARE / 'kwin':
-        DOTFILES / 'kde' / 'kwin',
-    LOCAL_SHARE / 'color-schemes':
-        DOTFILES / 'kde' / 'color-schemes',
+    CONFIG / "kdesurc": DOTFILES / "kde" / "kdesurc",
+    CONFIG / "kuriikwsfilterrc": DOTFILES / "kde" / "kuriikwsfilterrc",
+    LOCAL_SHARE / "icons": DOTFILES / "kde" / "icons",
+    LOCAL_SHARE / "applications": DOTFILES / "kde" / "applications",
+    LOCAL_SHARE / "kwin": DOTFILES / "kde" / "kwin",
+    LOCAL_SHARE / "color-schemes": DOTFILES / "kde" / "color-schemes",
 }
 
 if DOTFILES_PRIVATE is not None:
-    LINKS.update({
-        LOCAL_SHARE / 'kf6' / 'searchproviders':
-            DOTFILES_PRIVATE / 'kde' / 'searchproviders',
-    })
+    LINKS.update(
+        {
+            LOCAL_SHARE / "kf6" / "searchproviders": DOTFILES_PRIVATE
+            / "kde"
+            / "searchproviders",
+        }
+    )
 
 
 match HOSTNAME:
-    case 'mars':
-        LINKS.update({
-            CONFIG / 'autostart':
-                DOTFILES / 'kde' / 'autostart' / 'mars',
-        })
-    case 'phobos':
-        LINKS.update({
-            CONFIG / 'autostart':
-                DOTFILES / 'kde' / 'autostart' / 'phobos',
-        })
+    case "mars":
+        LINKS.update(
+            {
+                CONFIG / "autostart": DOTFILES / "kde" / "autostart" / "mars",
+            }
+        )
+    case "phobos":
+        LINKS.update(
+            {
+                CONFIG / "autostart": DOTFILES / "kde" / "autostart" / "phobos",
+            }
+        )
 
 
 def delete(path):
@@ -73,37 +70,32 @@ def symlink(source, target):
 
 def copy_into_replace_contents(source, target):
     target.mkdir(exist_ok=True, parents=True)
-    subprocess.run(
-        ['rsync', '-avq', '--delete',
-         f'{source}/', target],
-        check=True)
+    subprocess.run(["rsync", "-avq", "--delete", f"{source}/", target], check=True)
 
 
 def copy_replace(source, target):
     target.parent.mkdir(exist_ok=True, parents=True)
-    subprocess.run(
-        ['rsync', '-avq', source, target],
-        check=True)
+    subprocess.run(["rsync", "-avq", source, target], check=True)
 
 
 def main():
-    if not shutil.which('plasmashell'):
+    if not shutil.which("plasmashell"):
         exit()
 
     for target, source in LINKS.items():
         symlink(target, source)
 
     if HOSTNAME:
-        source = DOTFILES / 'kde' / 'applications_host' / HOSTNAME
-        target = LOCAL_SHARE / 'applications' / 'dotfiles-localhost'
+        source = DOTFILES / "kde" / "applications_host" / HOSTNAME
+        target = LOCAL_SHARE / "applications" / "dotfiles-localhost"
         if source.exists():
             copy_into_replace_contents(source, target)
         else:
             delete(target)
 
-    if HOSTNAME in ('mars', 'phobos'): 
-        subprocess.run(['update-desktop-database'], check=True)
+    if HOSTNAME in ("mars", "phobos"):
+        subprocess.run(["update-desktop-database"], check=True)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

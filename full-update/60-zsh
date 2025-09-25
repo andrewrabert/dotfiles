@@ -8,9 +8,8 @@ else
     ln -sfT "${DOTFILES}/zsh/.zshenv" ~/.zshenv
     ln -sfT "${DOTFILES}/zsh/.zshrc" ~/.zshrc
 
-    HOSTNAME="$(hostname)"
-    if [ -n "$HOSTNAME" ] && [ -f "${DOTFILES}/zsh/hosts/${HOSTNAME}/.zlogin" ]; then
-        ln -sfT "${DOTFILES}/zsh/hosts/${HOSTNAME}/.zlogin" ~/.zlogin
+    if [ -n "$HOST" ] && [ -f "${DOTFILES}/zsh/hosts/${HOST}/.zlogin" ]; then
+        ln -sfT "${DOTFILES}/zsh/hosts/${HOST}/.zlogin" ~/.zlogin
     fi
     rm -f ~/.zcompdump
     zsh -ic 'echo -n'

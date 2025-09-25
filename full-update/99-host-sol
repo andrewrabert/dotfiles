@@ -1,6 +1,6 @@
 #!/usr/bin/env sh
 set -e 
-if [ "$(hostname)" != 'sol' ]; then
+if [ "$HOST" != 'sol' ]; then
     exit
 fi
 

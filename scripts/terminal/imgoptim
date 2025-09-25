@@ -33,6 +33,7 @@ import json
 import os
 import pathlib
 import signal
+import shutil
 import sys
 import tempfile
 import types
@@ -509,7 +510,36 @@ async def is_animated_gif(path):
     return int(n_pages) > 1
 
 
-async def convert_to_jpeg(source, dest):
+async def convert_to_jpeg(*args, **kwargs):
+    if shutil.which("cjpegli"):
+        return await convert_to_jpeg_cjpegli(*args, **kwargs)
+    else:
+        return await convert_to_jpeg_cjpeg(*args, **kwargs)
+
+
+async def convert_to_jpeg_cjpeg(source, dest):
+    args = [
+        "cjpeg",
+        "-quality",
+        str(CONFIG.jpeg.quality),
+        source,
+        dest,
+    ]
+    proc = await asyncio.create_subprocess_exec(
+        *args,
+        stderr=asyncio.subprocess.DEVNULL,
+    )
+    await proc.wait()
+    if proc.returncode != 0:
+        raise ProcessError(proc)
+
+    data = await asyncio.to_thread(
+        mozjpeg_lossless_optimization.optimize, dest.read_bytes()
+    )
+    dest.write_bytes(data)
+
+
+async def convert_to_jpeg_cjpegli(source, dest):
     args = [
         "cjpegli",
         f"--quality={CONFIG.jpeg.quality}",
