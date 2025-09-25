@@ -172,6 +172,7 @@ if HOSTNAME in ("mars", "phobos"):
             "krita",
             "mkvtoolnix-gui",
             "mtpfs",
+            "ntfydesktop",
             "obs-studio",
             "okular",
             "plasma6-runners-emojirunner",
