@@ -28,9 +28,14 @@ while [ $# -gt 0 ]; do
             exit
             ;;
         *)
-            script="$1"
+            script_name="$1"
             shift
-            run_script "$DOTFILES"/full-update/"$script" "$@"
+            for d in "$DOTFILES" $(env | grep ^DOTFILES_ | sed 's/.*=//g' | sort); do
+                script="${d}/full-update/${script_name}"
+                if [ -f "$script" ]; then
+                    run_script "$script" "$@"
+                fi
+            done
             exit
             ;;
     esac
