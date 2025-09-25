@@ -7,8 +7,8 @@ export EDITOR=nvim
 export LESSHISTFILE=/dev/null
 export OPENER=open
 
-if command -v termux-info > /dev/null; then
-    export HOST=termux
+if [ -e ~/.zshenv.local ]; then
+    . ~/.zshenv.local
 fi
 
 for plugin in "$DOTFILES"/zsh/plugins/*/.zshenv(N); do
