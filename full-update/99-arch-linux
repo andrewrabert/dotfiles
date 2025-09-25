@@ -76,6 +76,7 @@ if HOSTNAME in ("sol", "mars", "phobos"):
             "neovim",
             "nsz",
             "ntfs-3g",
+            "ntfysh",
             "openbsd-netcat",
             "openssh",
             "opus-tools",
