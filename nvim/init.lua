@@ -94,7 +94,7 @@ vim.api.nvim_create_autocmd("BufWritePost", {
   group = augroup,
   pattern = "*",
   callback = function()
-    vim.fn.system("lmk")
+    vim.fn.jobstart("lmk")
   end,
 })
 
