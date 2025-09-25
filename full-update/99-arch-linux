@@ -159,7 +159,6 @@ if HOSTNAME in ("mars", "phobos"):
             "docker-compose",
             "dolphin",
             "element-desktop",
-            "firefoxpwa",
             "foliate",
             "foot",
             "fooyin",
