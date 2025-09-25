@@ -183,6 +183,7 @@ if HOSTNAME in ("mars", "phobos"):
             "spectacle",
             "tremotesf",
             "virt-manager",
+            "vlc",
             "wine",
             "xboxdrv",
             "zed",
