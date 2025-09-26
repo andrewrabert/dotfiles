@@ -1,0 +1,13 @@
+#compdef mkv-language-strip
+
+typeset -A opt_args
+
+_mkv-language-strip() {
+  _arguments \
+    '(-h --help)'{-h,--help}'[show this help message and exit]' \
+    '*'{-k,--keep}'[Language to keep]:language:' \
+    '(-d --dryrun)'{-d,--dryrun}'[dry run mode]' \
+    '*:mkv file:_files -g "*.mkv(-.)"'
+}
+
+_mkv-language-strip
