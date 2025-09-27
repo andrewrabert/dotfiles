@@ -3,6 +3,9 @@ require("config.lazy")
 require("config.cmp")
 require("config.lsp")
 
+local lmk = require("lmk")
+
+
 vim.o.ruler = true
 vim.o.tabstop = 4
 vim.o.shiftwidth = 4
@@ -81,6 +84,7 @@ vim.keymap.set("n", "<leader>dt", function()
     vim.diagnostic.enable(not vim.diagnostic.is_enabled())
 end)
 
+local augroup = vim.api.nvim_create_augroup("Main", {})
 
 vim.api.nvim_create_autocmd("StdinReadPre", {
   group = augroup,
@@ -94,7 +98,7 @@ vim.api.nvim_create_autocmd("BufWritePost", {
   group = augroup,
   pattern = "*",
   callback = function()
-    vim.fn.jobstart("lmk")
+    lmk.notify()
   end,
 })
 
