@@ -1,5 +1,7 @@
 *
 !/.gitignore
-!/agents
-!/commands
 !/CLAUDE.md
+!/agents/
+!/agents/**
+!/commands/
+!/commands/**
