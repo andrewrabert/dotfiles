@@ -18,7 +18,7 @@ local function publish(topic, message)
     while true do
       local name, type = vim.loop.fs_scandir_next(handle)
       if not name then break end
-      if type == "file" and name:sub(1, #prefix) == prefix then
+      if (type == "file" or type == "fifo") and name:sub(1, #prefix) == prefix then
         table.insert(pipes, pipe_dir .. "/" .. name)
       end
     end
