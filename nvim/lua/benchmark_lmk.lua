@@ -24,8 +24,8 @@ function M.run(iterations)
   print("Benchmarking system command:")
 
   -- Benchmark system command
-  benchmark("vim.fn.system('lmk') (Shell)", function()
-    vim.fn.system("lmk")
+  benchmark("vim.uv.spawn('lmk', {}) (Shell)", function()
+    vim.uv.spawn("lmk", {})
   end, iterations)
 end
 

@@ -3,9 +3,6 @@ require("config.lazy")
 require("config.cmp")
 require("config.lsp")
 
-local lmk = require("lmk")
-
-
 vim.o.ruler = true
 vim.o.tabstop = 4
 vim.o.shiftwidth = 4
@@ -98,9 +95,10 @@ vim.api.nvim_create_autocmd("BufWritePost", {
   group = augroup,
   pattern = "*",
   callback = function()
-      --vim.fn.system("lmk")
+      --vim.fn.system("lmk", {})
       --vim.fn.jobstart("lmk", {detach = true})
-      lmk.notify()
+      --lmk.notify()
+      vim.uv.spawn("lmk", {})
   end,
 })
 

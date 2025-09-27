@@ -1,7 +1,7 @@
 local M = {}
 
 local function get_pipe_dir()
-  return os.getenv("TMPDIR") or "/tmp"
+  return vim.uv.os_getenv("TMPDIR") or "/tmp"
 end
 
 local function get_pipe_path(topic, pid)
@@ -12,18 +12,22 @@ local function cleanup_stale_pipes(topic)
   local pipe_dir = get_pipe_dir()
   local prefix = string.format("fanpipe-%s-", topic)
 
-  local handle = vim.loop.fs_scandir(pipe_dir)
+  local handle = vim.uv.fs_scandir(pipe_dir)
   if not handle then return end
 
   while true do
-    local name, type = vim.loop.fs_scandir_next(handle)
+    local name, type = vim.uv.fs_scandir_next(handle)
     if not name then break end
     if type == "fifo" and name:sub(1, #prefix) == prefix then
       local pid = name:match("fanpipe%-" .. topic .. "%-(%d+)")
       if pid then
-        local kill_check = os.execute(string.format("kill -0 %s 2>/dev/null", pid))
-        if kill_check ~= 0 then
-          os.remove(pipe_dir .. "/" .. name)
+        local pid_num = tonumber(pid)
+        if pid_num then
+          local success, err = vim.uv.kill(pid_num, 0)
+          if not success or err then
+            -- Process doesn't exist or kill failed
+            os.remove(pipe_dir .. "/" .. name)
+          end
         end
       end
     end
@@ -37,10 +41,10 @@ local function publish(topic, message)
   local prefix = string.format("fanpipe-%s-", topic)
 
   local pipes = {}
-  local handle = vim.loop.fs_scandir(pipe_dir)
+  local handle = vim.uv.fs_scandir(pipe_dir)
   if handle then
     while true do
-      local name, type = vim.loop.fs_scandir_next(handle)
+      local name, type = vim.uv.fs_scandir_next(handle)
       if not name then break end
       if type == "fifo" and name:sub(1, #prefix) == prefix then
         table.insert(pipes, pipe_dir .. "/" .. name)
