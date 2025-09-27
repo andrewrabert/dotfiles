@@ -651,7 +651,7 @@ async def ensure_package_dependencies():
 async def run_mode(mode):
     args = []
     if mode == "root":
-        args.append("sudo")
+        args.extend(["sudo", "--preserve-env=HOST"])
     args.extend([__file__, mode])
     proc = await asyncio.create_subprocess_exec(*args)
     await proc.wait()
