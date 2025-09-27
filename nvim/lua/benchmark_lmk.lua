@@ -13,7 +13,7 @@ local function benchmark(name, func, iterations)
 end
 
 function M.run(iterations)
-  iterations = iterations or 1000
+  iterations = iterations or 100
   print("Benchmarking lmk implementations:")
 
   -- Benchmark native Lua version
