@@ -17,8 +17,15 @@ function M.run(iterations)
   print("Benchmarking lmk implementations:")
 
   -- Benchmark native Lua version
-  benchmark("Lua lmk.notify()", function()
+  benchmark("lmk.notify() (Lua)", function()
     lmk.notify()
+  end, iterations)
+
+  print("Benchmarking system command:")
+
+  -- Benchmark system command
+  benchmark("vim.fn.system('lmk') (Shell)", function()
+    vim.fn.system("lmk")
   end, iterations)
 end
 
