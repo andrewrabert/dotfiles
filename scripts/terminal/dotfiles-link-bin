@@ -18,10 +18,11 @@ def find_executables(directory):
 
 def main():
     dotfiles = pathlib.Path(os.environ["DOTFILES"])
-    try:
-        dotfiles_private = pathlib.Path(os.environ["DOTFILES_PRIVATE"])
-    except KeyError:
-        dotfiles_private = None
+    other_dotfiles = [
+        pathlib.Path(os.environ[k])
+        for k in sorted(os.environ)
+        if k.startswith("DOTFILES_")
+    ]
 
     dest = dotfiles / ".bin"
     dest.mkdir(exist_ok=True)
@@ -44,16 +45,16 @@ def main():
     sources = [
         dotfiles / "scripts" / "hosts" / hostname,
     ]
-    if dotfiles_private:
-        sources.append(dotfiles_private / "scripts" / "hosts" / hostname)
+    for d in other_dotfiles:
+        sources.append(d / "scripts" / "hosts" / hostname)
 
     for path in (dotfiles / "scripts" / "commands").iterdir():
         if path.name in all_commands:
             sources.append(path)
 
     sources.append(dotfiles / "scripts" / "terminal")
-    if dotfiles_private:
-        sources.append(dotfiles_private / "scripts" / "terminal")
+    for d in other_dotfiles:
+        sources.append(d / "scripts" / "terminal")
 
     match hostname:
         case "mars":
