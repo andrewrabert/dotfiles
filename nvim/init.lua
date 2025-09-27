@@ -138,3 +138,5 @@ vim.api.nvim_create_autocmd({ "BufRead", "BufNewFile" }, {
 vim.keymap.set('n', '<leader>td', function()
   vim.diagnostic.enable(not vim.diagnostic.is_enabled())
 end, { desc = 'Toggle diagnostics' })
+
+vim.api.nvim_set_keymap("n", "<leader>w", ":set wrap!<CR>", { noremap = true, silent = true })

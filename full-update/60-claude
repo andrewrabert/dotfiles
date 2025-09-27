@@ -1,0 +1,13 @@
+#!/usr/bin/env sh
+set -e
+
+if ! command -v claude > /dev/null; then
+    rm -rf ~/.claude
+    rm -rf ~/.claude.json
+else
+    if [ "$(realpath ~/.claude)" != "${DOTFILES}/claude" ]; then
+        echo "Linking configuration ..."
+        rm -rf ~/.claude
+        ln -sT "${DOTFILES}/claude" ~/.claude
+    fi
+fi
