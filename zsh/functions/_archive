@@ -1,0 +1,20 @@
+#compdef archive
+
+typeset -A opt_args
+
+_archive() {
+
+  # Global flags (i.e. ones not associated with a subcommand)
+  _arguments \
+    '(-h --help)'{-h,--help}'[show this help message and exit]' \
+    '--rm[remove source after success]' \
+    '-n=[number of parallel jobs (default: 1)]:' \
+    '-p=[parent directory to save the archive in]: :_files -/' \
+    '--password=[archive password]:' \
+    '(-o --output)'{-o,--output}'=[output filename]: :_files' \
+    '-f[archive format]:format:(7z cbz epub iso gz nsz rvz tar tar.gz tar.xz tar.zst xz zip zst sparse\:tar.zst)' \
+    '--fast[increase archiving speed at the expense of compression]' \
+    '*:: :_files'
+
+}
+_archive
