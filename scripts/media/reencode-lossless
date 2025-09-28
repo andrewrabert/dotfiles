@@ -1,4 +1,13 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv --quiet run --script
+"""
+# /// script
+# dependencies = [
+#     "async_executor",
+#     "mutagen",
+# ]
+# ///
+"""
+
 import argparse
 import asyncio
 import contextlib

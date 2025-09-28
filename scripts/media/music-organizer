@@ -10,6 +10,7 @@ Music library organization tool with metadata support.
 # ]
 # ///
 """
+
 import argparse
 import collections
 import logging
@@ -103,7 +104,7 @@ def folder_name(tag_value):
     return " ".join(part for part in name.split())
 
 
-def cue_track_count(path):
+def cue_track_count(path, dry_run=False):
     """Return the number of tracks in a .cue file
 
     Also converts the file to UTF-8 if it's not
@@ -111,13 +112,19 @@ def cue_track_count(path):
     data = path.read_bytes()
     text = data.decode(charset_normalizer.detect(data)["encoding"])
     if data != text:
-        path.write_text(text)
+        if not dry_run:
+            path.write_text(text)
+        else:
+            LOGGER.info(f"Would convert encoding for: {path}")
 
     return sum(1 for line in text.split("\n") if line.strip().startswith("TRACK "))
 
 
-def split_flac(flac_path, cue_path):
+def split_flac(flac_path, cue_path, dry_run=False):
     parent = cue_path.absolute().parent
+    if dry_run:
+        LOGGER.info(f"Would split {flac_path}")
+        return
     LOGGER.info(f"Splitting {flac_path}")
     with tempfile.TemporaryDirectory(dir=parent, prefix=".shntool_split") as tmpdir:
         subprocess.run(
@@ -143,7 +150,7 @@ def split_flac(flac_path, cue_path):
     flac_path.unlink()
 
 
-def check_cue_files(root_path):
+def check_cue_files(root_path, dry_run=False):
     paths = [p for p in root_path.iterdir() if p.is_file()]
     flac_files = [p for p in paths if p.suffix == FLAC_EXT]
     if not flac_files:
@@ -155,14 +162,14 @@ def check_cue_files(root_path):
         LOGGER.error(f"Multiple .cue files: {root_path}")
     elif len(cue_files) == len(flac_files) == 1:
         cue_file = cue_files[0]
-        num_tracks = cue_track_count(cue_file)
+        num_tracks = cue_track_count(cue_file, dry_run)
         if num_tracks == 0:
             LOGGER.error(f"Bad cue file: {cue_file}")
         elif num_tracks != 1:
-            split_flac(flac_files[0], cue_file)
+            split_flac(flac_files[0], cue_file, dry_run)
 
 
-def organize_images(root_path):
+def organize_images(root_path, dry_run=False):
     paths = [p for p in root_path.iterdir() if p.is_file()]
     audio_files = [p for p in paths if p.suffix in AUDIO_EXT]
     if not audio_files:
@@ -171,7 +178,12 @@ def organize_images(root_path):
     images = [p for p in paths if p.suffix in IMAGE_EXT]
     if len(images) == 1:
         image = images[0]
-        image.rename(pathlib.Path(image.parent, IMAGE_PREFIX + image.suffix))
+        target = image.parent / (IMAGE_PREFIX + image.suffix)
+        if image != target:
+            if not dry_run:
+                image.rename(pathlib.Path(image.parent, target))
+            else:
+                LOGGER.info(f"Would rename image: {image} -> {target}")
     elif len(images) > 1:
         LOGGER.error(f"Multiple images: {root_path}")
     else:
@@ -186,7 +198,7 @@ def check_metadata(path, metadata):
             LOGGER.error(f'File {path} missing "{tag}"')
 
 
-def fix_metadata(path, metadata):
+def fix_metadata(path, metadata, dry_run=False):
     for tag, values in metadata.items():
         new_values = sorted(
             {
@@ -197,7 +209,8 @@ def fix_metadata(path, metadata):
         if new_values != sorted(values):
             metadata[tag] = new_values
             LOGGER.info(f'Fixing whitespace/unicode normalization in "{tag}": "{path}"')
-            metadata.save()
+            if not dry_run:
+                metadata.save()
 
         for v in (tag, *values):
             for c in v:
@@ -207,7 +220,7 @@ def fix_metadata(path, metadata):
                     )
 
 
-def fix_tracknumber(path, metadata):
+def fix_tracknumber(path, metadata, dry_run=False):
     try:
         tracknumber = metadata["tracknumber"][0]
     except KeyError:
@@ -223,26 +236,27 @@ def fix_tracknumber(path, metadata):
 
         metadata["tracknumber"] = tracknumber
         LOGGER.info(f'Fixing track number: "{path}"')
-        metadata.save()
+        if not dry_run:
+            metadata.save()
 
 
-def rename_extensions(path):
+def rename_extensions(path, dry_run=False):
     for f in {p for p in path.iterdir() if p.is_file()}:
         mime = magic.from_file(str(f), mime=True)
         if mime in MIME_SUFFIXES:
             if expected := MIME_SUFFIXES[mime]:
                 if f.suffix not in expected:
                     if f.suffix.lower() in expected:
-                        safe_rename(f, f.stem + f.suffix.lower())
+                        safe_rename(f, f.stem + f.suffix.lower(), dry_run)
                     elif mime == "text/plain":
                         LOGGER.error('Unhandled text/plain suffix: "%s"', f)
                     else:
-                        safe_rename(f, f.stem + expected[0])
+                        safe_rename(f, f.stem + expected[0], dry_run)
         else:
             LOGGER.error('Unhandled MIME: "%s" for "%s"', mime, f)
 
 
-def rename_from_tags(path, metadata):
+def rename_from_tags(path, metadata, dry_run=False):
     try:
         title = metadata["title"][0]
     except KeyError:
@@ -260,17 +274,18 @@ def rename_from_tags(path, metadata):
     for char in IGNORED_PATH_CHARS:
         title = title.replace(char, " ")
     title = " ".join(title.split())
-    safe_rename(path, f"{tracknumber} {title}{path.suffix}")
+    safe_rename(path, f"{tracknumber} {title}{path.suffix}", dry_run)
 
 
-def safe_rename(source, name):
+def safe_rename(source, name, dry_run=False):
     target = source.with_name(name)
     if source != target:
         if target.exists():
             LOGGER.error(f'Error renaming "{source}" to "{target}": already exists')
         else:
             LOGGER.info(f'Renaming "{source}" to "{target}"')
-            source.rename(target)
+            if not dry_run:
+                source.rename(target)
 
 
 def all_dirs(root):
@@ -325,6 +340,11 @@ def main():
     parser.add_argument("directory", type=pathlib.Path)
     parser.add_argument("--library", action="store_true")
     parser.add_argument("-t", "--check-tags", action="store_true")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show what would be done without making changes",
+    )
     args = parser.parse_args()
 
     setup_logging("music-organizer")
@@ -333,9 +353,9 @@ def main():
 
     for root_path in all_dirs(args.directory.absolute()):
         set_permissions(root_path)
-        rename_extensions(root_path)
-        organize_images(root_path)
-        check_cue_files(root_path)
+        rename_extensions(root_path, args.dry_run)
+        organize_images(root_path, args.dry_run)
+        check_cue_files(root_path, args.dry_run)
 
         if args.check_tags:
             artists = set()
@@ -360,9 +380,9 @@ def main():
                 if path.suffix in AUDIO_EXT:
                     metadata = mutagen.File(path, easy=True)
                     check_metadata(path, metadata)
-                    fix_metadata(path, metadata)
-                    fix_tracknumber(path, metadata)
-                    rename_from_tags(path, metadata)
+                    fix_metadata(path, metadata, args.dry_run)
+                    fix_tracknumber(path, metadata, args.dry_run)
+                    rename_from_tags(path, metadata, args.dry_run)
                     try:
                         albums.add(metadata["album"][0])
                     except KeyError:
@@ -386,19 +406,63 @@ def main():
                 if not expected_album:
                     LOGGER.error('invalid album name "%s"', root_path)
                     raise RuntimeError("figure out what to do")
-                if root_path.name != expected_album:
-                    LOGGER.info(
-                        'renaming album folder from "%s" to "%s"',
-                        root_path,
-                        expected_album,
-                    )
-                    new_root = root_path.with_name(expected_album)
-                    if new_root.exists():
-                        LOGGER.error('new root already exists "%s"', new_root)
-                        continue
-                    else:
-                        root_path.rename(new_root)
-                        root_path = new_root
+
+                # Check if album is in correct artist folder
+                if len(albumartists) == 1:
+                    albumartist = list(albumartists)[0]
+                    expected_artist = folder_name(albumartist)
+                    if expected_artist and root_path.parent.name != expected_artist:
+                        # Album is in wrong artist folder, need to move it
+                        correct_artist_dir = root_path.parent.parent / expected_artist
+                        correct_album_path = correct_artist_dir / expected_album
+
+                        if correct_album_path.exists():
+                            LOGGER.error(
+                                'cannot move album "%s" to "%s": target already exists',
+                                root_path,
+                                correct_album_path,
+                            )
+                        else:
+                            LOGGER.info(
+                                'moving album from "%s" to "%s"',
+                                root_path,
+                                correct_album_path,
+                            )
+                            if not args.dry_run:
+                                correct_artist_dir.mkdir(exist_ok=True)
+                                root_path.rename(correct_album_path)
+                                root_path = correct_album_path
+                    elif root_path.name != expected_album:
+                        # Album is in correct artist folder but has wrong name
+                        LOGGER.info(
+                            'renaming album folder from "%s" to "%s"',
+                            root_path,
+                            expected_album,
+                        )
+                        new_root = root_path.with_name(expected_album)
+                        if new_root.exists():
+                            LOGGER.error('new root already exists "%s"', new_root)
+                            continue
+                        else:
+                            if not args.dry_run:
+                                root_path.rename(new_root)
+                                root_path = new_root
+                else:
+                    # No albumartist or multiple albumartists, just rename if needed
+                    if root_path.name != expected_album:
+                        LOGGER.info(
+                            'renaming album folder from "%s" to "%s"',
+                            root_path,
+                            expected_album,
+                        )
+                        new_root = root_path.with_name(expected_album)
+                        if new_root.exists():
+                            LOGGER.error('new root already exists "%s"', new_root)
+                            continue
+                        else:
+                            if not args.dry_run:
+                                root_path.rename(new_root)
+                                root_path = new_root
 
             if len(albumartists) > 1:
                 LOGGER.error(f'Multiple albumartists in "{root_path}"')
@@ -413,7 +477,8 @@ def main():
                     metadata = mutagen.File(path, easy=True)
                     LOGGER.info('Setting albumartist to "%s" (%s)', artist, path)
                     metadata["albumartist"] = artist
-                    metadata.save()
+                    if not args.dry_run:
+                        metadata.save()
 
             if len(albumartists) == 1 and args.library:
                 relative_root = root_path.relative_to(LIBRARY)
