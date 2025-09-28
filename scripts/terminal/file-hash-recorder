@@ -117,7 +117,7 @@ class FileInfoDB:
     def upsert_file(self, file_info):
         for ac in file_info.archive_contents.values():
             if ac.parent != file_info.path:
-                raise ValueError
+                raise ValueError(f"Archive content parent mismatch: expected {file_info.path}, got {ac.parent}")
         fi = dataclasses.asdict(file_info)
         ac = fi.pop("archive_contents")
         cur = self.conn.cursor()
@@ -402,7 +402,7 @@ def find_default_file_info_db(root_path, must_exist=True):
             return path
 
     if must_exist:
-        raise RuntimeError
+        raise RuntimeError(f"Could not find file_info.db in {root_path} or any parent directory")
     else:
         return root_path / "file_info.db"
 
@@ -651,7 +651,7 @@ async def main():
     parser.add_argument(
         "--no-tmpdir",
         action="store_true",
-        help="extract to tempdir when hashing archive contents",
+        help="don't extract to tempdir when hashing archive contents",
     )
     parser.add_argument("path", type=pathlib.Path, nargs="+")
     args = parser.parse_args()
@@ -661,7 +661,7 @@ async def main():
 
     if len(args.path) > 1:
         if any((args.output, args.show_dupes, args.list, args.multihash)):
-            raise RuntimeError
+            raise RuntimeError("Cannot use --output, --show-dupes, --list, or --multihash with multiple paths")
 
     for path in args.path:
         if args.multihash:
