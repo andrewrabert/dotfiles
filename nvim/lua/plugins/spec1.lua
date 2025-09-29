@@ -15,8 +15,6 @@ return {
   {"hrsh7th/nvim-cmp"},
   {"neovim/nvim-lspconfig"},
 
-  {"Vimjas/vim-python-pep8-indent"},
-
   {"godlygeek/tabular"},
   {"plasticboy/vim-markdown"},
   {"dhruvasagar/vim-table-mode"},
@@ -46,7 +44,7 @@ return {
     "nvim-treesitter/nvim-treesitter",
     config = function()
         require("nvim-treesitter.configs").setup({
-            ensure_installed = { 
+            ensure_installed = {
                 "bash",
                 "c",
                 "c_sharp",
@@ -60,16 +58,21 @@ return {
                 "json",
                 "latex",
                 "lua",
-                "lua", 
-                "markdown", 
-                "python", 
-                "rust", 
+                "lua",
+                "markdown",
+                "python",
+                "rust",
                 "yaml",
             },
             sync_install = #vim.api.nvim_list_uis() == 0,
             highlight = {
                 enable = true,
-                disable = { 
+                additional_vim_regex_highlighting = {
+                    -- fixes indent when string contains [
+                    -- https://github.com/nvim-treesitter/nvim-treesitter/issues/1573
+                    "python"
+                },
+                disable = {
                     -- breaks gx on urls
                     "markdown",
                 },
