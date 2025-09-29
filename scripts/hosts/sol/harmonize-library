@@ -3,9 +3,9 @@ set -e
 SOURCE=/storage/Audio/Library
 TARGET=/storage/Audio/Lossy_opus_128
 
-alias harmonize='/home/ar/src/github/nvllsvm/harmonize/env/bin/harmonize'
+export UV_PROJECT=~/src/github/nvllsvm/harmonize
 
-harmonize "$SOURCE" "$TARGET" \
+uv run harmonize "$SOURCE" "$TARGET" \
     --exclude '*.pdf' \
     --exclude '*.accurip' \
     --exclude '*.auCDtect' \
