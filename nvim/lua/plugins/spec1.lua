@@ -15,6 +15,8 @@ return {
   {"hrsh7th/nvim-cmp"},
   {"neovim/nvim-lspconfig"},
 
+  {"Vimjas/vim-python-pep8-indent"},
+
   {"godlygeek/tabular"},
   {"plasticboy/vim-markdown"},
   {"dhruvasagar/vim-table-mode"},

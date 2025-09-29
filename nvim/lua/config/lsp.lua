@@ -54,7 +54,7 @@ local servers = {
     root_patterns = { 'pyproject.toml', 'setup.py', 'setup.cfg', 'requirements.txt', 'Pipfile' }
   },
   pyright = {
-    cmd = { 'pyright-langserver', '--stdio' },
+    cmd = { 'basedpyright-langserver', '--stdio' },
     filetypes = { 'python' },
     root_patterns = { 'pyproject.toml', 'setup.py', 'setup.cfg', 'requirements.txt', 'Pipfile', 'pyrightconfig.json' },
     settings = function(root_dir, bufnr)
