@@ -2,6 +2,7 @@
 import asyncio
 import json
 import platform
+import shutil
 
 if platform.uname().system != "Darwin":
     exit()
@@ -116,7 +117,13 @@ class ProcessError(Exception):
 
 async def main():
     installed = await Homebrew.get_installed()
-    missing = EXPECTED_PACKAGES - set(installed)
+    expected = EXPECTED_PACKAGES.copy()
+
+    # Add docker-completion if docker is available
+    if shutil.which("docker"):
+        expected.add("docker-completion")
+
+    missing = expected - set(installed)
     if missing:
         await Homebrew.install(missing)
 
