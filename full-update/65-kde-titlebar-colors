@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """Generate KDE color scheme files for per-application titlebar colors."""
 
-import argparse
 import configparser
 import dataclasses
 import io
 import os
 import pathlib
+import shutil
 import subprocess
 import tempfile
 import uuid
@@ -372,10 +372,8 @@ def update_kwin_rules(
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Merge KDE color scheme files"
-    )
-    args = parser.parse_args()
+    if not shutil.which("plasmashell"):
+        exit()
 
     dark_mode = is_dark_mode()
     base16_bg, base16_active_fg, base16_inactive_fg = get_base16_colors()
