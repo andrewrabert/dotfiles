@@ -1,0 +1,142 @@
+#!/usr/bin/env python3
+"""Generate KDE color scheme files for per-application titlebar colors."""
+import argparse
+import configparser
+import dataclasses
+import io
+import os
+import pathlib
+
+
+@dataclasses.dataclass
+class TitlebarConfig:
+    active_bg: str | None = None
+    active_fg: str | None = None
+    inactive_bg: str | None = None
+    inactive_fg: str | None = None
+
+    def to_rgb(self, hex_color: str) -> str:
+        hex_color = hex_color.lstrip("#")
+        r = int(hex_color[0:2], 16)
+        g = int(hex_color[2:4], 16)
+        b = int(hex_color[4:6], 16)
+        return f"{r},{g},{b}"
+
+
+ACTIVE_FG = "#fcfcfc"
+INACTIVE_FG = "#7e7e7e"
+
+TITLEBAR_CONFIGS = {
+    "Element": TitlebarConfig(
+        active_bg="#101317",
+        active_fg=ACTIVE_FG,
+        inactive_bg="#101317",
+        inactive_fg=INACTIVE_FG,
+    ),
+    "Foot": TitlebarConfig(
+        active_bg="#181818",
+        active_fg=ACTIVE_FG,
+        inactive_bg="#181818",
+        inactive_fg=INACTIVE_FG,
+    ),
+    "Jellyfin Media Player": TitlebarConfig(
+        active_bg="#202020",
+        active_fg=ACTIVE_FG,
+        inactive_bg="#202020",
+        inactive_fg=INACTIVE_FG,
+    ),
+    "Krita": TitlebarConfig(
+        active_bg="#202326",
+        active_fg=ACTIVE_FG,
+        inactive_bg="#202326",
+        inactive_fg=INACTIVE_FG,
+    ),
+    "Obsidian": TitlebarConfig(
+        active_bg="#363636",
+        active_fg=ACTIVE_FG,
+        inactive_bg="#262626",
+        inactive_fg=INACTIVE_FG,
+    ),
+    "Signal": TitlebarConfig(
+        active_bg="#2e2e2e",
+        active_fg=ACTIVE_FG,
+        inactive_bg="#2e2e2e",
+        inactive_fg=INACTIVE_FG,
+    ),
+}
+
+
+def merge_config(
+    base: configparser.ConfigParser, config: TitlebarConfig, app_name: str
+):
+    if config.active_bg or config.active_fg:
+        base.setdefault("Colors:Header", {})
+        if config.active_bg:
+            base.set(
+                "Colors:Header", "BackgroundNormal", config.to_rgb(config.active_bg)
+            )
+        if config.active_fg:
+            base.set(
+                "Colors:Header", "ForegroundNormal", config.to_rgb(config.active_fg)
+            )
+
+    if config.inactive_bg or config.inactive_fg:
+        base.setdefault("Colors:Header][Inactive", {})
+        if config.inactive_bg:
+            base.set(
+                "Colors:Header][Inactive",
+                "BackgroundNormal",
+                config.to_rgb(config.inactive_bg),
+            )
+        if config.inactive_fg:
+            base.set(
+                "Colors:Header][Inactive",
+                "ForegroundNormal",
+                config.to_rgb(config.inactive_fg),
+            )
+
+    base.remove_section("General")
+    base.add_section("General")
+    base.set("General", "ColorScheme", f"Application{app_name}")
+    base.set("General", "Name", f"Application - {app_name}")
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Merge KDE color scheme files")
+    args = parser.parse_args()
+
+    base_file = pathlib.Path("/usr/share/color-schemes/BreezeDark.colors")
+    xdg_data_home = os.environ.get(
+        "XDG_DATA_HOME", pathlib.Path.home() / ".local/share"
+    )
+    output_dir = pathlib.Path(xdg_data_home) / "color-schemes"
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    created_files = set()
+    for app_name, config in TITLEBAR_CONFIGS.items():
+        base = configparser.RawConfigParser()
+        base.optionxform = str
+        base.read_string(base_file.read_text())
+
+        merge_config(base, config, app_name)
+
+        output = io.StringIO()
+        base.write(output, space_around_delimiters=False)
+
+        output_file = output_dir / f"Titlebar - {app_name}.colors"
+        new_content = output.getvalue()
+
+        if output_file.exists() and output_file.read_text() == new_content:
+            created_files.add(output_file)
+        else:
+            output_file.write_text(new_content)
+            created_files.add(output_file)
+
+    for file in output_dir.glob("Titlebar - *.colors"):
+        if file not in created_files:
+            file.unlink()
+            print(f"Removed {file}")
+
+
+if __name__ == "__main__":
+    main()

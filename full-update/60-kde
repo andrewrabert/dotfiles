@@ -22,7 +22,6 @@ LINKS = {
     LOCAL_SHARE / "icons": DOTFILES / "kde" / "icons",
     LOCAL_SHARE / "applications": DOTFILES / "kde" / "applications",
     LOCAL_SHARE / "kwin": DOTFILES / "kde" / "kwin",
-    LOCAL_SHARE / "color-schemes": DOTFILES / "kde" / "color-schemes",
 }
 
 if DOTFILES_PRIVATE is not None:
