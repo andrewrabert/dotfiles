@@ -1,0 +1,10 @@
+#!/usr/bin/env sh
+set -e
+
+if ! command -v ruff > /dev/null; then
+    rm -rf ~/.config/ruff
+elif [ "$(realpath ~/.config/ruff)" != "${DOTFILES}/ruff" ]; then
+    echo "Linking configuration ..."
+    rm -rf ~/.config/ruff
+    ln -sT "${DOTFILES}/ruff" ~/.config/ruff
+fi
