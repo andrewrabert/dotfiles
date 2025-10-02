@@ -1,5 +1,5 @@
-# /kier-plan
-**Usage:** `/kier-plan [PRD file path]`
+# /kier-create-tasks
+**Usage:** `/kier-create-tasks [PRD file path]`
 **Description:** Activate interactive planning mode to analyze PRD and create task breakdown
 
 You are operating the Four Tempers system in **PLANNING MODE** for interactive task breakdown and analysis.

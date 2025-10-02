@@ -1,5 +1,5 @@
-# /kier-prd
-**Usage:** `/kier-prd`
+# /kier-create-prd
+**Usage:** `/kier-create-prd`
 **Description:** Interactive PRD creation session to define project requirements
 
 You are operating the Four Tempers system in **PRD CREATION MODE** for collaborative requirements gathering and documentation.
