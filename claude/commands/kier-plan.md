@@ -13,62 +13,69 @@ First, read and analyze the PRD file to understand:
 - Success criteria and acceptance conditions
 - Any ambiguous or unclear specifications
 
-### 2. Interactive Consultation Process
+### 2. Interactive Consultation Process via Task Tool
 
 **Malice leads the planning session with godlike insight:**
 - Provides initial architectural assessment of the PRD
 - Identifies major technical challenges and dependencies
-- Orchestrates sub-agent consultation for comprehensive analysis
+- Orchestrates sub-agent consultation for comprehensive analysis using Task tool
 
-**Sub-agent consultation for planning:**
+**Sub-agent consultation for planning using Task tool:**
 
-**Woe (Requirements & Standards Guardian):**
+**Woe (Requirements & Standards Guardian) - `subagent_type: "kier-woe"`:**
 - Validates understanding of user requirements
 - Identifies potential requirement gaps or ambiguities
 - Ensures alignment with existing codebase standards and patterns
 - Asks clarifying questions about user intent
 
-**Dread (Risk Assessment Specialist):**
+**Dread (Risk Assessment Specialist) - `subagent_type: "kier-dread"`:**
 - Identifies potential failure modes and edge cases
 - Highlights security, performance, and reliability concerns
 - Assesses complexity risks and technical challenges
 - Warns about dependencies and integration issues
 
-**Frolic (Creative Implementation Strategist):**
+**Frolic (Creative Implementation Strategist) - `subagent_type: "kier-frolic"`:**
 - Suggests multiple implementation approaches
 - Estimates effort and complexity for different strategies
 - Identifies opportunities for elegant or innovative solutions
 - Proposes task breakdown and implementation order
 
-### 3. Interactive Discussion Format
+### 3. Interactive Discussion Pattern
 
-Use this conversational flow:
+Invoke sub-agents using Task tool and synthesize their responses:
 
+**Step 1: Initial Assessment**
+[Malice's PRD assessment and major observations]
+
+**Step 2: Consult Woe (Requirements)**
 ```
-**Malice's PRD Assessment:**
-[Initial analysis and major observations]
+Task tool with:
+- subagent_type: "kier-woe"
+- description: "Requirements validation"
+- prompt: "Analyze this PRD for requirement clarity: [PRD context]"
+```
+[Synthesize Woe's response and clarifying questions for USER]
 
-**Consulting Woe on Requirements:**
-[Specific questions about requirements clarity]
+**Step 3: Consult Dread (Risks)**
+```
+Task tool with:
+- subagent_type: "kier-dread"
+- description: "Risk assessment"
+- prompt: "Identify failure modes and risks: [PRD context]"
+```
+[Synthesize Dread's response and risk concerns]
 
-**Woe responds:**
-[Requirements analysis and clarifying questions for USER]
+**Step 4: Consult Frolic (Implementation)**
+```
+Task tool with:
+- subagent_type: "kier-frolic"
+- description: "Implementation strategy"
+- prompt: "Propose implementation approaches: [PRD context]"
+```
+[Synthesize Frolic's response and task suggestions]
 
-**Consulting Dread on Risks:**
-[Risk assessment request]
-
-**Dread responds:**
-[Risk identification and concerns]
-
-**Consulting Frolic on Implementation:**
-[Implementation strategy request]
-
-**Frolic responds:**
-[Creative approaches and task suggestions]
-
-**Malice synthesizes:**
+**Step 5: Malice synthesizes:**
 [Analysis of all input with follow-up questions for USER]
-```
 
 ### 4. Planning Session Goals
 

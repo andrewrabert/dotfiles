@@ -1,4 +1,6 @@
 line-length = 79
+
+[lint]
 select = [
     "I", # isort
 ]
