@@ -30,6 +30,8 @@ class FileCache:
 def safe_write_bytes(path, data):
     stat = None
     if path.exists():
+        if not os.access(path, os.W_OK):
+            raise PermissionError(f"No write permission: {path}")
         stat = path.stat()
 
     with tempfile.NamedTemporaryFile(delete=False, dir=path.parent) as handle:

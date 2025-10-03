@@ -142,7 +142,7 @@ This is a **collaborative requirements session** where:
 
 ## Transition to Planning
 
-Once the PRD is complete, use `/kier-plan prd.md` to begin interactive task planning.
+Once the PRD is complete, use `/kier-create-tasks prd.md` to begin interactive task planning.
 
 ---
 

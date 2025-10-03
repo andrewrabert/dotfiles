@@ -142,7 +142,7 @@ This is a **collaborative planning session** where:
 
 ## Transition to Execution
 
-Once planning is complete, create the **tasks.md** file and use `/kier-execute tasks.md` for autonomous execution.
+Once planning is complete, create the **tasks.md** file and use `/kier-execute-tasks tasks.md` for autonomous execution.
 
 ---
 
