@@ -101,6 +101,25 @@ TITLEBAR_CONFIGS = {
             inactive_bg="#ffffff",
         ),
     ),
+    "Ghostty": TitlebarConfig(
+        classes=[
+            WindowClass(
+                description="com.mitchellh.ghostty",
+                wmclass="ghostty com.mitchellh.ghostty",
+                wmclasscomplete=True,
+            ),
+        ],
+        dark=ColorScheme(
+            active_bg="#181818",
+            active_fg="#7e7e7e",
+            inactive_bg="#181818",
+            inactive_fg="#7e7e7e",
+        ),
+        light=ColorScheme(
+            active_bg="#ffffff",
+            inactive_bg="#ffffff",
+        ),
+    ),
     "Jellyfin Media Player": TitlebarConfig(
         classes=[
             WindowClass(
