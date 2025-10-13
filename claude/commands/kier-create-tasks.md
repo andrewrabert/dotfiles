@@ -36,7 +36,7 @@ First, read and analyze the PRD file to understand:
 
 **Frolic (Creative Implementation Strategist) - `subagent_type: "kier-frolic"`:**
 - Suggests multiple implementation approaches
-- Estimates effort and complexity for different strategies
+- Assesses relative effort and complexity for different strategies (no time estimates)
 - Identifies opportunities for elegant or innovative solutions
 - Proposes task breakdown and implementation order
 
@@ -92,7 +92,7 @@ Task tool with:
 **Task Breakdown:**
 - Break complex features into specific, actionable tasks
 - Establish implementation order and dependencies
-- Estimate complexity and effort for each task
+- Assess relative complexity and effort for each task (no time estimates)
 
 **Standards Alignment:**
 - Ensure approach fits existing codebase patterns
