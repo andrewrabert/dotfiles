@@ -18,7 +18,7 @@ except ImportError:
     subprocess.run(["yay", "-S", "--noconfirm", "pyalpm"], check=True)
     import pyalpm
 
-HOSTNAME = os.environ["HOST"]
+HOSTNAME = os.environ["HOST_DOTFILES"]
 
 EXPECTED_PACKAGES = {
     "logrotate",
@@ -651,7 +651,7 @@ async def ensure_package_dependencies():
 async def run_mode(mode):
     args = []
     if mode == "root":
-        args.extend(["sudo", "--preserve-env=HOST"])
+        args.extend(["sudo", "--preserve-env=HOST_DOTFILES"])
     args.extend([__file__, mode])
     proc = await asyncio.create_subprocess_exec(*args)
     await proc.wait()

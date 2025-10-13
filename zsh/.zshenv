@@ -20,7 +20,7 @@ path=(
     "$path[@]"
 )
 
-zshenv_host="${DOTFILES}/zsh/hosts/${HOST}/.zshenv"
+zshenv_host="${DOTFILES}/zsh/hosts/${HOST_DOTFILES}/.zshenv"
 if [[ -r "$zshenv_host" ]]; then
     . "$zshenv_host"
 fi

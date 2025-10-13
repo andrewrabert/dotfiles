@@ -5,7 +5,7 @@ import shutil
 import subprocess
 
 
-HOSTNAME = os.environ["HOST"]
+HOSTNAME = os.environ["HOST_DOTFILES"]
 
 HOME = pathlib.Path("~").expanduser()
 CONFIG = HOME / ".config"

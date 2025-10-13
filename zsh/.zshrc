@@ -94,7 +94,7 @@ zle -N zle-keymap-select
 
 fpath=("$DOTFILES/zsh/functions" "$fpath[@]")
 
-host_dir="$DOTFILES/zsh/hosts/$HOST"
+host_dir="$DOTFILES/zsh/hosts/$HOST_DOTFILES"
 if [ -r "$host_dir/.zshrc" ]; then
     . "$host_dir/.zshrc"
 fi

@@ -1,6 +1,6 @@
 #!/usr/bin/env sh
 set -e 
-if [ "$HOST" != 'sol' ]; then
+if [ "$HOST_DOTFILES" != 'sol' ]; then
     exit
 fi
 

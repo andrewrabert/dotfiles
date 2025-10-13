@@ -87,7 +87,7 @@ update_repo() {
     if [ -n "$INSTALL_SYSTEM" ]; then
         printf "%bUpdating non-user files %s (%s)...%b\n" "$MAGENTA" "$1" "$dotfiles_root" "$RESET"
         if command -v sudo > /dev/null; then
-            update_non_user "$dotfiles_root" "$HOST"
+            update_non_user "$dotfiles_root" "$HOST_DOTFILES"
 
             if command -v pacman > /dev/null; then
                 update_non_user "$dotfiles_root" _archlinux

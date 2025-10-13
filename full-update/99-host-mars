@@ -47,7 +47,7 @@ def enable_unit(name, now=False, user=False):
 
 
 def main():
-    if os.environ["HOST"] != "mars":
+    if os.environ["HOST_DOTFILES"] != "mars":
         return
 
     enable_unit("syncthing", user=True)
