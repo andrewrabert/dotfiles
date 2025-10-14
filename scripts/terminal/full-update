@@ -17,7 +17,14 @@ usage: full-update [script ...]
 EOF
 }
 
+if command -v hostname > /dev/null; then 
+    export HOST_DOTFILES="$(hostname)"
+fi
 export HOST_DOTFILES="$(zsh -lic 'if [ -f ~/.zshenv.local ]; then . ~/.zshenv.local; fi && echo "$HOST_DOTFILES"')"
+if [ -z "$HOST_DOTFILES" ]; then
+    echo 'error: cannot determine hostname' >&2
+    exit 1
+fi
 
 BREW_GNUBIN='/opt/homebrew/opt/coreutils/libexec/gnubin'
 if [ -d "$BREW_GNUBIN" ]; then

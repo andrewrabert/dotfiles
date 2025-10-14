@@ -12,6 +12,9 @@ case "$(git -C "$DOTFILES" remote get-url origin)" in
         ;;
 esac
 
+if [ -z "$HOST_DOTFILES" ]; then
+    exit 1
+fi
 usage() {
     cat << EOF
 usage: [OPTION]
