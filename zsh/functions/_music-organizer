@@ -7,6 +7,8 @@ _music-organizer() {
     '(-h --help)'{-h,--help}'[show this help message and exit]' \
     '--library[library mode]' \
     '(-t --check-tags)'{-t,--check-tags}'[check tags]' \
+    '--organize-dirs[enable directory organization; parent directory where artist folders are located]:parent directory:_files -/' \
+    '--dry-run[show what would be done without making changes]' \
     ':directory:_files -/'
 }
 

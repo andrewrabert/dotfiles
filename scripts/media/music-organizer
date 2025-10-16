@@ -117,7 +117,9 @@ def cue_track_count(path, dry_run=False):
         else:
             LOGGER.info(f"Would convert encoding for: {path}")
 
-    return sum(1 for line in text.split("\n") if line.strip().startswith("TRACK "))
+    return sum(
+        1 for line in text.split("\n") if line.strip().startswith("TRACK ")
+    )
 
 
 def split_flac(flac_path, cue_path, dry_run=False):
@@ -126,7 +128,9 @@ def split_flac(flac_path, cue_path, dry_run=False):
         LOGGER.info(f"Would split {flac_path}")
         return
     LOGGER.info(f"Splitting {flac_path}")
-    with tempfile.TemporaryDirectory(dir=parent, prefix=".shntool_split") as tmpdir:
+    with tempfile.TemporaryDirectory(
+        dir=parent, prefix=".shntool_split"
+    ) as tmpdir:
         subprocess.run(
             [
                 "shntool",
@@ -202,13 +206,17 @@ def fix_metadata(path, metadata, dry_run=False):
     for tag, values in metadata.items():
         new_values = sorted(
             {
-                unicodedata.normalize("NFC", " ".join(v for v in value.split() if v))
+                unicodedata.normalize(
+                    "NFC", " ".join(v for v in value.split() if v)
+                )
                 for value in values
             }
         )
         if new_values != sorted(values):
             metadata[tag] = new_values
-            LOGGER.info(f'Fixing whitespace/unicode normalization in "{tag}": "{path}"')
+            LOGGER.info(
+                f'Fixing whitespace/unicode normalization in "{tag}": "{path}"'
+            )
             if not dry_run:
                 metadata.save()
 
@@ -281,7 +289,9 @@ def safe_rename(source, name, dry_run=False):
     target = source.with_name(name)
     if source != target:
         if target.exists():
-            LOGGER.error(f'Error renaming "{source}" to "{target}": already exists')
+            LOGGER.error(
+                f'Error renaming "{source}" to "{target}": already exists'
+            )
         else:
             LOGGER.info(f'Renaming "{source}" to "{target}"')
             if not dry_run:
@@ -313,7 +323,9 @@ def set_permissions(path):
             + stat.S_IWUSR,
         )
     else:
-        os.chmod(path, stat.S_IRUSR + stat.S_IRGRP + stat.S_IROTH + stat.S_IWUSR)
+        os.chmod(
+            path, stat.S_IRUSR + stat.S_IRGRP + stat.S_IROTH + stat.S_IWUSR
+        )
 
 
 def setup_logging(name, level=logging.INFO):
@@ -341,11 +353,20 @@ def main():
     parser.add_argument("--library", action="store_true")
     parser.add_argument("-t", "--check-tags", action="store_true")
     parser.add_argument(
+        "--organize-dirs",
+        type=pathlib.Path,
+        help="Enable directory organization; parent directory where artist folders are located",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Show what would be done without making changes",
     )
     args = parser.parse_args()
+
+    # Convert organize_dirs to absolute path if specified
+    if args.organize_dirs:
+        args.organize_dirs = args.organize_dirs.absolute()
 
     setup_logging("music-organizer")
 
@@ -357,7 +378,7 @@ def main():
         organize_images(root_path, args.dry_run)
         check_cue_files(root_path, args.dry_run)
 
-        if args.check_tags:
+        if args.check_tags or args.organize_dirs:
             artists = set()
             albumartists = set()
             albums = set()
@@ -407,62 +428,93 @@ def main():
                     LOGGER.error('invalid album name "%s"', root_path)
                     raise RuntimeError("figure out what to do")
 
-                # Check if album is in correct artist folder
-                if len(albumartists) == 1:
-                    albumartist = list(albumartists)[0]
-                    expected_artist = folder_name(albumartist)
-                    if expected_artist and root_path.parent.name != expected_artist:
-                        # Album is in wrong artist folder, need to move it
-                        correct_artist_dir = root_path.parent.parent / expected_artist
-                        correct_album_path = correct_artist_dir / expected_album
+                # Check if album is in correct artist folder (only if --organize-dirs was specified)
+                if args.organize_dirs:
+                    if len(albumartists) == 1:
+                        albumartist = list(albumartists)[0]
+                        expected_artist = folder_name(albumartist)
+                        if (
+                            expected_artist
+                            and root_path.parent.name != expected_artist
+                        ):
+                            # Album is in wrong artist folder, need to move it
+                            correct_artist_dir = (
+                                args.organize_dirs / expected_artist
+                            )
+                            correct_album_path = (
+                                correct_artist_dir / expected_album
+                            )
 
-                        if correct_album_path.exists():
-                            LOGGER.error(
-                                'cannot move album "%s" to "%s": target already exists',
-                                root_path,
-                                correct_album_path,
-                            )
-                        else:
+                            if correct_album_path.exists():
+                                LOGGER.error(
+                                    'cannot move album "%s" to "%s": target already exists',
+                                    root_path,
+                                    correct_album_path,
+                                )
+                            else:
+                                # Special case: if root_path is the directory being scanned,
+                                # move just the files instead of the directory
+                                if root_path == args.directory.absolute():
+                                    LOGGER.info(
+                                        'moving files from "%s" to "%s"',
+                                        root_path,
+                                        correct_album_path,
+                                    )
+                                    if not args.dry_run:
+                                        correct_artist_dir.mkdir(exist_ok=True)
+                                        correct_album_path.mkdir(exist_ok=True)
+                                        for path in root_path.iterdir():
+                                            if path.is_file():
+                                                path.rename(
+                                                    correct_album_path
+                                                    / path.name
+                                                )
+                                        root_path = correct_album_path
+                                else:
+                                    LOGGER.info(
+                                        'moving album from "%s" to "%s"',
+                                        root_path,
+                                        correct_album_path,
+                                    )
+                                    if not args.dry_run:
+                                        correct_artist_dir.mkdir(exist_ok=True)
+                                        root_path.rename(correct_album_path)
+                                        root_path = correct_album_path
+                        elif root_path.name != expected_album:
+                            # Album is in correct artist folder but has wrong name
                             LOGGER.info(
-                                'moving album from "%s" to "%s"',
+                                'renaming album folder from "%s" to "%s"',
                                 root_path,
-                                correct_album_path,
+                                expected_album,
                             )
-                            if not args.dry_run:
-                                correct_artist_dir.mkdir(exist_ok=True)
-                                root_path.rename(correct_album_path)
-                                root_path = correct_album_path
-                    elif root_path.name != expected_album:
-                        # Album is in correct artist folder but has wrong name
-                        LOGGER.info(
-                            'renaming album folder from "%s" to "%s"',
-                            root_path,
-                            expected_album,
-                        )
-                        new_root = root_path.with_name(expected_album)
-                        if new_root.exists():
-                            LOGGER.error('new root already exists "%s"', new_root)
-                            continue
-                        else:
-                            if not args.dry_run:
-                                root_path.rename(new_root)
-                                root_path = new_root
-                else:
-                    # No albumartist or multiple albumartists, just rename if needed
-                    if root_path.name != expected_album:
-                        LOGGER.info(
-                            'renaming album folder from "%s" to "%s"',
-                            root_path,
-                            expected_album,
-                        )
-                        new_root = root_path.with_name(expected_album)
-                        if new_root.exists():
-                            LOGGER.error('new root already exists "%s"', new_root)
-                            continue
-                        else:
-                            if not args.dry_run:
-                                root_path.rename(new_root)
-                                root_path = new_root
+                            new_root = root_path.with_name(expected_album)
+                            if new_root.exists():
+                                LOGGER.error(
+                                    'new root already exists "%s"', new_root
+                                )
+                                continue
+                            else:
+                                if not args.dry_run:
+                                    root_path.rename(new_root)
+                                    root_path = new_root
+                    else:
+                        # No albumartist or multiple albumartists, just rename if needed
+                        if root_path.name != expected_album:
+                            LOGGER.info(
+                                'renaming album folder from "%s" to "%s"',
+                                root_path,
+                                expected_album,
+                            )
+                            new_root = root_path.with_name(expected_album)
+                            if new_root.exists():
+                                LOGGER.error(
+                                    'new root already exists "%s"', new_root
+                                )
+                                continue
+                            else:
+                                if not args.dry_run:
+                                    root_path.rename(new_root)
+                                    root_path = new_root
 
             if len(albumartists) > 1:
                 LOGGER.error(f'Multiple albumartists in "{root_path}"')
@@ -475,7 +527,9 @@ def main():
                 artist = list(artists)[0]
                 for path in tracks:
                     metadata = mutagen.File(path, easy=True)
-                    LOGGER.info('Setting albumartist to "%s" (%s)', artist, path)
+                    LOGGER.info(
+                        'Setting albumartist to "%s" (%s)', artist, path
+                    )
                     metadata["albumartist"] = artist
                     if not args.dry_run:
                         metadata.save()
@@ -483,7 +537,8 @@ def main():
             if len(albumartists) == 1 and args.library:
                 relative_root = root_path.relative_to(LIBRARY)
                 expected_root = LIBRARY.joinpath(
-                    folder_name(list(albumartists)[0]), *relative_root.parts[1:]
+                    folder_name(list(albumartists)[0]),
+                    *relative_root.parts[1:],
                 )
                 if expected_root != root_path:
                     LOGGER.error(
