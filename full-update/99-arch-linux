@@ -181,7 +181,6 @@ if HOSTNAME in ("mars", "phobos"):
             "signal-desktop",
             "slack-desktop",
             "spectacle",
-            "tremotesf",
             "virt-manager",
             "vlc",
             "wine",
@@ -522,7 +521,9 @@ async def ensure_using_systemd_resolved():
 
 async def ensure_users_in_expected_groups():
     for user, expected_groups in EXPECTED_GROUPS.items():
-        current_groups = {g.gr_name for g in grp.getgrall() if user in g.gr_mem}
+        current_groups = {
+            g.gr_name for g in grp.getgrall() if user in g.gr_mem
+        }
         for group in expected_groups - current_groups:
             await add_user_to_group(user, group)
 
