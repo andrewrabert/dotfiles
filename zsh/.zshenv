@@ -7,6 +7,7 @@ export EDITOR=nvim
 export LESSHISTFILE=/dev/null
 export OPENER=open
 
+export HOST_DOTFILES="$HOST"
 if [ -e ~/.zshenv.local ]; then
     . ~/.zshenv.local
 fi
