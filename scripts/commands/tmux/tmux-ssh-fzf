@@ -64,14 +64,37 @@ class fzf:
 
 async def main():
     cache = HistoryCache(CACHE_HOME / "tmux-ssh-history")
+    history = cache.read()
 
     selected = await fzf.select(
-        sorted(cache.read()),
+        sorted(history),
         prompt="SSH Host: ",
         allow_custom=True,
     )
     if not selected:
         sys.exit(130)
+
+    # Verify SSH connectivity and tmux-attach availability for new hosts
+    if selected not in history:
+        args = [
+            "ssh",
+            "-q",
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "ConnectTimeout=3",
+            selected,
+            "--",
+            "zsh",
+            "-lic",
+            "command -v tmux-attach",
+        ]
+        proc = await asyncio.create_subprocess_exec(*args)
+        await proc.wait()
+        if proc.returncode != 0:
+            print(f"error: failed to connect to {selected}", file=sys.stderr)
+            input("Press Enter to continue...")
+            sys.exit(1)
 
     cache.add(selected)
 
