@@ -1,8 +1,38 @@
 #compdef gs
 zmodload zsh/mapfile
 
-# escape : characters
-arr=("${(f@)mapfile[$HOME/.cache/gs]//:/\:}")
-# remove empty element
-arr=($arr)
-_describe 'history' arr
+local cache_root="${XDG_CACHE_HOME:-$HOME/.cache}"
+local use_backup=0
+
+# Check if --backup or -b is in the command line
+for word in "${words[@]}"; do
+    if [[ "$word" == "--backup" || "$word" == "-b" ]]; then
+        use_backup=1
+        break
+    fi
+done
+
+# Select appropriate cache file
+local cache_file
+if [[ $use_backup -eq 1 ]]; then
+    cache_file="$cache_root/git-sync-backup"
+else
+    cache_file="$cache_root/git-sync"
+fi
+
+# Handle option completion
+if [[ "${words[CURRENT]}" == -* ]]; then
+    _arguments \
+        '(-b --backup)'{-b,--backup}'[Use backup cache]' \
+        '(-c --clone-from-backup)'{-c,--clone-from-backup}'[Clone from backup to regular location]'
+    return
+fi
+
+# Complete repository names from cache
+if [[ -f "$cache_file" ]]; then
+    # escape : characters
+    arr=("${(f@)mapfile[$cache_file]//:/\:}")
+    # remove empty element
+    arr=($arr)
+    _describe 'repository' arr
+fi

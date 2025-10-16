@@ -1,13 +1,19 @@
 #!/usr/bin/env python3
 import argparse
 import enum
+import os
 import pathlib
 import shutil
 import subprocess
+import sys
 import urllib.parse
 
 CODE_ROOT_DIR = pathlib.Path("~/src").expanduser()
-CACHE_PATH = pathlib.Path("~/.cache/git-sync").expanduser()
+CACHE_ROOT_DIR = pathlib.Path(
+    os.environ.get("XDG_CACHE_HOME", "~/.cache")
+).expanduser()
+CACHE_PATH = CACHE_ROOT_DIR / "git-sync"
+BACKUP_CACHE_PATH = CACHE_ROOT_DIR / "git-sync-backup"
 
 
 class Git:
@@ -17,7 +23,9 @@ class Git:
 
     @staticmethod
     def fetch(directory):
-        subprocess.run(["git", "-C", str(directory), "fetch", "--all"], check=True)
+        subprocess.run(
+            ["git", "-C", str(directory), "fetch", "--all"], check=True
+        )
 
 
 def _find_git_repos_old(root):
@@ -34,7 +42,15 @@ def _find_git_repos_old(root):
 def _find_git_repos(root):
     all_repos = set()
     proc = subprocess.run(
-        ["fd", "--unrestricted", "--type=d", "--print0", r"^\.git$", "--", root],
+        [
+            "fd",
+            "--unrestricted",
+            "--type=d",
+            "--print0",
+            r"^\.git$",
+            "--",
+            root,
+        ],
         stdout=subprocess.PIPE,
         check=True,
     )
@@ -109,7 +125,9 @@ def parse_repo(repo):
                         raise RuntimeError("invalid git.nullsum.net url")
                     path = "/".join(parts)
                 case _:
-                    raise NotImplementedError(f"unhandled netloc: {parsed.netloc}")
+                    raise NotImplementedError(
+                        f"unhandled netloc: {parsed.netloc}"
+                    )
         elif parsed.scheme:
             host = parsed.scheme
         else:
@@ -122,16 +140,35 @@ def parse_repo(repo):
 
 def main():
     parser = argparse.ArgumentParser("git-sync")
-    parser.add_argument("--show-cache", action="store_true")
+    cache_group = parser.add_mutually_exclusive_group()
+    cache_group.add_argument("--show-cache", action="store_true")
+    cache_group.add_argument("--show-backup-cache", action="store_true")
     parser.add_argument("--build-cache", action="store_true")
+    parser.add_argument("--parse-url", action="store_true")
     parser.add_argument("--rm", action="store_true")
     parser.add_argument("repo", nargs="?")
     args = parser.parse_args()
+
+    # Handle --parse-url (no CODE_ROOT_DIR check needed)
+    if args.parse_url:
+        if not args.repo:
+            print(
+                "error: --parse-url requires a URL argument", file=sys.stderr
+            )
+            parser.exit(1)
+        try:
+            _, host, path = parse_repo(args.repo)
+            print(f"{host}:{path}")
+        except Exception as e:
+            print(f"error: {e}", file=sys.stderr)
+            parser.exit(1)
+        return
 
     if not CODE_ROOT_DIR.is_dir():
         return
 
     CACHE_PATH.touch()
+    BACKUP_CACHE_PATH.touch()
 
     cache = []
     cache_modified = False
@@ -147,8 +184,24 @@ def main():
         else:
             cache_modified = True
 
+    backup_cache = []
+    backup_cache_modified = False
+    for repo in BACKUP_CACHE_PATH.read_text().splitlines():
+        repo_dir = CODE_ROOT_DIR / repo
+        if not repo_dir.exists():
+            try:
+                repo_dir, _, _ = parse_repo(repo)
+            except Exception:
+                continue
+        if repo_dir.is_dir():
+            backup_cache.append(repo)
+        else:
+            backup_cache_modified = True
+
     if args.show_cache:
         print("\n".join(cache))
+    elif args.show_backup_cache:
+        print("\n".join(backup_cache))
     elif args.build_cache:
         # Load existing cache order
         existing_cache = []
@@ -158,29 +211,61 @@ def main():
                 existing_cache.append(repo)
                 existing_cache_set.add(repo)
 
+        existing_backup_cache = []
+        existing_backup_cache_set = set()
+        for repo in BACKUP_CACHE_PATH.read_text().splitlines():
+            if repo:  # skip empty lines
+                existing_backup_cache.append(repo)
+                existing_backup_cache_set.add(repo)
+
         # Find all current repos
-        repos = []
+        regular_repos = []
+        backup_repos = []
         for repo in _find_git_repos(CODE_ROOT_DIR):
             try:
                 host = SrcName(repo.parts[0])
             except ValueError:
                 host = None
             if host is None:
-                repos.append(str(repo))
+                repo_str = str(repo)
             else:
-                repos.append(f"{host}:{'/'.join(repo.parts[1:])}")
+                repo_str = f"{host}:{'/'.join(repo.parts[1:])}"
 
-        # Separate into existing (in order) and new (to be sorted)
-        repos_set = set(repos)
-        ordered_repos = [r for r in existing_cache if r in repos_set]
-        new_repos = sorted([r for r in repos if r not in existing_cache_set])
+            # Check if repo is in backup/ directory
+            if str(repo).startswith("backup/"):
+                backup_repos.append(repo_str)
+            else:
+                regular_repos.append(repo_str)
+
+        # Separate regular repos into existing (in order) and new (to be sorted)
+        regular_repos_set = set(regular_repos)
+        ordered_regular = [r for r in existing_cache if r in regular_repos_set]
+        new_regular = sorted(
+            [r for r in regular_repos if r not in existing_cache_set]
+        )
+
+        # Separate backup repos into existing (in order) and new (to be sorted)
+        backup_repos_set = set(backup_repos)
+        ordered_backup = [
+            r for r in existing_backup_cache if r in backup_repos_set
+        ]
+        new_backup = sorted(
+            [r for r in backup_repos if r not in existing_backup_cache_set]
+        )
 
         # Combine: existing order + new sorted
-        final_repos = ordered_repos + new_repos
+        final_regular_repos = ordered_regular + new_regular
+        final_backup_repos = ordered_backup + new_backup
 
         CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
-        CACHE_PATH.write_text("\n".join(final_repos))
-        print(f"Built cache with {len(final_repos)} repositories")
+        CACHE_PATH.write_text("\n".join(final_regular_repos))
+        BACKUP_CACHE_PATH.write_text("\n".join(final_backup_repos))
+        print(
+            f"Built cache with {len(final_regular_repos)} regular repositories"
+        )
+        print(
+            f"Built backup cache with {len(final_backup_repos)} backup repositories"
+        )
     elif args.repo is None:
         for repo_dir in _find_git_repos(pathlib.Path().absolute()):
             print(repo_dir)
@@ -193,26 +278,42 @@ def main():
             repo = args.repo.lower()
             repo_dir, host, path = parse_repo(repo)
 
+        # Determine if this is a backup repo
+        is_backup = args.repo.startswith("backup/")
+
         if args.rm:
             if repo_dir.exists():
                 shutil.rmtree(repo_dir)
                 parser.exit()
-            if repo in cache:
-                cache_modified = True
-                cache.remove(repo)
+            if is_backup:
+                if repo in backup_cache:
+                    backup_cache_modified = True
+                    backup_cache.remove(repo)
+            else:
+                if repo in cache:
+                    cache_modified = True
+                    cache.remove(repo)
         else:
             if not repo_dir.exists():
                 repo = f"{host}:{path}"
                 Git.clone(repo, repo_dir)
 
-            cache_modified = True
-            if repo in cache:
-                cache.remove(repo)
-            cache.append(repo)
+            if is_backup:
+                backup_cache_modified = True
+                if repo in backup_cache:
+                    backup_cache.remove(repo)
+                backup_cache.append(repo)
+            else:
+                cache_modified = True
+                if repo in cache:
+                    cache.remove(repo)
+                cache.append(repo)
             print(repo_dir)
 
     if cache_modified:
         CACHE_PATH.write_text("\n".join(cache))
+    if backup_cache_modified:
+        BACKUP_CACHE_PATH.write_text("\n".join(backup_cache))
 
 
 if __name__ == "__main__":
