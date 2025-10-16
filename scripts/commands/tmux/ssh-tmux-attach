@@ -2,6 +2,7 @@
 
 # Parse flags
 DISABLE_TMUX_CHECK=false
+SET_WINDOW_OPTIONS=false
 while [ $# -gt 0 ]; do
     case "$1" in
         -h|--help)
@@ -11,17 +12,23 @@ while [ $# -gt 0 ]; do
             echo "    ssh-tmux-attach [OPTIONS] SSH_HOST"
             echo ""
             echo "OPTIONS:"
-            echo "    -c, --current-pane   Open in current tmux pane (when in tmux session)"
-            echo "    -h, --help           Show this help message"
+            echo "    -c, --current-pane      Open in current tmux pane (when in tmux session)"
+            echo "        --current-window    Open in current tmux window and set window name/options"
+            echo "    -h, --help              Show this help message"
             exit 0
             ;;
         -c|--current-pane)
             DISABLE_TMUX_CHECK=true
             shift
             ;;
+        --current-window)
+            DISABLE_TMUX_CHECK=true
+            SET_WINDOW_OPTIONS=true
+            shift
+            ;;
         -*)
             echo "Unknown option: $1" >&2
-            echo 'usage: [-c|--current-pane] [-h|--help] SSH_HOST' >&2
+            echo 'usage: [-c|--current-pane] [--current-window] [-h|--help] SSH_HOST' >&2
             exit 1
             ;;
         *)
@@ -31,7 +38,7 @@ while [ $# -gt 0 ]; do
 done
 
 if [ $# -ne 1 ]; then
-    echo 'usage: [-c|--current-pane] [-h|--help] SSH_HOST' >&2
+    echo 'usage: [-c|--current-pane] [--current-window] [-h|--help] SSH_HOST' >&2
     exit 1
 fi
 SSH_HOST="$1"
@@ -49,7 +56,14 @@ if [ -n "$TMUX" ] && [ "$DISABLE_TMUX_CHECK" = false ]; then
     tmux set-window-option @renamed on
     tmux set-window-option @nested_mode on
 else
-    # Default behavior - direct SSH connection
+    # Set window options if requested
+    if [ "$SET_WINDOW_OPTIONS" = true ]; then
+        tmux rename-window "ssh $SSH_HOST"
+        tmux set-window-option @renamed on
+        tmux set-window-option @nested_mode on
+    fi
+
+    # Direct SSH connection
     case "$SSH_HOST" in
         mars|phobos|lounge-htpc)
             exec ssh -t "${SSH_HOST}" -- systemd-inhibit --who='ssh-tmux-attach' --what=idle --mode=block zsh -lic tmux-attach

@@ -1,0 +1,82 @@
+#!/usr/bin/env python3
+import asyncio
+import os
+import pathlib
+import subprocess
+import sys
+
+CACHE_HOME = (
+    pathlib.Path(os.environ["XDG_CACHE_HOME"])
+    if os.environ.get("XDG_CACHE_HOME")
+    else pathlib.Path.home() / ".cache"
+)
+HISTORY_PATH = CACHE_HOME / "tmux-ssh-history"
+
+
+class fzf:
+    @classmethod
+    async def select(cls, items, prompt=None, allow_custom=False):
+        """Run fzf with given items and return selected item."""
+        args = ["fzf", "--tac", "--exact", "--no-sort"]
+        if prompt:
+            args.extend(["--prompt", prompt])
+        if allow_custom:
+            args.append("--print-query")
+
+        proc = await asyncio.create_subprocess_exec(
+            *args,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, _ = await proc.communicate(input="\n".join(items).encode())
+
+        match proc.returncode:
+            case 0:
+                output = stdout.decode().strip().split("\n")[-1]
+                return output or None
+            case 130:
+                return None
+            case _:
+                raise subprocess.CalledProcessError(
+                    returncode=proc.returncode, cmd=args, output=stdout
+                )
+
+
+def add_to_history(host):
+    """Add host to history, removing duplicates and adding to end."""
+    history = (
+        [
+            line
+            for line in HISTORY_PATH.read_text().splitlines()
+            if line != host
+        ]
+        if HISTORY_PATH.exists()
+        else []
+    )
+    history.append(host)
+    HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
+    HISTORY_PATH.write_text("\n".join(history))
+
+
+async def main():
+    HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
+    HISTORY_PATH.touch()
+
+    selected = await fzf.select(
+        HISTORY_PATH.read_text().splitlines(),
+        prompt="SSH Host: ",
+        allow_custom=True,
+    )
+    if not selected:
+        sys.exit(130)
+
+    add_to_history(selected)
+
+    os.execvp(
+        "ssh-tmux-attach", ["ssh-tmux-attach", "--current-window", selected]
+    )
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

@@ -8,10 +8,12 @@ import subprocess
 import sys
 import urllib.parse
 
-CODE_ROOT_DIR = pathlib.Path("~/src").expanduser()
-CACHE_ROOT_DIR = pathlib.Path(
-    os.environ.get("XDG_CACHE_HOME", "~/.cache")
-).expanduser()
+CODE_ROOT_DIR = pathlib.Path.home() / "src"
+CACHE_ROOT_DIR = (
+    pathlib.Path(os.environ["XDG_CACHE_HOME"])
+    if os.environ.get("XDG_CACHE_HOME")
+    else pathlib.Path.home() / ".cache"
+)
 CACHE_PATH = CACHE_ROOT_DIR / "git-sync"
 BACKUP_CACHE_PATH = CACHE_ROOT_DIR / "git-sync-backup"
 
