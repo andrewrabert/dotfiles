@@ -81,6 +81,62 @@ class SrcName(enum.StrEnum):
     NULLSUM_NET = "git.nullsum.net"
 
 
+def clean_empty_dirs(root, dry_run=False):
+    """Recursively delete empty directories, skipping git repos."""
+    deleted_count = 0
+
+    def is_git_repo(path):
+        return (path / ".git").exists()
+
+    def clean_dir(path):
+        nonlocal deleted_count
+
+        if not path.is_dir():
+            return False
+
+        # Skip if this is a git repo
+        if is_git_repo(path):
+            return False
+
+        # Don't delete the root directory itself
+        is_root = path == root
+
+        # Check if directory contains any files (not just directories)
+        if not is_root:
+            try:
+                has_files = any(not item.is_dir() for item in path.iterdir())
+                if has_files:
+                    return False
+            except PermissionError:
+                return False
+
+        # Process subdirectories first
+        try:
+            for item in path.iterdir():
+                if item.is_dir():
+                    clean_dir(item)
+        except PermissionError:
+            return False
+
+        # Check if directory is now empty and delete it (but not root)
+        if not is_root:
+            try:
+                contents = list(path.iterdir())
+                if not contents:
+                    print(f"Deleting {path}")
+                    if not dry_run:
+                        path.rmdir()
+                    deleted_count += 1
+                    return True
+            except (PermissionError, OSError):
+                pass
+
+        return False
+
+    clean_dir(root)
+    return deleted_count
+
+
 def parse_repo(repo):
     repo = repo.lower()
     if ":" not in repo:
@@ -144,6 +200,8 @@ def main():
     cache_group.add_argument("--show-cache", action="store_true")
     cache_group.add_argument("--show-backup-cache", action="store_true")
     parser.add_argument("--build-cache", action="store_true")
+    parser.add_argument("--clean-empty", action="store_true")
+    parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--parse-url", action="store_true")
     parser.add_argument("--rm", action="store_true")
     parser.add_argument("repo", nargs="?")
@@ -202,6 +260,9 @@ def main():
         print("\n".join(cache))
     elif args.show_backup_cache:
         print("\n".join(backup_cache))
+    elif args.clean_empty:
+        deleted = clean_empty_dirs(CODE_ROOT_DIR, dry_run=args.dry_run)
+        print(f"Deleted {deleted} empty directories")
     elif args.build_cache:
         # Load existing cache order
         existing_cache = []

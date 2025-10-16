@@ -1,0 +1,29 @@
+#compdef git-sync
+zmodload zsh/mapfile
+
+local cache_root="${XDG_CACHE_HOME:-$HOME/.cache}"
+
+_arguments -s \
+    '(--show-cache --show-backup-cache)--show-cache[Show regular cache]' \
+    '(--show-cache --show-backup-cache)--show-backup-cache[Show backup cache]' \
+    '--build-cache[Build cache from filesystem]' \
+    '--clean-empty[Delete empty directories]' \
+    '--dry-run[Show what would be deleted without deleting]' \
+    '--parse-url[Parse repository URL]' \
+    '--rm[Remove repository]' \
+    '*:repository:->repos'
+
+case $state in
+    repos)
+        # Complete from regular cache by default
+        local cache_file="$cache_root/git-sync"
+        if [[ -f "$cache_file" ]]; then
+            # escape : characters
+            local -a arr
+            arr=("${(f@)mapfile[$cache_file]//:/\:}")
+            # remove empty element
+            arr=($arr)
+            _describe 'repository' arr
+        fi
+        ;;
+esac
