@@ -144,3 +144,6 @@ vim.keymap.set('n', '<leader>td', function()
 end, { desc = 'Toggle diagnostics' })
 
 vim.api.nvim_set_keymap("n", "<leader>w", ":set wrap!<CR>", { noremap = true, silent = true })
+
+-- use system clipboard for all operations
+vim.opt.clipboard = "unnamedplus"
