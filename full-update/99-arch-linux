@@ -641,6 +641,8 @@ async def get_installed_flatpaks():
 
 
 async def ensure_flatpaks():
+    if not shutil.which("flatpak"):
+        return
     installed_flatpaks = await get_installed_flatpaks()
 
     for remote, expected_apps in EXPECTED_FLATPAKS.items():
