@@ -189,6 +189,17 @@ if HOSTNAME in ("mars", "phobos"):
         }
     )
 
+EXPECTED_FLATPAKS = {
+    "flathub": set(),
+}
+
+if HOSTNAME in ("mars", "phobos"):
+    EXPECTED_FLATPAKS["flathub"].update(
+        {
+            "org.equeim.Tremotesf",
+        }
+    )
+
 EXPECTED_PACKAGE_DEPENDENCIES = {
     "cdemu-daemon": {
         "vhba-module-dkms",
@@ -612,6 +623,48 @@ def all_packages():
     return localdb.pkgcache
 
 
+async def get_installed_flatpaks():
+    proc = await asyncio.create_subprocess_exec(
+        "flatpak",
+        "list",
+        "--app",
+        "--columns=application",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.DEVNULL,
+    )
+    stdout, _ = await proc.communicate()
+    if proc.returncode:
+        return set()
+    return {
+        line.strip() for line in stdout.decode().splitlines() if line.strip()
+    }
+
+
+async def ensure_flatpaks():
+    installed_flatpaks = await get_installed_flatpaks()
+
+    for remote, expected_apps in EXPECTED_FLATPAKS.items():
+        missing = expected_apps - installed_flatpaks
+
+        if missing:
+            print(f"Installing missing flatpaks from {remote} ...")
+            for app in missing:
+                print(f"  Installing {app}")
+                proc = await asyncio.create_subprocess_exec(
+                    "flatpak",
+                    "install",
+                    "-y",
+                    "--user",
+                    remote,
+                    app,
+                )
+                await proc.communicate()
+                if proc.returncode:
+                    raise RuntimeError(
+                        f"Failed to install {app}: exit {proc.returncode}"
+                    )
+
+
 async def ensure_packages():
     expected_packages = set(EXPECTED_PACKAGES)
     installed_packages = {package.name: package for package in all_packages()}
@@ -697,6 +750,7 @@ async def main():
 
             await ensure_packages()
             await ensure_package_dependencies()
+            await ensure_flatpaks()
 
             for service in EXPECTED_SERVICES:
                 await enable_unit(service, now=True)
