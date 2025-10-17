@@ -37,6 +37,9 @@ return {
         fzf_opts = {
           ["--layout"] = "reverse-list",
         },
+        files = {
+          fd_opts = "--type f --hidden --follow --exclude .git --ignore-file " .. vim.fn.stdpath("config") .. "/fzf_fd_ignore",
+        },
       })
     end,
   },
