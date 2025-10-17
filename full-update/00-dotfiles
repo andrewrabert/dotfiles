@@ -71,7 +71,17 @@ update_non_user() {
                 printf "%bWarning: %s is a symlink but source is not, skipping%b\n" "$YELLOW" "$target" "$RESET"
                 continue
             fi
-            if sudo test -f "$target" || [ "$tag" != 'common' ]; then
+            if test -L "$source_file" && sudo test -L "$target"; then
+                source_link=$(readlink "$source_file")
+                target_link=$(sudo readlink "$target")
+                if [ "$source_link" != "$target_link" ]; then
+                    echo Syncing "$target"
+                    sudo mkdir -p "$(dirname "$target")"
+                    sudo cp -P "$source_file" "$target"
+                elif [ -n "$VERBOSE" ]; then
+                    echo Found "$tag" "$target"
+                fi
+            elif sudo test -f "$target" || [ "$tag" != 'common' ]; then
                 if ! sudo test -f "$target" || ! sudo diff "$source_file" "$target" > /dev/null 2>&1 ; then
                     echo Syncing "$target"
                     sudo mkdir -p "$(dirname "$target")"
