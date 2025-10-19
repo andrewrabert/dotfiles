@@ -161,7 +161,6 @@ if HOSTNAME in ("mars", "phobos"):
             "element-desktop",
             "foliate",
             "foot",
-            "fooyin",
             "gifski",
             "gimp",
             "gparted",
@@ -201,6 +200,7 @@ if HOSTNAME in ("mars", "phobos"):
     EXPECTED_FLATPAKS["flathub"].update(
         {
             "org.equeim.Tremotesf",
+            "org.fooyin.fooyin",
         }
     )
 
