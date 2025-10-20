@@ -147,3 +147,5 @@ Once the PRD is complete, use `/kier-create-tasks prd.md` to begin interactive t
 ---
 
 **Begin PRD Creation:** Start the interactive requirements gathering session.
+
+**After PRD completion:** Run `/kier-create-tasks prd.md` to create implementation tasks.

@@ -147,3 +147,5 @@ Once planning is complete, create the **tasks.md** file and use `/kier-execute-t
 ---
 
 **Begin Planning Mode:** Read the specified PRD file and start the interactive planning session.
+
+**After tasks.md creation:** Run `/kier-execute-tasks tasks.md` to begin autonomous execution.
