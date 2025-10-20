@@ -644,6 +644,67 @@ async def get_installed_flatpaks():
     }
 
 
+async def get_flatpak_permissions(app):
+    """Get current filesystem permissions for a flatpak."""
+    proc = await asyncio.create_subprocess_exec(
+        "flatpak",
+        "info",
+        "--show-permissions",
+        "--user",
+        app,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.DEVNULL,
+    )
+    stdout, _ = await proc.communicate()
+    if proc.returncode:
+        return set()
+
+    filesystems = set()
+    for line in stdout.decode().splitlines():
+        line = line.strip()
+        if line.startswith("filesystems="):
+            perms = line.split("=", 1)[1]
+            filesystems.update(
+                p.strip() for p in perms.split(";") if p.strip()
+            )
+    return filesystems
+
+
+async def ensure_flatpak_permissions():
+    """Configure persistent filesystem access for flatpaks."""
+    # Note: using :ro will always result in a portal path like /run/user/1000/doc/74ae3507/Library
+    flatpak_permissions = {
+        # portal paths are not consistent,
+        # likely due to /storage being an NFS mount.
+        # eg. it could initially be /run/user/1000/doc/74ae3507/Library, but change to /run/user/1000/doc/efd6054f after a reboot
+        "org.fooyin.fooyin": ["/storage/Audio/Library"],
+    }
+
+    installed_flatpaks = await get_installed_flatpaks()
+
+    for app, paths in flatpak_permissions.items():
+        if app not in installed_flatpaks:
+            continue
+
+        current_perms = await get_flatpak_permissions(app)
+
+        for path in paths:
+            if path not in current_perms:
+                print(f"Granting {app} access to {path}")
+                proc = await asyncio.create_subprocess_exec(
+                    "flatpak",
+                    "override",
+                    "--user",
+                    app,
+                    f"--filesystem={path}",
+                )
+                await proc.communicate()
+                if proc.returncode:
+                    raise RuntimeError(
+                        f"Failed to override {app}: exit {proc.returncode}"
+                    )
+
+
 async def ensure_flatpaks():
     if not shutil.which("flatpak"):
         return
@@ -669,6 +730,8 @@ async def ensure_flatpaks():
                     raise RuntimeError(
                         f"Failed to install {app}: exit {proc.returncode}"
                     )
+
+    await ensure_flatpak_permissions()
 
 
 async def ensure_packages():
