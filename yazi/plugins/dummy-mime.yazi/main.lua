@@ -8,7 +8,7 @@ function M:fetch(job)
 	for i, file in ipairs(job.files) do
 		local url = tostring(file.url)
 		urls[i] = url
-		updates[url] = "image/jpeg"  -- Return empty string for all files
+		updates[url] = "image/jpeg" -- Return empty string for all files
 		state[i] = true
 	end
 

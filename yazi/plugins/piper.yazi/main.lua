@@ -2,7 +2,9 @@
 
 local M = {}
 
-local function fail(job, s) ya.preview_widget(job, ui.Text.parse(s):area(job.area):wrap(ui.Wrap.YES)) end
+local function fail(job, s)
+	ya.preview_widget(job, ui.Text.parse(s):area(job.area):wrap(ui.Wrap.YES))
+end
 
 function M:peek(job)
 	local child, err = Command("sh")
@@ -43,7 +45,9 @@ function M:peek(job)
 	end
 end
 
-function M:seek(job) require("code"):seek(job) end
+function M:seek(job)
+	require("code"):seek(job)
+end
 
 function M.format(job, lines)
 	local format = job.args.format
@@ -57,11 +61,11 @@ function M.format(job, lines)
 
 		local icon = File({
 			url = Url(lines[i]),
-			cha = Cha { kind = lines[i]:sub(-1) == "/" and 1 or 0 },
+			cha = Cha({ kind = lines[i]:sub(-1) == "/" and 1 or 0 }),
 		}):icon()
 
 		if icon then
-			lines[i] = ui.Line { ui.Span(" " .. icon.text .. " "):style(icon.style), lines[i] }
+			lines[i] = ui.Line({ ui.Span(" " .. icon.text .. " "):style(icon.style), lines[i] })
 		end
 	end
 	return ui.Text(lines):area(job.area)

@@ -14,12 +14,8 @@ function M:peek(job)
 	ya.sleep(math.max(0, rt.preview.image_delay / 1000 + start - os.clock()))
 
 	-- Get preview command output first
-	local cmd = Command("preview")
-		:arg("--")
-		:arg(tostring(job.file.url))
-		:stdout(Command.PIPED)
-		:stderr(Command.PIPED)
-	
+	local cmd = Command("preview"):arg("--"):arg(tostring(job.file.url)):stdout(Command.PIPED):stderr(Command.PIPED)
+
 	local preview_lines = {}
 	local child = cmd:spawn()
 	if child then
@@ -33,26 +29,26 @@ function M:peek(job)
 
 	-- Split area 50/50 - thumbnail at top, text at bottom
 	local half_height = math.floor(job.area.h / 2)
-	local image_area = ui.Rect {
+	local image_area = ui.Rect({
 		x = job.area.x,
 		y = job.area.y,
 		w = job.area.w,
-		h = half_height
-	}
+		h = half_height,
+	})
 
-	local text_area = ui.Rect {
+	local text_area = ui.Rect({
 		x = job.area.x,
 		y = job.area.y + half_height,
 		w = job.area.w,
-		h = job.area.h - half_height
-	}
+		h = job.area.h - half_height,
+	})
 
 	-- Show the video thumbnail in the top half
 	local _, err = ya.image_show(cache, image_area)
-	
+
 	-- ALWAYS create a text widget that completely fills the text area
 	local text_lines = {}
-	
+
 	-- Add actual content if we have it
 	if #preview_lines > 0 then
 		local separator = string.rep("─", text_area.w)
@@ -61,25 +57,25 @@ function M:peek(job)
 			table.insert(text_lines, line)
 		end
 	end
-	
+
 	-- Fill the ENTIRE remaining space with blank lines
 	while #text_lines < text_area.h do
 		table.insert(text_lines, string.rep(" ", text_area.w))
 	end
-	
+
 	-- Ensure we don't exceed the area
 	if #text_lines > text_area.h then
 		for i = #text_lines, text_area.h + 1, -1 do
 			text_lines[i] = nil
 		end
 	end
-	
+
 	-- Create the final text that fills every single character of the text area
 	local full_text = table.concat(text_lines, "\n")
-	
+
 	-- ALWAYS show this widget to completely overwrite the area
 	ya.preview_widgets(job, {
-		ui.Text.parse(full_text):area(text_area):wrap(rt.preview.wrap == "yes" and ui.Wrap.YES or ui.Wrap.NO)
+		ui.Text.parse(full_text):area(text_area):wrap(rt.preview.wrap == "yes" and ui.Wrap.YES or ui.Wrap.NO),
 	})
 end
 
@@ -126,11 +122,11 @@ function M:preload(job)
 	})
 
 	if percent ~= 0 then
-		cmd:arg { "-ss", math.floor(meta.format.duration * percent / 100) }
+		cmd:arg({ "-ss", math.floor(meta.format.duration * percent / 100) })
 	end
-	cmd:arg { "-i", tostring(job.file.url) }
+	cmd:arg({ "-i", tostring(job.file.url) })
 	if percent == 0 then
-		cmd:arg { "-map", "disp:attached_pic" }
+		cmd:arg({ "-map", "disp:attached_pic" })
 	end
 
 	-- stylua: ignore
@@ -153,17 +149,17 @@ end
 
 function M:spot(job)
 	local rows = self:spot_base(job)
-	rows[#rows + 1] = ui.Row {}
+	rows[#rows + 1] = ui.Row({})
 
 	ya.spot_table(
 		job,
 		ui.Table(ya.list_merge(rows, require("file"):spot_base(job)))
-			:area(ui.Pos { "center", w = 60, h = 20 })
+			:area(ui.Pos({ "center", w = 60, h = 20 }))
 			:row(1)
 			:col(1)
 			:col_style(th.spot.tbl_col)
 			:cell_style(th.spot.tbl_cell)
-			:widths { ui.Constraint.Length(14), ui.Constraint.Fill(1) }
+			:widths({ ui.Constraint.Length(14), ui.Constraint.Fill(1) })
 	)
 end
 
@@ -177,26 +173,26 @@ function M:spot_base(job)
 	local dur = meta.format.duration or 0
 	local rows = {
 		ui.Row({ "Video" }):style(ui.Style():fg("green")),
-		ui.Row { "  Duration:", string.format("%d:%02d", math.floor(dur / 60), math.floor(dur % 60)) },
+		ui.Row({ "  Duration:", string.format("%d:%02d", math.floor(dur / 60), math.floor(dur % 60)) }),
 	}
 
 	for i, s in ipairs(meta.streams) do
 		if s.codec_type == "video" then
-			rows[#rows + 1] = ui.Row { string.format("  Stream %d:", i), "video" }
-			rows[#rows + 1] = ui.Row { "    Codec:", s.codec_name }
-			rows[#rows + 1] = ui.Row { "    Size:", string.format("%dx%d", s.width, s.height) }
+			rows[#rows + 1] = ui.Row({ string.format("  Stream %d:", i), "video" })
+			rows[#rows + 1] = ui.Row({ "    Codec:", s.codec_name })
+			rows[#rows + 1] = ui.Row({ "    Size:", string.format("%dx%d", s.width, s.height) })
 		elseif s.codec_type == "audio" then
-			rows[#rows + 1] = ui.Row { string.format("  Stream %d:", i), "audio" }
-			rows[#rows + 1] = ui.Row { "    Codec:", s.codec_name }
+			rows[#rows + 1] = ui.Row({ string.format("  Stream %d:", i), "audio" })
+			rows[#rows + 1] = ui.Row({ "    Codec:", s.codec_name })
 		end
 	end
 	return rows
 end
 
 function M.list_meta(url, entries)
-	local cmd = Command("ffprobe"):arg { "-v", "quiet" }
+	local cmd = Command("ffprobe"):arg({ "-v", "quiet" })
 	if not entries:find("attached_pic", 1, true) then
-		cmd:arg { "-select_streams", "v" }
+		cmd:arg({ "-select_streams", "v" })
 	end
 
 	local output, err = cmd:arg({ "-show_entries", entries, "-of", "json=c=1", tostring(url) }):output()

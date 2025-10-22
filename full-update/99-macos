@@ -47,6 +47,7 @@ EXPECTED_PACKAGES = {
     "ruff",
     "sevenzip",  # aka _the_ 7zip
     "shellcheck",
+    "stylua",
     "tmux",
     "tree-sitter-cli",
     "unzip",
@@ -88,7 +89,9 @@ class Homebrew:
 
     @staticmethod
     async def install(packages):
-        proc = await asyncio.create_subprocess_exec("brew", "install", "--", *packages)
+        proc = await asyncio.create_subprocess_exec(
+            "brew", "install", "--", *packages
+        )
         await proc.wait()
         if proc.returncode:
             raise ProcessError(proc)

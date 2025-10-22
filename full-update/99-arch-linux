@@ -103,6 +103,7 @@ if HOSTNAME in ("sol", "mars", "phobos"):
             "speedtest-go",
             "sshfs",
             "sshuttle",
+            "stylua",
             "svgo",
             "syncthing",
             "tmux",
