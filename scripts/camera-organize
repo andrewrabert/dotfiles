@@ -122,7 +122,9 @@ class ffprobe:
             if line.startswith("    creation_time   : ")
         ]
         if match:
-            value = match[0].split(":", maxsplit=1)[-1].strip().removesuffix("Z")
+            value = (
+                match[0].split(":", maxsplit=1)[-1].strip().removesuffix("Z")
+            )
             return datetime.datetime.fromisoformat(value)
 
 
@@ -150,7 +152,9 @@ async def parse_date(path):
     try:
         name = path.name
         if name.startswith(("DOC", "IMG", "VID")) and name[3] in ("-", "_"):
-            dt = datetime.datetime(int(name[4:8]), int(name[8:10]), int(name[10:12]))
+            dt = datetime.datetime(
+                int(name[4:8]), int(name[8:10]), int(name[10:12])
+            )
         elif not set(name[:10]) - set(string.digits):
             dt = datetime.datetime.fromtimestamp(int(name[:10]))
         else:
@@ -186,7 +190,7 @@ def all_files(root):
     return sorted(files)
 
 
-async def process_file(path, target_root, dry_run):
+async def process_file(path, target_root, dry_run, only_copy):
     suffix = path.suffix.lower()
     if suffix in PHOTO_EXT:
         target_path = target_root.joinpath(PHOTO_DIR)
@@ -203,19 +207,27 @@ async def process_file(path, target_root, dry_run):
             )
         else:
             target_path = target_path.joinpath(
-                str(dt.year), str(dt.month).zfill(2), str(dt.day).zfill(2), path.name
+                str(dt.year),
+                str(dt.month).zfill(2),
+                str(dt.day).zfill(2),
+                path.name,
             )
     except Exception:
         target_path = target_path.joinpath("unknown", path.name)
 
     target_path = target_path.with_suffix(target_path.suffix.lower())
     while target_path.exists():
-        target_path = target_path.with_name(target_path.stem + "_" + target_path.suffix)
+        target_path = target_path.with_name(
+            target_path.stem + "_" + target_path.suffix
+        )
     if target_path.exists():
         raise RuntimeError(f"path exists: {path} {target_path}")
     if not dry_run:
         target_path.parent.mkdir(parents=True, exist_ok=True)
-        shutil.move(path, target_path)
+        if only_copy:
+            shutil.move(path, target_path)
+        else:
+            shutil.move(path, target_path)
 
 
 async def main():
@@ -228,6 +240,7 @@ async def main():
         help="target directory (default: %(default)s)",
     )
     parser.add_argument("-d", "--dry-run", action="store_true")
+    parser.add_argument("--copy", action="store_true")
     parser.add_argument("path", type=pathlib.Path, nargs="+")
     args = parser.parse_args()
 
@@ -249,7 +262,9 @@ async def main():
         elif suffix not in PHOTO_EXT and suffix not in VIDEO_EXT:
             print(f'warning: unhandled suffix in "{path}"', file=sys.stderr)
             continue
-        executor.submit(process_file, path, args.target, args.dry_run)
+        executor.submit(
+            process_file, path, args.target, args.dry_run, args.copy
+        )
 
     async for task in tqdm.asyncio.tqdm(executor):
         try:
