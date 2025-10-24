@@ -1,3 +1,8 @@
+vo=gpu-next
+gpu-api=vulkan
+gpu-context=waylandvk
+target-colorspace-hint
+
 sid=no
 sub-scale=0.7
 tone-mapping=reinhard
