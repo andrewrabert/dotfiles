@@ -1,21 +1,220 @@
 #!/usr/bin/env python3
 import argparse
+import asyncio
 import dataclasses
+import json
+import os
 import pathlib
+import re
 import shutil
 import subprocess
+import sys
+
+import pyalpm
 
 
 DATABASE = "sol"
+
+# Pre-compile regex for better performance when parsing many dependencies
+VERSION_CONSTRAINT_RE = re.compile(r"[<>=]")
+
+
+def strip_version(dep_string):
+    """Strip version information from a dependency string.
+
+    Examples:
+        "munt>=2.7.2" -> "munt"
+        "foo=1.0" -> "foo"
+        "bar: optional description" -> "bar"
+    """
+    # Handle optional dependency format with description
+    dep_string = str(dep_string).split(":")[0].strip()
+    # Strip version constraints
+    return VERSION_CONSTRAINT_RE.split(dep_string)[0]
+
+
+async def run_cmd(*cmd, check=False, capture_output=False, **kwargs):
+    """
+    Run a command using asyncio subprocess.
+
+    Args:
+        *cmd: Command and arguments
+        check: If True, raise CalledProcessError on non-zero exit
+        capture_output: If True, capture stdout/stderr
+        **kwargs: Additional arguments for create_subprocess_exec
+
+    Returns:
+        CompletedProcess-like object with returncode, stdout, stderr
+    """
+    if capture_output:
+        kwargs.setdefault("stdout", asyncio.subprocess.PIPE)
+        kwargs.setdefault("stderr", asyncio.subprocess.PIPE)
+
+    proc = await asyncio.create_subprocess_exec(*cmd, **kwargs)
+    stdout, stderr = await proc.communicate()
+
+    if check and proc.returncode != 0:
+        raise subprocess.CalledProcessError(
+            proc.returncode, cmd, output=stdout, stderr=stderr
+        )
+
+    # Return a simple object with the same interface as subprocess.CompletedProcess
+    class Result:
+        def __init__(self, returncode, stdout, stderr):
+            self.returncode = returncode
+            self.stdout = stdout
+            self.stderr = stderr
+
+    return Result(proc.returncode, stdout, stderr)
 
 
 @dataclasses.dataclass
 class Package:
     name: str
     version: str
+    depends: list
+    optdepends: list
+    makedepends: list
+    provides: list
+    pkgbase: str
+
+    def __post_init__(self):
+        """Strip version information from dependency fields."""
+        self.depends = [strip_version(d) for d in self.depends]
+        self.optdepends = [strip_version(d) for d in self.optdepends]
+        self.makedepends = [strip_version(d) for d in self.makedepends]
+        self.provides = [strip_version(p) for p in self.provides]
+
+    @classmethod
+    def from_alpm(cls, alpm_pkg):
+        """Create a Package instance from an alpm.Package object.
+
+        Args:
+            alpm_pkg: A pyalpm.Package object
+
+        Returns:
+            Package instance with dependency versions stripped
+        """
+        return cls(
+            name=alpm_pkg.name,
+            version=alpm_pkg.version,
+            depends=alpm_pkg.depends,
+            optdepends=alpm_pkg.optdepends,
+            makedepends=alpm_pkg.makedepends,
+            provides=alpm_pkg.provides,
+            pkgbase=alpm_pkg.base,
+        )
+
+
+class PackageDatabase:
+    """Helper class to manage pyalpm database access."""
+
+    OFFICIAL_REPOS = [
+        "core",
+        "extra",
+        "multilib",
+    ]
+
+    def __init__(self, repo_name):
+        self.repo_name = repo_name
+        self.handle = pyalpm.Handle("/", "/var/lib/pacman")
+        self._sol_db = self.handle.register_syncdb(self.repo_name, 0)
+
+    @property
+    def sol_db(self):
+        """Get the sol repository database."""
+        return self._sol_db
+
+    def get_official_dbs(self):
+        """Get official Arch repository databases (core, extra, multilib)."""
+        for repo in self.OFFICIAL_REPOS:
+            try:
+                self.handle.register_syncdb(repo, 0)
+            except Exception:
+                pass  # Already registered
+        return self.handle.get_syncdbs()
+
+    def get_all_packages(self):
+        """Get all packages in the sol repository."""
+        packages = []
+        for pkg in self.sol_db.pkgcache:
+            packages.append(Package.from_alpm(pkg))
+        return packages
+
+    def get_package(self, name):
+        """Get a specific package by name."""
+        return self.sol_db.get_pkg(name)
+
+    def load_package_file(self, file_path):
+        """Load a package from a file."""
+        return self.handle.load_pkg(str(file_path))
+
+
+DOTFILES_PRIVATE = pathlib.Path(os.environ["DOTFILES_PRIVATE"])
+CONFIG_PATH = DOTFILES_PRIVATE / "sol-repotool.json"
+
+
+class ConfigFile:
+    def __init__(self, path):
+        self.path = pathlib.Path(path)
+        self._load()
+
+    def _load(self):
+        self.aur = set()
+        self.manual = set()
+        if self.path.exists():
+            data = json.loads(self.path.read_text())
+            packages = data.get("packages", {})
+            self.aur.update(packages.get("aur", []))
+            self.manual.update(packages.get("manual", []))
+
+    def _dump(self):
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        data = {
+            "packages": {
+                "aur": sorted(self.aur),
+                "manual": sorted(self.manual),
+            }
+        }
+        self.path.write_text(json.dumps(data, indent=2, sort_keys=True))
+
+    def get_explicit_packages(self):
+        return set(self.aur)
+
+    def get_no_update_packages(self):
+        return set(self.manual)
+
+    def add_packages(self, *packages):
+        updated = self.aur.copy()
+        updated.update(packages)
+        if updated != self.aur:
+            self.aur = updated
+            self._dump()
+
+    def remove_packages(self, *packages):
+        updated = self.aur - set(packages)
+        if updated != self.aur:
+            self.aur = updated
+            self._dump()
+
+    def add_no_update(self, *packages):
+        updated = self.manual.copy()
+        updated.update(packages)
+        if updated != self.manual:
+            self.manual = updated
+            self._dump()
+
+    def remove_no_update(self, *packages):
+        updated = self.manual - set(packages)
+        if updated != self.manual:
+            self.manual = updated
+            self._dump()
 
 
 class Database:
+    DIRECTORY_BASE = pathlib.Path("/var/cache/pacman")
+    AURUTILS_CACHE = pathlib.Path.home() / ".cache/aurutils/sync"
+
     def __init__(
         self,
         name,
@@ -25,273 +224,872 @@ class Database:
     ):
         self.name = name
 
-        self.directory = (
-            pathlib.Path(directory)
-            if directory is not None
-            else pathlib.Path("/var/cache/pacman") / name
-        )
+        self.directory = self.DIRECTORY_BASE / name
+        if directory:
+            self.directory = pathlib.Path(directory)
 
-        self.aurutils_cache = (
-            pathlib.Path(aurutils_cache)
-            if aurutils_cache is not None
-            else pathlib.Path("~/.cache/aurutils/sync").expanduser()
-        )
+        self.aurutils_cache = self.AURUTILS_CACHE
+        if aurutils_cache:
+            self.aurutils_cache = pathlib.Path(aurutils_cache)
+
+        self.config = ConfigFile(CONFIG_PATH)
 
         self.db_tar = self.directory / f"{self.name}.db.tar"
         self.db_tar_link = self.directory / f"{self.name}.db"
         self.files_tar = self.directory / f"{self.name}.files.tar"
         self.db_files_link = self.directory / f"{self.name}.files"
 
-        # if self.db_tar.is_file():
-        #    subprocess.run(
-        #        ['repo-add', '--sign', self.db_tar],
-        #        check=True)
+        self.pkg_db = PackageDatabase(self.name)
 
-    def _sign_database(self):
+    async def _sign_database(self):
         tar_link = self.directory / f"{self.name}.db"
         files_link = self.directory / f"{self.name}.files"
 
-        for path in paths:
+        for path in [tar_link, files_link]:
             dest = path.with_name(path.name + ".sig")
-            subprocess.run(
-                [
-                    "gpg",
-                    "--yes",
-                    "--detach-sign",
-                    "--use-agent",
-                    "--no-armor",
-                    "--output",
-                    dest,
-                    path,
-                ],
-                check=True,
-            )
-
-    def cleanup(self):
-        for path in self.aurutils_cache.iterdir():
-            for subpath in (path / "src", path / "pkg"):
-                if not subpath.exists():
-                    continue
-                subprocess.run(["chmod", "-R", "777", "--", subpath], check=True)
-                try:
-                    shutil.rmtree(subpath)
-                except FileNotFoundError:
-                    pass
-
-    def packages(self):
-        proc = subprocess.run(
-            ["aur", "repo", "--database", self.name, "--list"],
-            stdout=subprocess.PIPE,
-            check=True,
-        )
-
-        packages = []
-        for line in proc.stdout.decode().splitlines():
-            name, version = line.split()
-            packages.append(Package(name=name, version=version))
-        return packages
-
-    def prune(self):
-        packages = {package.name for package in self.packages()}
-        for path in self.aurutils_cache.iterdir():
-            if path.name not in packages:
-                print("Clearing cache for", path.name)
-                shutil.rmtree(path)
-        self._pacsync()
-        self._paccache()
-        self.sync()
-
-    def sync(self):
-        subprocess.run(
-            [
-                "rsync",
-                "-avz",
-                "--progress",
-                "--delete-after",
-                "/var/cache/pacman/sol/",
-                "nullsum.net:~/srv/http/repo/arch/x86_64",
-            ],
-            check=True,
-        )
-
-    def remove(self, *packages):
-        for package in packages:
-            # run per-package to avoid one package's error
-            # from stopping removal of the others
-            subprocess.run(["repo-remove", "--sign", self.db_tar, package])
-
-            paths = (self.directory).glob(f"{package}*.pkg.*")
-            for path in paths:
-                path.unlink()
-            try:
-                shutil.rmtree(self.aurutils_cache / package)
-            except FileNotFoundError:
-                pass
-        self._pacsync()
-        self.sync()
-
-    @staticmethod
-    def _sign(path):
-        path = pathlib.Path(path)
-        dest = path.with_name(path.name + ".sig")
-        subprocess.run(
-            [
+            await run_cmd(
                 "gpg",
                 "--yes",
                 "--detach-sign",
                 "--use-agent",
                 "--no-armor",
                 "--output",
-                dest,
-                path,
-            ],
+                str(dest),
+                str(path),
+                check=True,
+            )
+
+    async def cleanup(self):
+        for path in self.aurutils_cache.iterdir():
+            for subpath in (path / "src", path / "pkg"):
+                if not subpath.exists():
+                    continue
+                await run_cmd("chmod", "-R", "777", "--", str(subpath), check=True)
+                try:
+                    shutil.rmtree(subpath)
+                except FileNotFoundError:
+                    pass
+
+    async def _get_dependencies(self, package_name, pkg_db=None):
+        """
+        Get all dependencies for a package.
+        Returns a dict with 'required' and 'optional' lists.
+        """
+        # First try pyalpm if pkg_db is provided (much faster)
+        if pkg_db:
+            pkg = pkg_db.get_package(package_name)
+            if pkg:
+                required = []
+                for dep in pkg.depends:
+                    dep_name = strip_version(dep)
+                    if dep_name and dep_name != package_name:
+                        required.append(dep_name)
+
+                optional = []
+                for optdep in pkg.optdepends:
+                    dep_name = strip_version(optdep)
+                    if dep_name and dep_name != package_name:
+                        optional.append(dep_name)
+
+                return {"required": sorted(required), "optional": sorted(optional)}
+
+        # Fallback to aur depends for packages not in sol database
+        # Get required dependencies only
+        proc_required = await run_cmd(
+            "aur", "depends", "--", package_name, capture_output=True
+        )
+
+        required_deps = set()
+        if proc_required.returncode == 0:
+            for line in proc_required.stdout.decode().splitlines():
+                parts = line.split()
+                if len(parts) >= 2:
+                    _, name = parts[0], parts[1]
+                    if name != package_name:
+                        required_deps.add(name)
+
+        # Get all dependencies (required + optional)
+        proc_all = await run_cmd(
+            "aur", "depends", "--optdeps", "--", package_name, capture_output=True
+        )
+
+        all_deps = set()
+        if proc_all.returncode == 0:
+            for line in proc_all.stdout.decode().splitlines():
+                parts = line.split()
+                if len(parts) >= 2:
+                    _, name = parts[0], parts[1]
+                    if name != package_name:
+                        all_deps.add(name)
+
+        # Optional deps are those in all_deps but not in required_deps
+        optional_deps = all_deps - required_deps
+
+        return {
+            "required": sorted(list(required_deps)),
+            "optional": sorted(list(optional_deps)),
+        }
+
+    async def _build_dependency_tree(self, packages, verbose=False):
+        """
+        Build a dependency tree for the given packages.
+        Returns a dict mapping each package to its required and optional dependencies.
+        Format: {"package_name": {"required": [...], "optional": [...]}}
+        """
+        # Initialize pyalpm to speed up dependency lookups
+        dep_tree = {}
+
+        for i, pkg in enumerate(packages, 1):
+            if verbose:
+                print(f"[{i}/{len(packages)}] Checking package: {pkg}")
+
+            deps = await self._get_dependencies(pkg, pkg_db=self.pkg_db)
+
+            if verbose:
+                req_count = len(deps["required"])
+                opt_count = len(deps["optional"])
+                print(
+                    f"  Found {req_count} required, {opt_count} optional dependencies"
+                )
+
+            dep_tree[pkg] = deps
+
+        return dep_tree
+
+    def package_names_from_json(self):
+        """Get all package names from JSON file (packages + no_update)."""
+        all_packages = self.config.get_explicit_packages()
+        all_packages.update(self.config.get_no_update_packages())
+        return list(all_packages)
+
+    def packages(self):
+        """Get all packages in the repository using pyalpm."""
+        return self.pkg_db.get_all_packages()
+
+    def _calculate_needed_packages(self):
+        """
+        Get all dependencies (depends, optdepends, makedepends) for a set of packages.
+        Returns a set of package names including the input packages and all their deps.
+        """
+        all_packages = set(self.config.get_explicit_packages())
+
+        # Process packages until we've expanded all dependencies
+        to_process = all_packages.copy()
+        processed = set()
+
+        while to_process:
+            pkg_name = to_process.pop()
+            if pkg_name in processed:
+                continue
+            processed.add(pkg_name)
+
+            pkg = self.pkg_db.get_package(pkg_name)
+            if not pkg:
+                continue
+
+            # Extract and add all dependency types
+            for dep in pkg.depends:
+                dep_name = strip_version(dep)
+                if dep_name and dep_name not in all_packages:
+                    all_packages.add(dep_name)
+                    to_process.add(dep_name)
+
+            for optdep in pkg.optdepends:
+                dep_name = strip_version(optdep)
+                if dep_name and dep_name not in all_packages:
+                    all_packages.add(dep_name)
+                    to_process.add(dep_name)
+
+            for makedep in pkg.makedepends:
+                dep_name = strip_version(makedep)
+                if dep_name and dep_name not in all_packages:
+                    all_packages.add(dep_name)
+                    to_process.add(dep_name)
+
+        return all_packages
+
+    def get_orphaned_packages(self):
+        """
+        Business Logic: Find packages that should be removed from the repository.
+
+        Orphans = packages currently in repo - packages we need to keep
+
+        A package is kept if:
+        - Its name is needed, OR
+        - Its pkgbase is needed, OR
+        - It provides something that's needed
+        """
+        in_repo = {pkg.name for pkg in self.packages()}
+        to_keep = self._calculate_needed_packages()
+        orphans = set()
+
+        for name in in_repo - to_keep:
+            pkg = Package.from_alpm(self.pkg_db.get_package(name))
+
+            # Check if package is needed by name, pkgbase, or any provides
+            identifiers = [pkg.name, pkg.pkgbase, *pkg.provides]
+            is_needed = any(identifier in to_keep for identifier in identifiers)
+
+            if not is_needed:
+                orphans.add(name)
+
+        return orphans
+
+    async def prune(self, dry_run=False):
+        """Remove packages from repository that aren't in the JSON config."""
+        to_remove = self.get_orphaned_packages()
+
+        if to_remove:
+            if dry_run:
+                print(f"Would remove {len(to_remove)} packages not in config:")
+                for package in sorted(to_remove):
+                    print(f"  - {package}")
+                return
+            else:
+                print(f"Removing {len(to_remove)} packages not in config:")
+                for package in sorted(to_remove):
+                    print(f"  - {package}")
+
+                # Batch remove from database
+                await run_cmd(
+                    "repo-remove", "--sign", str(self.db_tar), *sorted(to_remove)
+                )
+
+                # Remove package files and cache
+                for package in to_remove:
+                    # Remove package files
+                    paths = (self.directory).glob(f"{package}*.pkg.*")
+                    for path in paths:
+                        path.unlink()
+
+                    # Remove from cache
+                    try:
+                        shutil.rmtree(self.aurutils_cache / package)
+                    except FileNotFoundError:
+                        pass
+        else:
+            print("No packages to prune")
+            return
+
+        # Clean up cache for packages that are no longer needed
+        needed_packages = self._calculate_needed_packages()
+
+        for path in self.aurutils_cache.iterdir():
+            if path.name not in needed_packages:
+                print(f"Clearing cache for {path.name}")
+                shutil.rmtree(path)
+
+        await self._pacsync()
+        await self._paccache()
+        await self.sync_to_nullsum_net()
+
+    async def sync_to_nullsum_net(self):
+        await run_cmd(
+            "rsync",
+            "-avz",
+            "--progress",
+            "--delete-after",
+            "/var/cache/pacman/sol/",
+            "nullsum.net:~/srv/http/repo/arch/x86_64",
             check=True,
         )
 
-    def add(self, *packages):
-        self._pacsync()
+    async def remove(self, *packages):
+        packages_to_remove = self.config.aur.intersection(set(packages))
+        if packages_to_remove:
+            print(f"Removing {len(packages_to_remove)} package(s):")
+            for pkg in sorted(packages_to_remove):
+                print(f"  - {pkg}")
+
+            self.config.remove_packages(*packages_to_remove)
+            self.config.remove_no_update(*packages_to_remove)
+
+            await run_cmd(
+                "repo-remove", "--sign", str(self.db_tar), *sorted(packages_to_remove)
+            )
+
+            for package in packages_to_remove:
+                paths = (self.directory).glob(f"{package}*.pkg.*")
+                for path in paths:
+                    path.unlink()
+                try:
+                    shutil.rmtree(self.aurutils_cache / package)
+                except FileNotFoundError:
+                    pass
+
+        await self._pacsync()
+        await self.sync_to_nullsum_net()
+
+    @staticmethod
+    async def _sign(path):
+        path = pathlib.Path(path)
+        dest = path.with_name(path.name + ".sig")
+        await run_cmd(
+            "gpg",
+            "--yes",
+            "--detach-sign",
+            "--use-agent",
+            "--no-armor",
+            "--output",
+            str(dest),
+            str(path),
+            check=True,
+        )
+
+    async def add(self, *packages, as_deps=False, as_explicit=False, parents=None):
+        await self._pacsync()
+
+        # Note: parents parameter is deprecated with the new list-based config format
+        if parents:
+            print(
+                "Warning: --parent flag is deprecated and will be ignored",
+                file=sys.stderr,
+            )
+
+        # Get all packages currently in the repository database
+        repo_packages = {pkg.name for pkg in self.packages()}
 
         packages_and_deps = set()
+        new_packages = []
+        new_files = []
+        already_exists = []
+
+        reclassified = []
+
         for package in packages:
             maybe_path = pathlib.Path(package)
             if maybe_path.is_file():
-                subprocess.run(["sudo", "cp", maybe_path, self.directory], check=True)
-                subprocess.run(["repo-add", self.db_tar, maybe_path], check=True)
-                self._sign(self.directory / maybe_path.name)
-            else:
-                proc = subprocess.run(
-                    ["aur", "depends", "--", package],
-                    stdout=subprocess.PIPE,
-                    check=True,
+                # Handle package file
+                await run_cmd(
+                    "sudo", "cp", str(maybe_path), str(self.directory), check=True
                 )
-                for line in proc.stdout.decode().splitlines():
-                    _, name = line.split()
-                    packages_and_deps.add(name)
+                await run_cmd("repo-add", str(self.db_tar), str(maybe_path), check=True)
+                await self._sign(self.directory / maybe_path.name)
+
+                # Extract package name and pkgbase using pyalpm
+                pkg_file = self.pkg_db.load_package_file(maybe_path)
+                pkg_name_only = pkg_file.name
+                pkgbase = pkg_file.base
+
+                new_files.append(pkg_name_only)
+                self.config.add_no_update(pkgbase)
+
+                if not as_deps:
+                    self.config.add_packages(pkgbase)
+            else:
+                # Check if package already exists in repository
+                if package in repo_packages:
+                    # Package is already built and in the repo
+                    is_in_list = package in self.config.aur
+
+                    if as_deps or as_explicit:
+                        # User wants to change category
+                        if as_deps and is_in_list:
+                            # Change from explicit to dependency (remove from list)
+                            self.config.remove_packages(package)
+                            reclassified.append((package, "explicit", "dependency"))
+                        elif (as_explicit or (not as_deps)) and not is_in_list:
+                            # Change to explicit (add to list)
+                            self.config.add_packages(package)
+                            reclassified.append((package, "dependency", "explicit"))
+                        else:
+                            # Already in the correct category
+                            already_exists.append(package)
+                    else:
+                        # Package exists and no category change requested
+                        already_exists.append(package)
+                    continue
+
+                # Handle new AUR package
+                # Just add the package itself - aur sync will handle dependencies
+                # and makepkg/pacman will properly check if they're satisfied by provides
+                packages_and_deps.add(package)
+                new_packages.append(package)
+
+                if not as_deps:
+                    self.config.add_packages(package)
 
         if packages_and_deps:
-            subprocess.run(
-                [
-                    "aur",
-                    "sync",
-                    "--no-view",
-                    "--no-confirm",
-                    "--no-ver",
-                    f"--database={self.name}",
-                    "--",
-                    *packages_and_deps,
-                ],
+            await run_cmd(
+                "aur",
+                "sync",
+                "--no-view",
+                "--no-confirm",
+                "--no-ver",
+                f"--database={self.name}",
+                "--",
+                *packages_and_deps,
             )
-        self._pacsync()
-        self.sync()
 
-    def update(self):
-        self.cleanup()
-        self._pacsync()
+        # Report reclassified packages
+        if reclassified:
+            print(f"Reclassified {len(reclassified)} package(s):")
+            for package, old_cat, new_cat in sorted(reclassified):
+                print(f"  - {package}: {old_cat} → {new_cat}")
+
+        # Report packages that already exist
+        if already_exists:
+            print(f"Skipping {len(already_exists)} package(s) already in repository:")
+            for package in sorted(already_exists):
+                print(f"  - {package}")
+
+        # Exit early if nothing to add or reclassify
+        if not new_packages and not new_files and not reclassified:
+            if already_exists:
+                print("\nNo new packages to add.")
+            return
+
+        # Only sync if we actually built/added packages or added files
+        if new_packages or new_files:
+            await self._pacsync()
+            await self.sync_to_nullsum_net()
+        elif reclassified:
+            # Only update config file, no need to sync repo
+            print("\nConfiguration updated (no repository sync needed)")
+
+    async def update(self):
+        await self.cleanup()
+        await self._pacsync()
         self.aurutils_cache.mkdir(exist_ok=True, parents=True)
 
-        subprocess.run(
-            [
+        sync_dbs = self.pkg_db.get_official_dbs()
+
+        packages_in_official_repos = set()
+        repo_packages = {pkg.name for pkg in self.packages()}
+
+        for pkg_name in repo_packages:
+            # Check if package is now in any official repo
+            for sync_db in sync_dbs:
+                if sync_db.name != self.name and sync_db.get_pkg(pkg_name):
+                    packages_in_official_repos.add(pkg_name)
+                    break
+
+        if packages_in_official_repos:
+            print(
+                f"Found {len(packages_in_official_repos)} packages now in official repos, removing from sol:"
+            )
+            for pkg in sorted(packages_in_official_repos):
+                print(f"  - {pkg}")
+            await self.remove(*packages_in_official_repos)
+
+        # Calculate what packages we need
+        needed_packages = self._calculate_needed_packages()
+
+        # Get packages currently in the repo
+        repo_packages = {pkg.name for pkg in self.packages()}
+
+        # Only update packages that are currently in the repo and are AUR packages
+        packages_to_update = (needed_packages & repo_packages) - self.config.manual
+
+        # Check for unsatisfied dependencies and add them to packages_to_update
+        sync_dbs = self.pkg_db.get_official_dbs()
+
+        missing_deps = set()
+
+        for pkg_name in repo_packages:
+            sol_pkg = self.pkg_db.get_package(pkg_name)
+            if not sol_pkg:
+                continue
+
+            # Check only required dependencies
+            for dep in sol_pkg.depends:
+                dep_name = strip_version(dep)
+
+                if not dep_name:
+                    continue
+
+                satisfied = False
+
+                # Check sol repo
+                if self.pkg_db.get_package(dep_name):
+                    satisfied = True
+                else:
+                    # Check provides in sol repo
+                    for p in self.pkg_db.sol_db.pkgcache:
+                        for prov in p.provides:
+                            prov_name = strip_version(prov)
+                            if prov_name == dep_name:
+                                satisfied = True
+                                break
+                        if satisfied:
+                            break
+
+                # Check sync repos (official repos)
+                if not satisfied:
+                    for sync_db in sync_dbs:
+                        if sync_db.get_pkg(dep_name):
+                            satisfied = True
+                            break
+                        # Check provides in sync repos
+                        for p in sync_db.pkgcache:
+                            for prov in p.provides:
+                                prov_name = strip_version(prov)
+                                if prov_name == dep_name:
+                                    satisfied = True
+                                    break
+                            if satisfied:
+                                break
+                        if satisfied:
+                            break
+
+                if not satisfied:
+                    missing_deps.add(dep_name)
+
+        if missing_deps:
+            print(
+                f"Found {len(missing_deps)} missing dependencies, adding to update list:"
+            )
+            for dep in sorted(missing_deps):
+                print(f"  - {dep}")
+            packages_to_update.update(missing_deps)
+
+        if not packages_to_update:
+            print("No AUR packages to update")
+            return
+
+        # Calculate maximum distance from parents for each package
+        # This ensures dependencies are updated before packages that depend on them
+        distances = {}
+        parents = self.config.aur
+
+        # Create pyalpm handle once for efficiency
+        try:
+            sol_db = self.pkg_db.sol_db
+        except Exception:
+            raise
+            # If we can't get the database, just use unsorted packages
+            sorted_packages = list(packages_to_update)
+            await run_cmd(
                 "aur",
                 "sync",
                 "--no-view",
                 "--no-confirm",
                 f"--database={self.name}",
-                "--no-ver",
-                "--upgrades",
-            ],
-            cwd=self.aurutils_cache,
+                "--",
+                *sorted_packages,
+                cwd=str(self.aurutils_cache),
+                check=True,
+            )
+            await self._pacsync()
+            await self._paccache()
+            await self.sync_to_nullsum_net()
+            return
+
+        def calculate_distance(pkg, visited=None):
+            if visited is None:
+                visited = set()
+            if pkg in visited:
+                return 0
+            if pkg in distances:
+                return distances[pkg]
+
+            visited.add(pkg)
+
+            # If it's a parent, distance is 0
+            if pkg in parents:
+                distances[pkg] = 0
+                return 0
+
+            # Find all packages that depend on this package
+            max_dist = 0
+
+            # Check which packages depend on this one
+            for potential_parent in packages_to_update:
+                parent_pkg = sol_db.get_pkg(potential_parent)
+                if parent_pkg:
+                    # Check if pkg is in this package's dependencies
+                    for dep in parent_pkg.depends:
+                        dep_name = strip_version(dep)
+                        if dep_name == pkg:
+                            dist = (
+                                calculate_distance(potential_parent, visited.copy()) + 1
+                            )
+                            max_dist = max(max_dist, dist)
+                    for optdep in parent_pkg.optdepends:
+                        dep_name = strip_version(optdep)
+                        if dep_name == pkg:
+                            dist = (
+                                calculate_distance(potential_parent, visited.copy()) + 1
+                            )
+                            max_dist = max(max_dist, dist)
+
+            distances[pkg] = max_dist
+            return max_dist
+
+        # Calculate distances for all packages
+        for pkg in packages_to_update:
+            calculate_distance(pkg)
+
+        # Sort packages by distance (highest first - deepest dependencies first)
+        # Ensure each package appears only once
+        seen = set()
+        sorted_packages = []
+        for pkg in sorted(
+            packages_to_update, key=lambda p: distances.get(p, 0), reverse=True
+        ):
+            if pkg not in seen:
+                seen.add(pkg)
+                sorted_packages.append(pkg)
+
+        # Sync all AUR packages (this will run srcver and detect git package updates)
+        await run_cmd(
+            "aur",
+            "sync",
+            "--no-view",
+            "--no-confirm",
+            f"--database={self.name}",
+            "--",
+            *sorted_packages,
+            cwd=str(self.aurutils_cache),
             check=True,
         )
-        self._pacsync()
-        self._paccache()
-        self.sync()
+        await self._pacsync()
+        await self._paccache()
+        await self.sync_to_nullsum_net()
         return
 
-        r"""
-        packages = self.packages()
-        package_names = [
-            package.name
-            for package in packages
-        ]
-
-        #subprocess.run(
-        #    ['aur', 'sync', *package_names,
-        #     '--no-ver-argv', '--no-build', '--no-view'],
-        #    cwd=self.aurutils_dir,
-        #    check=True)
-
-        for package in packages:
-            print('Checking', package.name)
-
-            repo_ver = package.version
-            proc = subprocess.run(
-                ['aur', 'srcver', package.name],
-                stdout=subprocess.PIPE,
-                cwd=self.aurutils_dir)
-            output = proc.stdout.decode()
-            if not output:
-                continue
-                raise NotImplementedError
-
-            current_ver = output.split()[-1]
-            if current_ver == repo_ver:
-                continue
-            print(repo_ver, current_ver)
-
-        cd ~/.cache/aurutils/sync || exit 1
-
-        for pkg in $package_names; do
-            echo "Checking ${pkg}"
-            escaped_pkg="$(printf '%s' "$pkg" | sed 's/\+/\\+/g')"
-            repo_ver="$(aur repo --database "$DATABASE" --list | grep -P "^$escaped_pkg\t")"
-            current_ver="$(aur srcver "$pkg" || true)"
-            if [ -z "$current_ver" ]; then
-                repotool_add "$pkg"
-            fi
-
-            ood="$(printf '%s' "$repo_ver" | aur vercmp -p <(printf '%s' "$current_ver"))"
-            if [ -n "$ood" ]; then
-                repotool_add "$pkg"
-            fi
-        done
-        """
-
-    def _paccache(self):
-        subprocess.run(
-            ["paccache", "--remove", "--keep", "1", "--cachedir", self.directory],
+    async def _paccache(self):
+        await run_cmd(
+            "paccache",
+            "--remove",
+            "--keep",
+            "1",
+            "--cachedir",
+            str(self.directory),
             check=True,
         )
 
-    def _pacsync(self):
-        subprocess.run(
-            ["sudo", "pacsync", self.name], stderr=subprocess.DEVNULL, check=True
+    async def _pacsync(self):
+        await run_cmd(
+            "sudo", "pacsync", self.name, stderr=asyncio.subprocess.DEVNULL, check=True
         )
 
 
-def db_list():
+def db_list(orphans=False, as_json=False, show_all=False):
     database = Database(DATABASE)
+
+    if orphans:
+        # Show orphaned packages
+        orphan_list = database.get_orphaned_packages()
+        if orphan_list:
+            for package in sorted(orphan_list):
+                print(package)
+        return
+
+    if as_json:
+        # Output full package info as JSON for packages in config
+        try:
+            pkg_db = PackageDatabase(DATABASE)
+        except Exception as e:
+            print(f"Error: Coul not access database: {e}", file=sys.stderr)
+            return
+
+        # Get packages to show
+        if show_all:
+            # Show all packages in sol database
+            packages_to_show = [pkg.name for pkg in database.packages()]
+        else:
+            # Show only packages from config
+            packages_to_show = list(database.config.get_explicit_packages())
+
+        result = {}
+        for pkg_name in packages_to_show:
+            pkg = pkg_db.get_package(pkg_name)
+            if not pkg:
+                continue
+
+            # Get dependencies (only those in sol)
+            depends = []
+            for dep in pkg.depends:
+                dep_name = strip_version(dep)
+                if dep_name and pkg_db.get_package(dep_name):
+                    depends.append(dep_name)
+
+            # Get optional dependencies (only those in sol)
+            optdepends = []
+            for optdep in pkg.optdepends:
+                dep_name = strip_version(optdep)
+                if dep_name and pkg_db.get_package(dep_name):
+                    optdepends.append(dep_name)
+
+            # Get makedepends (only those in sol)
+            makedepends = []
+            for makedep in pkg.makedepends:
+                dep_name = strip_version(makedep)
+                if dep_name and pkg_db.get_package(dep_name):
+                    makedepends.append(dep_name)
+
+            pkg_info = {}
+            if depends:
+                pkg_info["depends"] = sorted(depends)
+            if optdepends:
+                pkg_info["optdepends"] = sorted(optdepends)
+            if makedepends:
+                pkg_info["makedepends"] = sorted(makedepends)
+
+            result[pkg_name] = pkg_info
+
+        print(json.dumps(result, indent=2))
+        return
+
+    # Default: list package names
     for package in database.packages():
         print(package.name)
 
 
-def db_prune():
+def db_show_deps(packages=None):
+    """Show dependencies for packages in the sol database as JSON."""
     database = Database(DATABASE)
-    database.prune()
+
+    # Get list of packages to query
+    if packages:
+        package_list = set(packages)
+    else:
+        # Get all packages from the database
+        package_list = {pkg.name for pkg in database.packages()}
+
+    if not package_list:
+        print("{}")
+        return
+
+    # Initialize pyalpm
+    pkg_db = PackageDatabase(DATABASE)
+
+    result = {"packages": {}}
+
+    # Query each package
+    for pkg_name in package_list:
+        pkg = pkg_db.get_package(pkg_name)
+        if not pkg:
+            continue
+
+        # Get required dependencies
+        required = []
+        for dep in pkg.depends:
+            dep_name = strip_version(dep)
+            if dep_name:
+                required.append(dep_name)
+
+        # Get optional dependencies
+        optional = []
+        for optdep in pkg.optdepends:
+            dep_name = strip_version(optdep)
+            if dep_name:
+                optional.append(dep_name)
+
+        result["packages"][pkg_name] = {"required": required, "optional": optional}
+
+    print(json.dumps(result, indent=2))
 
 
-def db_sync():
+def db_check_deps():
+    """Check for unsatisfied dependencies in the repo."""
     database = Database(DATABASE)
-    database.sync()
+
+    try:
+        pkg_db = PackageDatabase(DATABASE)
+        sync_dbs = pkg_db.get_official_dbs()
+
+        unsatisfied = {}
+
+        for pkg in database.packages():
+            sol_pkg = pkg_db.get_package(pkg.name)
+            if not sol_pkg:
+                continue
+
+            pkg_unsatisfied = []
+
+            # Check only required dependencies (not optdepends or makedepends)
+            all_deps = list(sol_pkg.depends)
+
+            for dep in all_deps:
+                # Extract dependency name (strip version constraints)
+                dep_name = strip_version(dep)
+
+                if not dep_name:
+                    continue
+
+                satisfied = False
+
+                # Check sol repo
+                if pkg_db.get_package(dep_name):
+                    satisfied = True
+                else:
+                    # Check provides in sol repo
+                    for p in pkg_db.sol_db.pkgcache:
+                        for prov in p.provides:
+                            prov_name = strip_version(prov)
+                            if prov_name == dep_name:
+                                satisfied = True
+                                break
+                        if satisfied:
+                            break
+
+                # Check sync repos (official repos)
+                if not satisfied:
+                    for sync_db in sync_dbs:
+                        if sync_db.get_pkg(dep_name):
+                            satisfied = True
+                            break
+                        # Check provides in sync repos
+                        for p in sync_db.pkgcache:
+                            for prov in p.provides:
+                                prov_name = strip_version(prov)
+                                if prov_name == dep_name:
+                                    satisfied = True
+                                    break
+                            if satisfied:
+                                break
+                        if satisfied:
+                            break
+
+                if not satisfied:
+                    pkg_unsatisfied.append(dep_name)
+
+            if pkg_unsatisfied:
+                unsatisfied[pkg.name] = sorted(set(pkg_unsatisfied))
+
+        if unsatisfied:
+            print("Packages with unsatisfied dependencies:")
+            for pkg_name, deps in sorted(unsatisfied.items()):
+                print(f"\n{pkg_name}:")
+                for dep in deps:
+                    print(f"  - {dep}")
+            return 1
+        else:
+            print("All dependencies are satisfied")
+            return 0
+
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        import traceback
+
+        traceback.print_exc()
+        return 1
 
 
-def db_remove(packages):
+async def db_prune(dry_run=False):
     database = Database(DATABASE)
-    database.remove(*packages)
+    await database.prune(dry_run=dry_run)
 
 
-def db_add(packages, delete=False):
+async def db_sync():
     database = Database(DATABASE)
-    database.add(*packages)
+    await database.sync_to_nullsum_net()
+
+
+async def db_remove(packages):
+    database = Database(DATABASE)
+    await database.remove(*packages)
+
+
+async def db_add(
+    packages, delete=False, as_deps=False, as_explicit=False, parents=None
+):
+    database = Database(DATABASE)
+    await database.add(
+        *packages, as_deps=as_deps, as_explicit=as_explicit, parents=parents
+    )
     if delete:
         for package in packages:
             path = pathlib.Path(package)
@@ -299,68 +1097,116 @@ def db_add(packages, delete=False):
                 path.unlink()
 
 
-def db_update():
+async def db_update():
     database = Database(DATABASE)
-    database.update()
+    await database.update()
 
 
-def db_sign(all=False):
+async def db_sign(all=False):
     database = Database(DATABASE)
     if all:
         for path in database.directory.iterdir():
             if not path.name.endswith(".pkg.tar.zst"):
                 continue
-            database._sign(path)
+            await database._sign(path)
     # database._sign_database()
-    database.sync()
+    await database.sync_to_nullsum_net()
 
 
 def main():
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers(dest="command", metavar="COMMAND", required=True)
 
-    add_parser = subparsers.add_parser("add", help="")
-    add_parser.add_argument("--rm", action="store_true")
+    add_parser = subparsers.add_parser("add", help="Add packages to the repository")
+    add_parser.add_argument(
+        "--rm", action="store_true", help="Delete package file after adding"
+    )
+    add_parser.add_argument("--asdeps", action="store_true", help="Add as dependency")
+    add_parser.add_argument(
+        "--asexplicit", action="store_true", help="Add as explicit (default)"
+    )
+    add_parser.add_argument(
+        "--parent",
+        action="append",
+        dest="parents",
+        help="Add as dependency of parent package (can be specified multiple times)",
+    )
     add_parser.add_argument("package", nargs="+")
 
-    list_parser = subparsers.add_parser("list", help="")
-    prune_parser = subparsers.add_parser("prune", help="")
+    list_parser = subparsers.add_parser("list", help="List packages in the repository")
+    list_parser.add_argument(
+        "-o", "--orphans", action="store_true", help="Show orphaned packages only"
+    )
+    list_parser.add_argument(
+        "--json", action="store_true", help="Output package dependencies as JSON"
+    )
+    list_parser.add_argument(
+        "-a",
+        "--all",
+        action="store_true",
+        help="Include all dependencies (not just sol packages)",
+    )
 
-    remove_parser = subparsers.add_parser("remove", help="")
+    prune_parser = subparsers.add_parser("prune", help="Remove packages not in config")
+    prune_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show what would be removed without removing",
+    )
+
+    show_deps_parser = subparsers.add_parser(
+        "show-deps", help="Show dependencies as JSON"
+    )
+    show_deps_parser.add_argument(
+        "package", nargs="*", help="Specific packages (optional, defaults to all)"
+    )
+
+    subparsers.add_parser("check-deps", help="Check for unsatisfied dependencies")
+
+    remove_parser = subparsers.add_parser(
+        "remove", help="Remove packages from the repository"
+    )
     remove_parser.add_argument("package", nargs="+")
 
-    sign_parser = subparsers.add_parser("sign", help="")
+    sign_parser = subparsers.add_parser("sign", help="Sign packages")
     sign_parser.add_argument("--all", action="store_true")
 
-    sync_parser = subparsers.add_parser("sync", help="")
+    subparsers.add_parser("sync", help="Sync repository to remote")
 
-    update_parser = subparsers.add_parser("update", help="")
+    subparsers.add_parser("update", help="Update all packages")
 
     args = parser.parse_args()
 
     match args.command:
-        case "prune":
-            db_prune()
-        case "update":
-            db_update()
-        case "add":
-            db_add(args.package, delete=args.rm)
-        case "remove":
-            db_remove(args.package)
         case "list":
-            db_list()
+            db_list(orphans=args.orphans, as_json=args.json, show_all=args.all)
+        case "prune":
+            asyncio.run(db_prune(dry_run=args.dry_run))
+        case "update":
+            asyncio.run(db_update())
+        case "add":
+            asyncio.run(
+                db_add(
+                    args.package,
+                    delete=args.rm,
+                    as_deps=args.asdeps,
+                    as_explicit=args.asexplicit,
+                    parents=args.parents,
+                )
+            )
+        case "remove":
+            asyncio.run(db_remove(args.package))
+        case "show-deps":
+            db_show_deps(args.package if args.package else None)
+        case "check-deps":
+            db_check_deps()
         case "sign":
-            db_sign(all=args.all)
+            asyncio.run(db_sign(all=args.all))
         case "sync":
-            db_sync()
+            asyncio.run(db_sync())
         case _:
             raise ValueError
 
 
 if __name__ == "__main__":
     main()
-"""
-repotool_update() {
-}
-
-"""
