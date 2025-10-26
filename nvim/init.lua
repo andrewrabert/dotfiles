@@ -145,4 +145,5 @@ end, { desc = "Toggle diagnostics" })
 vim.api.nvim_set_keymap("n", "<leader>w", ":set wrap!<CR>", { noremap = true, silent = true })
 
 -- use system clipboard for all operations
-vim.opt.clipboard = "unnamedplus"
+-- 2025-10-25: disabled due to hanging when no clipboard is available (ssh?)
+-- vim.opt.clipboard = "unnamedplus"
