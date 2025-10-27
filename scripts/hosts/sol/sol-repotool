@@ -7,72 +7,16 @@ import os
 import pathlib
 import re
 import shutil
-import socket
 import subprocess
 import sys
 
 import pyalpm
 
-DEBUG = False
 
 DATABASE = "sol"
-REMOTE_HOST = "sol"  # The host where the repository lives
 
 # Pre-compile regex for better performance when parsing many dependencies
 VERSION_CONSTRAINT_RE = re.compile(r"[<>=]")
-
-
-def is_remote_mode():
-    """Check if we're running on a different host than the repository host."""
-    return socket.gethostname() != REMOTE_HOST
-
-
-async def remote_rsync_packages(package_files):
-    """Rsync package files to the remote host.
-
-    Args:
-        package_files: List of package file paths to transfer
-
-    Returns:
-        List of remote file paths on the destination host
-    """
-    if not package_files:
-        return []
-
-    # Create temporary directory on remote host
-    remote_tmp = f"/tmp/sol-repotool-{os.getpid()}"
-    cmd = ["ssh", "-t", REMOTE_HOST, "mkdir", "-p", remote_tmp]
-    proc = await asyncio.create_subprocess_exec(*cmd)
-    returncode = await proc.wait()
-    if returncode != 0:
-        raise subprocess.CalledProcessError(returncode, cmd)
-
-    # Rsync all packages
-    for pkg_file in package_files:
-        await run_cmd(
-            "rsync",
-            "-avz",
-            "--progress",
-            str(pkg_file),
-            f"{REMOTE_HOST}:{remote_tmp}/",
-            check=True,
-        )
-
-    # Return remote paths
-    return [f"{remote_tmp}/{pathlib.Path(p).name}" for p in package_files]
-
-
-async def remote_run_repotool(*args):
-    """Run sol-repotool on the remote host via SSH.
-
-    Args:
-        *args: Arguments to pass to sol-repotool
-    """
-    cmd = ["ssh", "-t", REMOTE_HOST, "sol-repotool", *args]
-    proc = await asyncio.create_subprocess_exec(*cmd)
-    returncode = await proc.wait()
-    if returncode != 0:
-        raise subprocess.CalledProcessError(returncode, cmd)
 
 
 def strip_version(dep_string):
@@ -106,8 +50,6 @@ async def run_cmd(*cmd, check=False, capture_output=False, **kwargs):
         kwargs.setdefault("stdout", asyncio.subprocess.PIPE)
         kwargs.setdefault("stderr", asyncio.subprocess.PIPE)
 
-    if DEBUG:
-        print(f"Running command: {cmd} {kwargs}")
     proc = await asyncio.create_subprocess_exec(*cmd, **kwargs)
     stdout, stderr = await proc.communicate()
 
@@ -318,23 +260,11 @@ class Database:
             )
 
     async def cleanup(self):
-        if not self.aurutils_cache.exists():
-            return
-
-        # Only clean up packages we're managing (config packages + their deps in sol repo)
-        needed_packages = self._calculate_needed_packages()
-
-        for pkg_name in needed_packages:
-            pkg_cache = self.aurutils_cache / pkg_name
-            if not pkg_cache.exists():
-                continue
-
-            for subpath in (pkg_cache / "src", pkg_cache / "pkg"):
+        for path in self.aurutils_cache.iterdir():
+            for subpath in (path / "src", path / "pkg"):
                 if not subpath.exists():
                     continue
-                await run_cmd(
-                    "chmod", "-R", "777", "--", str(subpath), check=True
-                )
+                await run_cmd("chmod", "-R", "777", "--", str(subpath), check=True)
                 try:
                     shutil.rmtree(subpath)
                 except FileNotFoundError:
@@ -361,10 +291,7 @@ class Database:
                     if dep_name and dep_name != package_name:
                         optional.append(dep_name)
 
-                return {
-                    "required": sorted(required),
-                    "optional": sorted(optional),
-                }
+                return {"required": sorted(required), "optional": sorted(optional)}
 
         # Fallback to aur depends for packages not in sol database
         # Get required dependencies only
@@ -383,12 +310,7 @@ class Database:
 
         # Get all dependencies (required + optional)
         proc_all = await run_cmd(
-            "aur",
-            "depends",
-            "--optdeps",
-            "--",
-            package_name,
-            capture_output=True,
+            "aur", "depends", "--optdeps", "--", package_name, capture_output=True
         )
 
         all_deps = set()
@@ -506,9 +428,7 @@ class Database:
 
             # Check if package is needed by name, pkgbase, or any provides
             identifiers = [pkg.name, pkg.pkgbase, *pkg.provides]
-            is_needed = any(
-                identifier in to_keep for identifier in identifiers
-            )
+            is_needed = any(identifier in to_keep for identifier in identifiers)
 
             if not is_needed:
                 orphans.add(name)
@@ -532,10 +452,7 @@ class Database:
 
                 # Batch remove from database
                 await run_cmd(
-                    "repo-remove",
-                    "--sign",
-                    str(self.db_tar),
-                    *sorted(to_remove),
+                    "repo-remove", "--sign", str(self.db_tar), *sorted(to_remove)
                 )
 
                 # Remove package files and cache
@@ -588,10 +505,7 @@ class Database:
             self.config.remove_no_update(*packages_to_remove)
 
             await run_cmd(
-                "repo-remove",
-                "--sign",
-                str(self.db_tar),
-                *sorted(packages_to_remove),
+                "repo-remove", "--sign", str(self.db_tar), *sorted(packages_to_remove)
             )
 
             for package in packages_to_remove:
@@ -622,18 +536,8 @@ class Database:
             check=True,
         )
 
-    async def add(
-        self, *packages, as_deps=False, as_explicit=False, parents=None
-    ):
-        # Build packages locally (same whether on sol or remote)
-        if is_remote_mode():
-            print(
-                f"Running in remote mode (building on {socket.gethostname()}, adding to {REMOTE_HOST})"
-            )
-
-        # For remote mode, skip pacsync since we don't have the repo locally
-        if not is_remote_mode():
-            await self._pacsync()
+    async def add(self, *packages, as_deps=False, as_explicit=False, parents=None):
+        await self._pacsync()
 
         # Note: parents parameter is deprecated with the new list-based config format
         if parents:
@@ -642,16 +546,12 @@ class Database:
                 file=sys.stderr,
             )
 
-        # Get all packages currently in the repository database (skip if remote)
-        repo_packages = (
-            set()
-            if is_remote_mode()
-            else {pkg.name for pkg in self.packages()}
-        )
+        # Get all packages currently in the repository database
+        repo_packages = {pkg.name for pkg in self.packages()}
 
         packages_and_deps = set()
         new_packages = []
-        pkg_files_to_transfer = []  # For remote mode
+        new_files = []
         already_exists = []
 
         reclassified = []
@@ -660,35 +560,22 @@ class Database:
             maybe_path = pathlib.Path(package)
             if maybe_path.is_file():
                 # Handle package file
-                if is_remote_mode():
-                    # In remote mode, just track file for transfer
-                    pkg_files_to_transfer.append(maybe_path)
-                else:
-                    # Local mode: add directly to repository
-                    await run_cmd(
-                        "sudo",
-                        "cp",
-                        str(maybe_path),
-                        str(self.directory),
-                        check=True,
-                    )
-                    await run_cmd(
-                        "repo-add",
-                        str(self.db_tar),
-                        str(maybe_path),
-                        check=True,
-                    )
-                    await self._sign(self.directory / maybe_path.name)
+                await run_cmd(
+                    "sudo", "cp", str(maybe_path), str(self.directory), check=True
+                )
+                await run_cmd("repo-add", str(self.db_tar), str(maybe_path), check=True)
+                await self._sign(self.directory / maybe_path.name)
 
-                    # Extract package name and pkgbase using pyalpm
-                    pkg_file = self.pkg_db.load_package_file(maybe_path)
-                    pkg_name_only = pkg_file.name
-                    pkgbase = pkg_file.base
+                # Extract package name and pkgbase using pyalpm
+                pkg_file = self.pkg_db.load_package_file(maybe_path)
+                pkg_name_only = pkg_file.name
+                pkgbase = pkg_file.base
 
-                    self.config.add_no_update(pkgbase)
+                new_files.append(pkg_name_only)
+                self.config.add_no_update(pkgbase)
 
-                    if not as_deps:
-                        self.config.add_packages(pkgbase)
+                if not as_deps:
+                    self.config.add_packages(pkgbase)
             else:
                 # Check if package already exists in repository
                 if package in repo_packages:
@@ -700,15 +587,11 @@ class Database:
                         if as_deps and is_in_list:
                             # Change from explicit to dependency (remove from list)
                             self.config.remove_packages(package)
-                            reclassified.append(
-                                (package, "explicit", "dependency")
-                            )
+                            reclassified.append((package, "explicit", "dependency"))
                         elif (as_explicit or (not as_deps)) and not is_in_list:
                             # Change to explicit (add to list)
                             self.config.add_packages(package)
-                            reclassified.append(
-                                (package, "dependency", "explicit")
-                            )
+                            reclassified.append((package, "dependency", "explicit"))
                         else:
                             # Already in the correct category
                             already_exists.append(package)
@@ -723,7 +606,7 @@ class Database:
                 packages_and_deps.add(package)
                 new_packages.append(package)
 
-                if not as_deps and not is_remote_mode():
+                if not as_deps:
                     self.config.add_packages(package)
 
         if packages_and_deps:
@@ -738,23 +621,6 @@ class Database:
                 *packages_and_deps,
             )
 
-            # If remote mode, find the built package files
-            if is_remote_mode():
-                for pkg_name in packages_and_deps:
-                    # Look for .pkg.tar.* files in the repository directory
-                    pkg_pattern = f"{pkg_name}*.pkg.tar.*"
-                    matches = list(self.directory.glob(pkg_pattern))
-                    # Filter out signature files
-                    matches = [
-                        m for m in matches if not m.name.endswith(".sig")
-                    ]
-                    if matches:
-                        # Use the most recent match
-                        pkg_file = max(
-                            matches, key=lambda p: p.stat().st_mtime
-                        )
-                        pkg_files_to_transfer.append(pkg_file)
-
         # Report reclassified packages
         if reclassified:
             print(f"Reclassified {len(reclassified)} package(s):")
@@ -763,154 +629,25 @@ class Database:
 
         # Report packages that already exist
         if already_exists:
-            print(
-                f"Skipping {len(already_exists)} package(s) already in repository:"
-            )
+            print(f"Skipping {len(already_exists)} package(s) already in repository:")
             for package in sorted(already_exists):
                 print(f"  - {package}")
 
-        # Remote mode: transfer packages and call sol-repotool add --rm
-        if is_remote_mode():
-            if not pkg_files_to_transfer:
-                print("No packages to transfer")
-                return
-
-            # Transfer packages to sol
-            print(
-                f"Transferring {len(pkg_files_to_transfer)} package(s) to {REMOTE_HOST}..."
-            )
-            remote_paths = await remote_rsync_packages(pkg_files_to_transfer)
-
-            # Build the add command
-            add_args = ["add", "--rm"]
-            if as_deps:
-                add_args.append("--asdeps")
-            if as_explicit:
-                add_args.append("--asexplicit")
-            add_args.extend(remote_paths)
-
-            # Run sol-repotool add on the remote host
-            print(f"Adding packages on {REMOTE_HOST}...")
-            await remote_run_repotool(*add_args)
-            print("Remote add completed successfully")
-            return
-
-        # Local mode: Exit early if nothing to add or reclassify
-        if not new_packages and not reclassified:
+        # Exit early if nothing to add or reclassify
+        if not new_packages and not new_files and not reclassified:
             if already_exists:
                 print("\nNo new packages to add.")
             return
 
-        # Only sync if we actually built/added packages
-        if new_packages:
+        # Only sync if we actually built/added packages or added files
+        if new_packages or new_files:
             await self._pacsync()
             await self.sync_to_nullsum_net()
         elif reclassified:
             # Only update config file, no need to sync repo
             print("\nConfiguration updated (no repository sync needed)")
 
-    async def update(self, list_only=False):
-        # Remote mode: build locally, then transfer to sol
-        if is_remote_mode():
-            print(
-                f"Running in remote mode (building on {socket.gethostname()}, updating on {REMOTE_HOST})"
-            )
-            # Get list of packages to update from remote
-            print(f"Fetching package list from {REMOTE_HOST}...")
-
-            # Use script to capture output while keeping interactive terminal
-            import tempfile
-            with tempfile.NamedTemporaryFile(mode='w+', delete=False, suffix='.txt') as f:
-                tmpfile = f.name
-
-            try:
-                if DEBUG:
-                    print(f"Running: ssh -t {REMOTE_HOST} sol-repotool update --list-only > {tmpfile}")
-                proc = await asyncio.create_subprocess_exec(
-                    "ssh", "-t", REMOTE_HOST, f"sol-repotool update --list-only > {tmpfile}",
-                )
-                await proc.wait()
-
-                if proc.returncode != 0:
-                    print("Failed to get package list from remote")
-                    return
-
-                # Fetch the file back
-                if DEBUG:
-                    print(f"Fetching: scp {REMOTE_HOST}:{tmpfile} {tmpfile}")
-                proc2 = await asyncio.create_subprocess_exec(
-                    "scp", f"{REMOTE_HOST}:{tmpfile}", tmpfile,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                )
-                await proc2.wait()
-
-                # Read the package list
-                with open(tmpfile, 'r') as f:
-                    package_list = [line.strip() for line in f if line.strip()]
-
-                if DEBUG:
-                    print(f"Got {len(package_list)} packages from remote")
-
-                # Cleanup remote file
-                if DEBUG:
-                    print(f"Cleaning up: ssh {REMOTE_HOST} rm -f {tmpfile}")
-                proc3 = await asyncio.create_subprocess_exec(
-                    "ssh", REMOTE_HOST, f"rm -f {tmpfile}",
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                )
-                await proc3.wait()
-            finally:
-                # Cleanup local file
-                pathlib.Path(tmpfile).unlink(missing_ok=True)
-
-            if not package_list:
-                print("No packages to update")
-                return
-
-            print(f"Building {len(package_list)} package(s) locally:")
-            for pkg in package_list:
-                print(f"  - {pkg}")
-
-            # Build packages locally (without adding to local repo)
-            # Use aur build instead of aur sync to avoid repo database issues
-            proc = await asyncio.create_subprocess_exec(
-                "aur",
-                "build",
-                "--no-view",
-                "--no-confirm",
-                "--",
-                *package_list,
-            )
-            returncode = await proc.wait()
-            if returncode != 0:
-                print("Build failed")
-                return
-
-            # Find built package files
-            pkg_files_to_transfer = []
-            for pkg_name in package_list:
-                pkg_pattern = f"{pkg_name}*.pkg.tar.*"
-                matches = list(self.directory.glob(pkg_pattern))
-                matches = [m for m in matches if not m.name.endswith(".sig")]
-                if matches:
-                    pkg_file = max(matches, key=lambda p: p.stat().st_mtime)
-                    pkg_files_to_transfer.append(pkg_file)
-
-            if not pkg_files_to_transfer:
-                print("No package files found to transfer")
-                return
-
-            # Transfer to sol and add
-            print(f"Transferring {len(pkg_files_to_transfer)} package(s) to {REMOTE_HOST}...")
-            remote_paths = await remote_rsync_packages(pkg_files_to_transfer)
-
-            print(f"Adding packages on {REMOTE_HOST}...")
-            await remote_run_repotool("add", "--rm", *remote_paths)
-            print("Remote update completed successfully")
-            return
-
+    async def update(self):
         await self.cleanup()
         await self._pacsync()
         self.aurutils_cache.mkdir(exist_ok=True, parents=True)
@@ -942,9 +679,7 @@ class Database:
         repo_packages = {pkg.name for pkg in self.packages()}
 
         # Only update packages that are currently in the repo and are AUR packages
-        packages_to_update = (
-            needed_packages & repo_packages
-        ) - self.config.manual
+        packages_to_update = (needed_packages & repo_packages) - self.config.manual
 
         # Check for unsatisfied dependencies and add them to packages_to_update
         sync_dbs = self.pkg_db.get_official_dbs()
@@ -1067,20 +802,14 @@ class Database:
                         dep_name = strip_version(dep)
                         if dep_name == pkg:
                             dist = (
-                                calculate_distance(
-                                    potential_parent, visited.copy()
-                                )
-                                + 1
+                                calculate_distance(potential_parent, visited.copy()) + 1
                             )
                             max_dist = max(max_dist, dist)
                     for optdep in parent_pkg.optdepends:
                         dep_name = strip_version(optdep)
                         if dep_name == pkg:
                             dist = (
-                                calculate_distance(
-                                    potential_parent, visited.copy()
-                                )
-                                + 1
+                                calculate_distance(potential_parent, visited.copy()) + 1
                             )
                             max_dist = max(max_dist, dist)
 
@@ -1101,12 +830,6 @@ class Database:
             if pkg not in seen:
                 seen.add(pkg)
                 sorted_packages.append(pkg)
-
-        # If list_only, just print packages and exit
-        if list_only:
-            for pkg in sorted_packages:
-                print(pkg)
-            return
 
         # Sync all AUR packages (this will run srcver and detect git package updates)
         await run_cmd(
@@ -1137,10 +860,9 @@ class Database:
         )
 
     async def _pacsync(self):
-        proc = await asyncio.create_subprocess_exec("sudo", "pacsync", self.name)
-        returncode = await proc.wait()
-        if returncode != 0:
-            raise subprocess.CalledProcessError(returncode, ["sudo", "pacsync", self.name])
+        await run_cmd(
+            "sudo", "pacsync", self.name, stderr=asyncio.subprocess.DEVNULL, check=True
+        )
 
 
 def db_list(orphans=False, as_json=False, show_all=False):
@@ -1255,10 +977,7 @@ def db_show_deps(packages=None):
             if dep_name:
                 optional.append(dep_name)
 
-        result["packages"][pkg_name] = {
-            "required": required,
-            "optional": optional,
-        }
+        result["packages"][pkg_name] = {"required": required, "optional": optional}
 
     print(json.dumps(result, indent=2))
 
@@ -1378,9 +1097,9 @@ async def db_add(
                 path.unlink()
 
 
-async def db_update(list_only=False):
+async def db_update():
     database = Database(DATABASE)
-    await database.update(list_only=list_only)
+    await database.update()
 
 
 async def db_sign(all=False):
@@ -1396,20 +1115,13 @@ async def db_sign(all=False):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--verbose", action="store_true")
-    subparsers = parser.add_subparsers(
-        dest="command", metavar="COMMAND", required=True
-    )
+    subparsers = parser.add_subparsers(dest="command", metavar="COMMAND", required=True)
 
-    add_parser = subparsers.add_parser(
-        "add", help="Add packages to the repository"
-    )
+    add_parser = subparsers.add_parser("add", help="Add packages to the repository")
     add_parser.add_argument(
         "--rm", action="store_true", help="Delete package file after adding"
     )
-    add_parser.add_argument(
-        "--asdeps", action="store_true", help="Add as dependency"
-    )
+    add_parser.add_argument("--asdeps", action="store_true", help="Add as dependency")
     add_parser.add_argument(
         "--asexplicit", action="store_true", help="Add as explicit (default)"
     )
@@ -1421,19 +1133,12 @@ def main():
     )
     add_parser.add_argument("package", nargs="+")
 
-    list_parser = subparsers.add_parser(
-        "list", help="List packages in the repository"
+    list_parser = subparsers.add_parser("list", help="List packages in the repository")
+    list_parser.add_argument(
+        "-o", "--orphans", action="store_true", help="Show orphaned packages only"
     )
     list_parser.add_argument(
-        "-o",
-        "--orphans",
-        action="store_true",
-        help="Show orphaned packages only",
-    )
-    list_parser.add_argument(
-        "--json",
-        action="store_true",
-        help="Output package dependencies as JSON",
+        "--json", action="store_true", help="Output package dependencies as JSON"
     )
     list_parser.add_argument(
         "-a",
@@ -1442,9 +1147,7 @@ def main():
         help="Include all dependencies (not just sol packages)",
     )
 
-    prune_parser = subparsers.add_parser(
-        "prune", help="Remove packages not in config"
-    )
+    prune_parser = subparsers.add_parser("prune", help="Remove packages not in config")
     prune_parser.add_argument(
         "--dry-run",
         action="store_true",
@@ -1455,14 +1158,10 @@ def main():
         "show-deps", help="Show dependencies as JSON"
     )
     show_deps_parser.add_argument(
-        "package",
-        nargs="*",
-        help="Specific packages (optional, defaults to all)",
+        "package", nargs="*", help="Specific packages (optional, defaults to all)"
     )
 
-    subparsers.add_parser(
-        "check-deps", help="Check for unsatisfied dependencies"
-    )
+    subparsers.add_parser("check-deps", help="Check for unsatisfied dependencies")
 
     remove_parser = subparsers.add_parser(
         "remove", help="Remove packages from the repository"
@@ -1474,18 +1173,9 @@ def main():
 
     subparsers.add_parser("sync", help="Sync repository to remote")
 
-    update_parser = subparsers.add_parser("update", help="Update all packages")
-    update_parser.add_argument(
-        "--list-only",
-        action="store_true",
-        help="Only list packages to update (don't build)",
-    )
+    subparsers.add_parser("update", help="Update all packages")
 
     args = parser.parse_args()
-
-    if args.verbose:
-        global DEBUG
-        DEBUG = True
 
     match args.command:
         case "list":
@@ -1493,7 +1183,7 @@ def main():
         case "prune":
             asyncio.run(db_prune(dry_run=args.dry_run))
         case "update":
-            asyncio.run(db_update(list_only=args.list_only))
+            asyncio.run(db_update())
         case "add":
             asyncio.run(
                 db_add(
