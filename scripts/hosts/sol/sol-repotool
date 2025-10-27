@@ -818,7 +818,7 @@ class Database:
             # Get list of packages to update from remote
             print(f"Fetching package list from {REMOTE_HOST}...")
             proc = await asyncio.create_subprocess_exec(
-                "ssh", REMOTE_HOST, "sol-repotool", "update", "--list-only",
+                "ssh", "-t", REMOTE_HOST, "sol-repotool", "update", "--list-only",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
