@@ -100,7 +100,7 @@ async def run_cmd(*cmd, check=False, capture_output=False, **kwargs):
         kwargs.setdefault("stderr", asyncio.subprocess.PIPE)
 
     if DEBUG:
-        print("Running command: {cmd} {kwargs}")
+        print(f"Running command: {cmd} {kwargs}")
     proc = await asyncio.create_subprocess_exec(*cmd, **kwargs)
     stdout, stderr = await proc.communicate()
 
