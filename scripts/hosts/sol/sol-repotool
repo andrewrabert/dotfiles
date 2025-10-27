@@ -17,6 +17,7 @@ DEBUG = False
 
 DATABASE = "sol"
 REMOTE_HOST = "sol"  # The host where the repository lives
+PASSWD = os.environ.get("SUDO_PASSWD", "")
 
 # Pre-compile regex for better performance when parsing many dependencies
 VERSION_CONSTRAINT_RE = re.compile(r"[<>=]")
@@ -66,7 +67,7 @@ async def remote_run_repotool(*args):
     Args:
         *args: Arguments to pass to sol-repotool
     """
-    cmd = ["ssh", REMOTE_HOST, "sol-repotool", *args]
+    cmd = ["ssh", "-t", REMOTE_HOST, "sol-repotool", *args]
     await run_cmd(*cmd, check=True)
 
 
@@ -84,7 +85,9 @@ def strip_version(dep_string):
     return VERSION_CONSTRAINT_RE.split(dep_string)[0]
 
 
-async def run_cmd(*cmd, check=False, capture_output=False, **kwargs):
+async def run_cmd(
+    *cmd, check=False, capture_output=False, input=None, **kwargs
+):
     """
     Run a command using asyncio subprocess.
 
@@ -92,6 +95,7 @@ async def run_cmd(*cmd, check=False, capture_output=False, **kwargs):
         *cmd: Command and arguments
         check: If True, raise CalledProcessError on non-zero exit
         capture_output: If True, capture stdout/stderr
+        input: Optional bytes to send to stdin
         **kwargs: Additional arguments for create_subprocess_exec
 
     Returns:
@@ -104,7 +108,7 @@ async def run_cmd(*cmd, check=False, capture_output=False, **kwargs):
     if DEBUG:
         print(f"Running command: {cmd} {kwargs}")
     proc = await asyncio.create_subprocess_exec(*cmd, **kwargs)
-    stdout, stderr = await proc.communicate()
+    stdout, stderr = await proc.communicate(input=input)
 
     if check and proc.returncode != 0:
         raise subprocess.CalledProcessError(
@@ -662,10 +666,12 @@ class Database:
                     # Local mode: add directly to repository
                     await run_cmd(
                         "sudo",
+                        "-S",
                         "cp",
                         str(maybe_path),
                         str(self.directory),
                         check=True,
+                        input=(PASSWD + "\n").encode() if PASSWD else None,
                     )
                     await run_cmd(
                         "repo-add",
@@ -1034,7 +1040,15 @@ class Database:
         )
 
     async def _pacsync(self):
-        await run_cmd("sudo", "pacsync", self.name, check=True)
+        await run_cmd(
+            "sudo",
+            "-S",
+            "pacsync",
+            self.name,
+            stdin=asyncio.subprocess.PIPE,
+            check=True,
+            input=(PASSWD + "\n").encode() if PASSWD else None,
+        )
 
 
 def db_list(orphans=False, as_json=False, show_all=False):
