@@ -873,13 +873,13 @@ class Database:
             for pkg in package_list:
                 print(f"  - {pkg}")
 
-            # Build packages locally
+            # Build packages locally (without adding to local repo)
+            # Use aur build instead of aur sync to avoid repo database issues
             proc = await asyncio.create_subprocess_exec(
                 "aur",
-                "sync",
+                "build",
                 "--no-view",
                 "--no-confirm",
-                f"--database={self.name}",
                 "--",
                 *package_list,
             )
