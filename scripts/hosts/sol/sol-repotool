@@ -42,9 +42,7 @@ async def remote_rsync_packages(package_files):
 
     # Create temporary directory on remote host
     remote_tmp = f"/tmp/sol-repotool-{os.getpid()}"
-    await run_cmd(
-        "ssh", "-t", REMOTE_HOST, "mkdir", "-p", remote_tmp, check=True
-    )
+    await run_cmd("ssh", REMOTE_HOST, "mkdir", "-p", remote_tmp, check=True)
 
     # Rsync all packages
     for pkg_file in package_files:
@@ -67,7 +65,14 @@ async def remote_run_repotool(*args):
     Args:
         *args: Arguments to pass to sol-repotool
     """
-    cmd = ["ssh", "-t", REMOTE_HOST, "sol-repotool", *args]
+    # Get sudo password locally if not already set
+    passwd = PASSWD
+    if not passwd:
+        import getpass
+        passwd = getpass.getpass("Enter sudo password for remote host: ")
+
+    # Pass SUDO_PASSWD environment variable to remote command
+    cmd = ["ssh", REMOTE_HOST, f"SUDO_PASSWD={passwd}", "sol-repotool", *args]
     await run_cmd(*cmd, check=True)
 
 
