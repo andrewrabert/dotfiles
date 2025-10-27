@@ -817,15 +817,20 @@ class Database:
             )
             # Get list of packages to update from remote
             print(f"Fetching package list from {REMOTE_HOST}...")
-            result = await run_cmd(
+            proc = await asyncio.create_subprocess_exec(
                 "ssh", REMOTE_HOST, "sol-repotool", "update", "--list-only",
-                capture_output=True,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
             )
-            if result.returncode != 0:
+            stdout, stderr = await proc.communicate()
+
+            if proc.returncode != 0:
                 print("Failed to get package list from remote")
+                if stderr:
+                    print(stderr.decode(), file=sys.stderr)
                 return
 
-            package_list = result.stdout.decode().strip().split('\n')
+            package_list = stdout.decode().strip().split('\n')
             package_list = [p for p in package_list if p]
 
             if not package_list:
