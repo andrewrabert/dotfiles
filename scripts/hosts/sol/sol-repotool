@@ -970,9 +970,7 @@ class Database:
         )
 
     async def _pacsync(self):
-        await run_cmd(
-            "sudo", "pacsync", self.name, stderr=asyncio.subprocess.DEVNULL, check=True
-        )
+        await run_cmd("sudo", "pacsync", self.name, check=True)
 
 
 def db_list(orphans=False, as_json=False, show_all=False):
