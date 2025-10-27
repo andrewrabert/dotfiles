@@ -809,13 +809,64 @@ class Database:
             # Only update config file, no need to sync repo
             print("\nConfiguration updated (no repository sync needed)")
 
-    async def update(self):
-        # Remote mode: delegate to sol
+    async def update(self, list_only=False):
+        # Remote mode: build locally, then transfer to sol
         if is_remote_mode():
             print(
-                f"Running in remote mode - delegating update to {REMOTE_HOST}..."
+                f"Running in remote mode (building on {socket.gethostname()}, updating on {REMOTE_HOST})"
             )
-            await remote_run_repotool("update")
+            # Get list of packages to update from remote
+            print(f"Fetching package list from {REMOTE_HOST}...")
+            result = await run_cmd(
+                "ssh", REMOTE_HOST, "sol-repotool", "update", "--list-only",
+                capture_output=True,
+            )
+            if result.returncode != 0:
+                print("Failed to get package list from remote")
+                return
+
+            package_list = result.stdout.decode().strip().split('\n')
+            package_list = [p for p in package_list if p]
+
+            if not package_list:
+                print("No packages to update")
+                return
+
+            print(f"Building {len(package_list)} package(s) locally:")
+            for pkg in package_list:
+                print(f"  - {pkg}")
+
+            # Build packages locally
+            await run_cmd(
+                "aur",
+                "sync",
+                "--no-view",
+                "--no-confirm",
+                f"--database={self.name}",
+                "--",
+                *package_list,
+            )
+
+            # Find built package files
+            pkg_files_to_transfer = []
+            for pkg_name in package_list:
+                pkg_pattern = f"{pkg_name}*.pkg.tar.*"
+                matches = list(self.directory.glob(pkg_pattern))
+                matches = [m for m in matches if not m.name.endswith(".sig")]
+                if matches:
+                    pkg_file = max(matches, key=lambda p: p.stat().st_mtime)
+                    pkg_files_to_transfer.append(pkg_file)
+
+            if not pkg_files_to_transfer:
+                print("No package files found to transfer")
+                return
+
+            # Transfer to sol and add
+            print(f"Transferring {len(pkg_files_to_transfer)} package(s) to {REMOTE_HOST}...")
+            remote_paths = await remote_rsync_packages(pkg_files_to_transfer)
+
+            print(f"Adding packages on {REMOTE_HOST}...")
+            await remote_run_repotool("add", "--rm", *remote_paths)
             print("Remote update completed successfully")
             return
 
@@ -1009,6 +1060,12 @@ class Database:
             if pkg not in seen:
                 seen.add(pkg)
                 sorted_packages.append(pkg)
+
+        # If list_only, just print packages and exit
+        if list_only:
+            for pkg in sorted_packages:
+                print(pkg)
+            return
 
         # Sync all AUR packages (this will run srcver and detect git package updates)
         await run_cmd(
@@ -1280,9 +1337,9 @@ async def db_add(
                 path.unlink()
 
 
-async def db_update():
+async def db_update(list_only=False):
     database = Database(DATABASE)
-    await database.update()
+    await database.update(list_only=list_only)
 
 
 async def db_sign(all=False):
@@ -1376,7 +1433,12 @@ def main():
 
     subparsers.add_parser("sync", help="Sync repository to remote")
 
-    subparsers.add_parser("update", help="Update all packages")
+    update_parser = subparsers.add_parser("update", help="Update all packages")
+    update_parser.add_argument(
+        "--list-only",
+        action="store_true",
+        help="Only list packages to update (don't build)",
+    )
 
     args = parser.parse_args()
 
@@ -1390,7 +1452,7 @@ def main():
         case "prune":
             asyncio.run(db_prune(dry_run=args.dry_run))
         case "update":
-            asyncio.run(db_update())
+            asyncio.run(db_update(list_only=args.list_only))
         case "add":
             asyncio.run(
                 db_add(
