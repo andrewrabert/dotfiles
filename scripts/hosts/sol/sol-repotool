@@ -7,6 +7,7 @@ import os
 import pathlib
 import re
 import shutil
+import socket
 import subprocess
 import sys
 
@@ -14,9 +15,54 @@ import pyalpm
 
 
 DATABASE = "sol"
+REMOTE_HOST = "sol"  # The host where the repository lives
 
 # Pre-compile regex for better performance when parsing many dependencies
 VERSION_CONSTRAINT_RE = re.compile(r"[<>=]")
+
+
+def is_remote_mode():
+    """Check if we're running on a different host than the repository host."""
+    return socket.gethostname() != REMOTE_HOST
+
+
+async def remote_rsync_packages(package_files):
+    """Rsync package files to the remote host.
+
+    Args:
+        package_files: List of package file paths to transfer
+
+    Returns:
+        List of remote file paths on the destination host
+    """
+    if not package_files:
+        return []
+
+    # Create temporary directory on remote host
+    remote_tmp = f"/tmp/sol-repotool-{os.getpid()}"
+    await run_cmd("ssh", REMOTE_HOST, "mkdir", "-p", remote_tmp, check=True)
+
+    # Rsync all packages
+    for pkg_file in package_files:
+        await run_cmd(
+            "rsync", "-avz", "--progress",
+            str(pkg_file),
+            f"{REMOTE_HOST}:{remote_tmp}/",
+            check=True
+        )
+
+    # Return remote paths
+    return [f"{remote_tmp}/{pathlib.Path(p).name}" for p in package_files]
+
+
+async def remote_run_repotool(*args):
+    """Run sol-repotool on the remote host via SSH.
+
+    Args:
+        *args: Arguments to pass to sol-repotool
+    """
+    cmd = ["ssh", REMOTE_HOST, "sol-repotool", *args]
+    await run_cmd(*cmd, check=True)
 
 
 def strip_version(dep_string):
@@ -260,8 +306,18 @@ class Database:
             )
 
     async def cleanup(self):
-        for path in self.aurutils_cache.iterdir():
-            for subpath in (path / "src", path / "pkg"):
+        if not self.aurutils_cache.exists():
+            return
+
+        # Only clean up packages we're managing (config packages + their deps in sol repo)
+        needed_packages = self._calculate_needed_packages()
+
+        for pkg_name in needed_packages:
+            pkg_cache = self.aurutils_cache / pkg_name
+            if not pkg_cache.exists():
+                continue
+
+            for subpath in (pkg_cache / "src", pkg_cache / "pkg"):
                 if not subpath.exists():
                     continue
                 await run_cmd("chmod", "-R", "777", "--", str(subpath), check=True)
@@ -537,7 +593,13 @@ class Database:
         )
 
     async def add(self, *packages, as_deps=False, as_explicit=False, parents=None):
-        await self._pacsync()
+        # Build packages locally (same whether on sol or remote)
+        if is_remote_mode():
+            print(f"Running in remote mode (building on {socket.gethostname()}, adding to {REMOTE_HOST})")
+
+        # For remote mode, skip pacsync since we don't have the repo locally
+        if not is_remote_mode():
+            await self._pacsync()
 
         # Note: parents parameter is deprecated with the new list-based config format
         if parents:
@@ -546,12 +608,12 @@ class Database:
                 file=sys.stderr,
             )
 
-        # Get all packages currently in the repository database
-        repo_packages = {pkg.name for pkg in self.packages()}
+        # Get all packages currently in the repository database (skip if remote)
+        repo_packages = set() if is_remote_mode() else {pkg.name for pkg in self.packages()}
 
         packages_and_deps = set()
         new_packages = []
-        new_files = []
+        pkg_files_to_transfer = []  # For remote mode
         already_exists = []
 
         reclassified = []
@@ -560,22 +622,26 @@ class Database:
             maybe_path = pathlib.Path(package)
             if maybe_path.is_file():
                 # Handle package file
-                await run_cmd(
-                    "sudo", "cp", str(maybe_path), str(self.directory), check=True
-                )
-                await run_cmd("repo-add", str(self.db_tar), str(maybe_path), check=True)
-                await self._sign(self.directory / maybe_path.name)
+                if is_remote_mode():
+                    # In remote mode, just track file for transfer
+                    pkg_files_to_transfer.append(maybe_path)
+                else:
+                    # Local mode: add directly to repository
+                    await run_cmd(
+                        "sudo", "cp", str(maybe_path), str(self.directory), check=True
+                    )
+                    await run_cmd("repo-add", str(self.db_tar), str(maybe_path), check=True)
+                    await self._sign(self.directory / maybe_path.name)
 
-                # Extract package name and pkgbase using pyalpm
-                pkg_file = self.pkg_db.load_package_file(maybe_path)
-                pkg_name_only = pkg_file.name
-                pkgbase = pkg_file.base
+                    # Extract package name and pkgbase using pyalpm
+                    pkg_file = self.pkg_db.load_package_file(maybe_path)
+                    pkg_name_only = pkg_file.name
+                    pkgbase = pkg_file.base
 
-                new_files.append(pkg_name_only)
-                self.config.add_no_update(pkgbase)
+                    self.config.add_no_update(pkgbase)
 
-                if not as_deps:
-                    self.config.add_packages(pkgbase)
+                    if not as_deps:
+                        self.config.add_packages(pkgbase)
             else:
                 # Check if package already exists in repository
                 if package in repo_packages:
@@ -606,7 +672,7 @@ class Database:
                 packages_and_deps.add(package)
                 new_packages.append(package)
 
-                if not as_deps:
+                if not as_deps and not is_remote_mode():
                     self.config.add_packages(package)
 
         if packages_and_deps:
@@ -621,6 +687,19 @@ class Database:
                 *packages_and_deps,
             )
 
+            # If remote mode, find the built package files
+            if is_remote_mode():
+                for pkg_name in packages_and_deps:
+                    # Look for .pkg.tar.* files in the repository directory
+                    pkg_pattern = f"{pkg_name}*.pkg.tar.*"
+                    matches = list(self.directory.glob(pkg_pattern))
+                    # Filter out signature files
+                    matches = [m for m in matches if not m.name.endswith('.sig')]
+                    if matches:
+                        # Use the most recent match
+                        pkg_file = max(matches, key=lambda p: p.stat().st_mtime)
+                        pkg_files_to_transfer.append(pkg_file)
+
         # Report reclassified packages
         if reclassified:
             print(f"Reclassified {len(reclassified)} package(s):")
@@ -633,14 +712,38 @@ class Database:
             for package in sorted(already_exists):
                 print(f"  - {package}")
 
-        # Exit early if nothing to add or reclassify
-        if not new_packages and not new_files and not reclassified:
+        # Remote mode: transfer packages and call sol-repotool add --rm
+        if is_remote_mode():
+            if not pkg_files_to_transfer:
+                print("No packages to transfer")
+                return
+
+            # Transfer packages to sol
+            print(f"Transferring {len(pkg_files_to_transfer)} package(s) to {REMOTE_HOST}...")
+            remote_paths = await remote_rsync_packages(pkg_files_to_transfer)
+
+            # Build the add command
+            add_args = ["add", "--rm"]
+            if as_deps:
+                add_args.append("--asdeps")
+            if as_explicit:
+                add_args.append("--asexplicit")
+            add_args.extend(remote_paths)
+
+            # Run sol-repotool add on the remote host
+            print(f"Adding packages on {REMOTE_HOST}...")
+            await remote_run_repotool(*add_args)
+            print("Remote add completed successfully")
+            return
+
+        # Local mode: Exit early if nothing to add or reclassify
+        if not new_packages and not reclassified:
             if already_exists:
                 print("\nNo new packages to add.")
             return
 
-        # Only sync if we actually built/added packages or added files
-        if new_packages or new_files:
+        # Only sync if we actually built/added packages
+        if new_packages:
             await self._pacsync()
             await self.sync_to_nullsum_net()
         elif reclassified:
@@ -648,6 +751,13 @@ class Database:
             print("\nConfiguration updated (no repository sync needed)")
 
     async def update(self):
+        # Remote mode: delegate to sol
+        if is_remote_mode():
+            print(f"Running in remote mode - delegating update to {REMOTE_HOST}...")
+            await remote_run_repotool("update")
+            print("Remote update completed successfully")
+            return
+
         await self.cleanup()
         await self._pacsync()
         self.aurutils_cache.mkdir(exist_ok=True, parents=True)
