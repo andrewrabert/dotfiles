@@ -1039,7 +1039,10 @@ class Database:
         )
 
     async def _pacsync(self):
-        await run_cmd("sudo", "pacsync", self.name, check=True)
+        proc = await asyncio.create_subprocess_exec("sudo", "pacsync", self.name)
+        returncode = await proc.wait()
+        if returncode != 0:
+            raise subprocess.CalledProcessError(returncode, ["sudo", "pacsync", self.name])
 
 
 def db_list(orphans=False, as_json=False, show_all=False):
