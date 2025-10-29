@@ -318,9 +318,6 @@ EXPECTED_PACKAGE_DEPENDENCIES = {
     "python-aiohttp": {
         "python-aiodns",
     },
-    "steam": {
-        "steam-native-runtime",
-    },
     "udiskie": {
         "libappindicator-gtk3",
     },
