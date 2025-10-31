@@ -3,6 +3,7 @@ import argparse
 import asyncio
 import dataclasses
 import json
+import logging
 import os
 import pathlib
 import re
@@ -11,6 +12,31 @@ import subprocess
 import sys
 
 import pyalpm
+
+# Set up logging
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+
+
+@dataclasses.dataclass
+class DependencyInfo:
+    """Parsed dependency information from .SRCINFO"""
+
+    depends: list[str]
+    optdepends: list[str]
+    makedepends: list[str]
+
+
+@dataclasses.dataclass
+class PackageUpdateInfo:
+    """Information about a package update"""
+
+    name: str
+    current_version: str
+    new_version: str
+    has_update: bool
+    is_vcs: bool
+    deps: DependencyInfo | None  # None if no update, otherwise new deps from .SRCINFO
 
 
 DATABASE = "sol"
@@ -441,14 +467,14 @@ class Database:
 
         if to_remove:
             if dry_run:
-                print(f"Would remove {len(to_remove)} packages not in config:")
+                logger.info(f"Would remove {len(to_remove)} packages not in config:")
                 for package in sorted(to_remove):
-                    print(f"  - {package}")
+                    logger.info(f"  - {package}")
                 return
             else:
-                print(f"Removing {len(to_remove)} packages not in config:")
+                logger.info(f"Removing {len(to_remove)} packages not in config:")
                 for package in sorted(to_remove):
-                    print(f"  - {package}")
+                    logger.info(f"  - {package}")
 
                 # Batch remove from database
                 await run_cmd(
@@ -468,7 +494,7 @@ class Database:
                     except FileNotFoundError:
                         pass
         else:
-            print("No packages to prune")
+            logger.info("No packages to prune")
             return
 
         # Clean up cache for packages that are no longer needed
@@ -476,7 +502,7 @@ class Database:
 
         for path in self.aurutils_cache.iterdir():
             if path.name not in needed_packages:
-                print(f"Clearing cache for {path.name}")
+                logger.debug(f"Clearing cache for {path.name}")
                 shutil.rmtree(path)
 
         await self._pacsync()
@@ -497,9 +523,9 @@ class Database:
     async def remove(self, *packages):
         packages_to_remove = self.config.aur.intersection(set(packages))
         if packages_to_remove:
-            print(f"Removing {len(packages_to_remove)} package(s):")
+            logger.info(f"Removing {len(packages_to_remove)} package(s):")
             for pkg in sorted(packages_to_remove):
-                print(f"  - {pkg}")
+                logger.info(f"  - {pkg}")
 
             self.config.remove_packages(*packages_to_remove)
             self.config.remove_no_update(*packages_to_remove)
@@ -536,7 +562,14 @@ class Database:
             check=True,
         )
 
-    async def add(self, *packages, as_deps=False, as_explicit=False, parents=None, makepkg_flags=None):
+    async def add(
+        self,
+        *packages,
+        as_deps=False,
+        as_explicit=False,
+        parents=None,
+        makepkg_flags=None,
+    ):
         await self._pacsync()
 
         # Build makepkg args from flags
@@ -546,10 +579,7 @@ class Database:
 
         # Note: parents parameter is deprecated with the new list-based config format
         if parents:
-            print(
-                "Warning: --parent flag is deprecated and will be ignored",
-                file=sys.stderr,
-            )
+            logger.warning("--parent flag is deprecated and will be ignored")
 
         # Get all packages currently in the repository database
         repo_packages = {pkg.name for pkg in self.packages()}
@@ -630,20 +660,22 @@ class Database:
 
         # Report reclassified packages
         if reclassified:
-            print(f"Reclassified {len(reclassified)} package(s):")
+            logger.info(f"Reclassified {len(reclassified)} package(s):")
             for package, old_cat, new_cat in sorted(reclassified):
-                print(f"  - {package}: {old_cat} → {new_cat}")
+                logger.info(f"  - {package}: {old_cat} → {new_cat}")
 
         # Report packages that already exist
         if already_exists:
-            print(f"Skipping {len(already_exists)} package(s) already in repository:")
+            logger.info(
+                f"Skipping {len(already_exists)} package(s) already in repository:"
+            )
             for package in sorted(already_exists):
-                print(f"  - {package}")
+                logger.info(f"  - {package}")
 
         # Exit early if nothing to add or reclassify
         if not new_packages and not new_files and not reclassified:
             if already_exists:
-                print("\nNo new packages to add.")
+                logger.info("No new packages to add.")
             return
 
         # Only sync if we actually built/added packages or added files
@@ -652,12 +684,12 @@ class Database:
             await self.sync_to_nullsum_net()
         elif reclassified:
             # Only update config file, no need to sync repo
-            print("\nConfiguration updated (no repository sync needed)")
+            logger.info("Configuration updated (no repository sync needed)")
 
     @staticmethod
     def _is_vcs_package(pkg_name):
         """Check if a package is a VCS package based on its name."""
-        vcs_suffixes = ('-git', '-svn', '-hg', '-bzr', '-cvs', '-darcs')
+        vcs_suffixes = ("-git", "-svn", "-hg", "-bzr", "-cvs", "-darcs")
         return pkg_name.endswith(vcs_suffixes)
 
     async def _get_vcs_pkgver(self, pkg_name):
@@ -669,9 +701,12 @@ class Database:
 
         # Fetch the package (downloads PKGBUILD and updates sources)
         fetch_result = await run_cmd(
-            "aur", "fetch", "--", pkg_name,
+            "aur",
+            "fetch",
+            "--",
+            pkg_name,
             cwd=str(self.aurutils_cache),
-            capture_output=True
+            capture_output=True,
         )
 
         if fetch_result.returncode != 0:
@@ -681,9 +716,7 @@ class Database:
         # -o: download/update sources
         # -d: skip dependency checks
         makepkg_result = await run_cmd(
-            "makepkg", "-od",
-            cwd=str(pkg_dir),
-            capture_output=True
+            "makepkg", "-od", cwd=str(pkg_dir), capture_output=True
         )
 
         if makepkg_result.returncode != 0:
@@ -693,9 +726,7 @@ class Database:
         # Source the PKGBUILD and extract pkgver and pkgrel
         bash_cmd = "source PKGBUILD && echo ${pkgver}-${pkgrel}"
         version_result = await run_cmd(
-            "bash", "-c", bash_cmd,
-            cwd=str(pkg_dir),
-            capture_output=True
+            "bash", "-c", bash_cmd, cwd=str(pkg_dir), capture_output=True
         )
 
         if version_result.returncode != 0:
@@ -704,7 +735,513 @@ class Database:
         version = version_result.stdout.decode().strip()
         return version if version else None
 
+    async def _parse_srcinfo(self, pkg_name) -> DependencyInfo | None:
+        """
+        Parse .SRCINFO for a package and return dependency information.
+        Returns DependencyInfo dataclass or None if parsing fails.
+        """
+        srcinfo_path = self.aurutils_cache / pkg_name / ".SRCINFO"
+        if not srcinfo_path.exists():
+            return None
+
+        depends = []
+        optdepends = []
+        makedepends = []
+
+        try:
+            with open(srcinfo_path, "r") as f:
+                for line in f:
+                    line = line.strip()
+                    if line.startswith("depends = "):
+                        dep = line.split("=", 1)[1].strip()
+                        depends.append(strip_version(dep))
+                    elif line.startswith("optdepends = "):
+                        dep = line.split("=", 1)[1].strip()
+                        optdepends.append(strip_version(dep))
+                    elif line.startswith("makedepends = "):
+                        dep = line.split("=", 1)[1].strip()
+                        makedepends.append(strip_version(dep))
+        except Exception:
+            return None
+
+        return DependencyInfo(
+            depends=depends, optdepends=optdepends, makedepends=makedepends
+        )
+
+    async def _calculate_post_update_tree(
+        self, pkg_updates: dict[str, PackageUpdateInfo]
+    ) -> set[str]:
+        """
+        Calculate what the dependency tree would be after applying updates.
+
+        Args:
+            pkg_updates: Dict mapping package names to PackageUpdateInfo
+
+        Returns:
+            Set of package names that would be needed after updates
+        """
+        # Start with explicit packages from config
+        needed = set(self.config.get_explicit_packages())
+
+        # Process packages until we've expanded all dependencies
+        to_process = needed.copy()
+        processed = set()
+
+        while to_process:
+            pkg_name = to_process.pop()
+            if pkg_name in processed:
+                continue
+            processed.add(pkg_name)
+
+            # Get dependencies - use updated deps if available, otherwise current repo
+            if pkg_name in pkg_updates and pkg_updates[pkg_name].deps:
+                deps_info = pkg_updates[pkg_name].deps
+                all_deps = (
+                    deps_info.depends + deps_info.optdepends + deps_info.makedepends
+                )
+            else:
+                # Use current repo dependencies
+                pkg = self.pkg_db.get_package(pkg_name)
+                if not pkg:
+                    continue
+                all_deps = []
+                for dep in pkg.depends:
+                    all_deps.append(strip_version(dep))
+                for optdep in pkg.optdepends:
+                    all_deps.append(strip_version(optdep))
+                for makedep in pkg.makedepends:
+                    all_deps.append(strip_version(makedep))
+
+            # Add dependencies to needed set
+            for dep_name in all_deps:
+                if dep_name and dep_name not in needed:
+                    needed.add(dep_name)
+                    to_process.add(dep_name)
+
+        return needed
+
+    async def _check_package_updates(
+        self, packages_to_check: set[str]
+    ) -> dict[str, PackageUpdateInfo]:
+        """
+        Check which packages have updates available.
+
+        Args:
+            packages_to_check: Set of package names to check
+
+        Returns:
+            Dict mapping package name to PackageUpdateInfo for packages with updates
+        """
+        pkg_updates = {}
+
+        for pkg_name in packages_to_check:
+            sol_pkg = self.pkg_db.get_package(pkg_name)
+            if not sol_pkg:
+                continue
+
+            current_version = sol_pkg.version
+            is_vcs = self._is_vcs_package(pkg_name)
+
+            if is_vcs:
+                # Check VCS package for new commits
+                new_version = await self._get_vcs_pkgver(pkg_name)
+                if not new_version:
+                    continue
+
+                # Compare versions
+                if pyalpm.vercmp(new_version, current_version) > 0:
+                    # Has update - parse new dependencies
+                    deps = await self._parse_srcinfo(pkg_name)
+                    pkg_updates[pkg_name] = PackageUpdateInfo(
+                        name=pkg_name,
+                        current_version=current_version,
+                        new_version=new_version,
+                        has_update=True,
+                        is_vcs=True,
+                        deps=deps,
+                    )
+            else:
+                # Check non-VCS package by fetching PKGBUILD
+                fetch_result = await run_cmd(
+                    "aur",
+                    "fetch",
+                    "--",
+                    pkg_name,
+                    cwd=str(self.aurutils_cache),
+                    capture_output=True,
+                )
+
+                if fetch_result.returncode != 0:
+                    continue
+
+                # Parse .SRCINFO to get version
+                srcinfo_path = self.aurutils_cache / pkg_name / ".SRCINFO"
+                if not srcinfo_path.exists():
+                    continue
+
+                try:
+                    new_version = None
+                    with open(srcinfo_path, "r") as f:
+                        for line in f:
+                            if line.strip().startswith("pkgver = "):
+                                pkgver = line.split("=", 1)[1].strip()
+                            elif line.strip().startswith("pkgrel = "):
+                                pkgrel = line.split("=", 1)[1].strip()
+                                new_version = f"{pkgver}-{pkgrel}"
+                                break
+                except Exception:
+                    continue
+
+                if not new_version:
+                    continue
+
+                # Compare versions
+                if pyalpm.vercmp(new_version, current_version) > 0:
+                    # Has update - parse dependencies
+                    deps = await self._parse_srcinfo(pkg_name)
+                    pkg_updates[pkg_name] = PackageUpdateInfo(
+                        name=pkg_name,
+                        current_version=current_version,
+                        new_version=new_version,
+                        has_update=True,
+                        is_vcs=False,
+                        deps=deps,
+                    )
+
+        return pkg_updates
+
+    def _filter_updates_to_needed(
+        self, pkg_updates: dict[str, PackageUpdateInfo], needed_packages: set[str]
+    ) -> set[str]:
+        """
+        Filter package updates to only those that will still be needed after the update.
+
+        Args:
+            pkg_updates: Dict of PackageUpdateInfo
+            needed_packages: Set of packages that will be needed post-update
+
+        Returns:
+            Set of package names to actually update
+        """
+        packages_to_update = set()
+
+        for pkg_name, update_info in pkg_updates.items():
+            if update_info.has_update and pkg_name in needed_packages:
+                packages_to_update.add(pkg_name)
+
+        return packages_to_update
+
+    def _sort_by_dependency_depth(
+        self, packages: set[str], pkg_updates: dict[str, PackageUpdateInfo]
+    ) -> list[str]:
+        """
+        Sort packages by dependency depth (deepest first).
+
+        Args:
+            packages: Set of package names to sort
+            pkg_updates: Dict of PackageUpdateInfo (for dependency information)
+
+        Returns:
+            List of package names sorted deepest-first
+        """
+        distances = {}
+        parents = self.config.aur
+        sol_db = self.pkg_db.sol_db
+
+        def calculate_distance(pkg, visited=None):
+            if visited is None:
+                visited = set()
+            if pkg in visited:
+                return 0
+            if pkg in distances:
+                return distances[pkg]
+
+            visited.add(pkg)
+
+            # If it's a parent (explicit package), distance is 0
+            if pkg in parents:
+                distances[pkg] = 0
+                return 0
+
+            # Find all packages that depend on this package
+            max_dist = 0
+
+            # Check which packages depend on this one
+            for potential_parent in packages:
+                # Use updated dependencies if available, otherwise current repo
+                if (
+                    potential_parent in pkg_updates
+                    and pkg_updates[potential_parent].deps
+                ):
+                    deps_info = pkg_updates[potential_parent].deps
+                    all_deps = deps_info.depends + deps_info.optdepends
+                else:
+                    # Use current repo dependencies
+                    parent_pkg = sol_db.get_pkg(potential_parent)
+                    if not parent_pkg:
+                        continue
+                    all_deps = []
+                    for dep in parent_pkg.depends:
+                        all_deps.append(strip_version(dep))
+                    for optdep in parent_pkg.optdepends:
+                        all_deps.append(strip_version(optdep))
+
+                # Check if pkg is in this package's dependencies
+                if pkg in all_deps:
+                    dist = calculate_distance(potential_parent, visited.copy()) + 1
+                    max_dist = max(max_dist, dist)
+
+            distances[pkg] = max_dist
+            return max_dist
+
+        # Calculate distances for all packages
+        for pkg in packages:
+            calculate_distance(pkg)
+
+        # Sort packages by distance (highest first - deepest dependencies first)
+        # Ensure each package appears only once
+        seen = set()
+        sorted_packages = []
+        for pkg in sorted(packages, key=lambda p: distances.get(p, 0), reverse=True):
+            if pkg not in seen:
+                seen.add(pkg)
+                sorted_packages.append(pkg)
+
+        return sorted_packages
+
+    async def _build_packages(
+        self,
+        sorted_packages: list[str],
+        pkg_updates: dict[str, PackageUpdateInfo],
+        makepkg_args: list[str],
+    ) -> tuple[set[str], list[str]]:
+        """
+        Build packages in order, tracking failures and skips.
+
+        Args:
+            sorted_packages: List of packages sorted by dependency depth
+            pkg_updates: Dict of PackageUpdateInfo (to know which are VCS)
+            makepkg_args: makepkg flags to pass
+
+        Returns:
+            Tuple of (failed_packages: set, skipped_packages: list)
+        """
+        failed_packages = set()
+        skipped_packages = []
+        sol_db = self.pkg_db.sol_db
+
+        def has_failed_dependency(pkg_name, failed_set):
+            """Check if pkg_name depends on any package in failed_set."""
+            pkg = sol_db.get_pkg(pkg_name)
+            if not pkg:
+                return False
+
+            for dep in pkg.depends:
+                dep_name = strip_version(dep)
+                if dep_name in failed_set:
+                    return True
+
+            for optdep in pkg.optdepends:
+                dep_name = strip_version(optdep)
+                if dep_name in failed_set:
+                    return True
+
+            return False
+
+        # Split into VCS and non-VCS
+        vcs_packages = [
+            pkg
+            for pkg in sorted_packages
+            if pkg in pkg_updates and pkg_updates[pkg].is_vcs
+        ]
+        non_vcs_packages = [
+            pkg
+            for pkg in sorted_packages
+            if pkg not in pkg_updates or not pkg_updates[pkg].is_vcs
+        ]
+
+        # Build non-VCS packages
+        if non_vcs_packages:
+            logger.info(f"Updating {len(non_vcs_packages)} non-VCS package(s)...")
+            for pkg_name in non_vcs_packages:
+                if has_failed_dependency(pkg_name, failed_packages):
+                    logger.warning(f"  Skipping {pkg_name} (depends on failed package)")
+                    skipped_packages.append(pkg_name)
+                    continue
+
+                logger.debug(f"  Building {pkg_name}...")
+                cmd = [
+                    "aur",
+                    "sync",
+                    "--no-view",
+                    "--no-confirm",
+                    f"--database={self.name}",
+                ]
+                if makepkg_args:
+                    cmd.extend(["--margs", *makepkg_args])
+                cmd.extend(["--", pkg_name])
+                result = await run_cmd(
+                    *cmd,
+                    cwd=str(self.aurutils_cache),
+                )
+                if result.returncode != 0:
+                    logger.error(f"  Failed to build {pkg_name}")
+                    failed_packages.add(pkg_name)
+
+        # Build VCS packages
+        if vcs_packages:
+            logger.info(f"Building {len(vcs_packages)} VCS package(s)...")
+            for pkg_name in vcs_packages:
+                if has_failed_dependency(pkg_name, failed_packages):
+                    logger.warning(f"  Skipping {pkg_name} (depends on failed package)")
+                    skipped_packages.append(pkg_name)
+                    continue
+
+                logger.debug(f"  Building {pkg_name}...")
+                pkg_dir = self.aurutils_cache / pkg_name
+                cmd = [
+                    "aur",
+                    "build",
+                    "--force",
+                    f"--database={self.name}",
+                ]
+                if makepkg_args:
+                    cmd.extend(["--margs", *makepkg_args])
+                result = await run_cmd(
+                    *cmd,
+                    cwd=str(pkg_dir),
+                )
+                if result.returncode != 0:
+                    logger.error(f"  Failed to build {pkg_name}")
+                    failed_packages.add(pkg_name)
+
+        return failed_packages, skipped_packages
+
+    def _report_failures_and_skips(
+        self, failed_packages: set[str], skipped_packages: list[str]
+    ):
+        """Report build failures and skipped packages."""
+        if failed_packages:
+            logger.error(f"{len(failed_packages)} package(s) failed to build:")
+            for pkg in sorted(failed_packages):
+                logger.error(f"  - {pkg}")
+
+        if skipped_packages:
+            logger.warning(
+                f"{len(skipped_packages)} package(s) skipped due to failed dependencies:"
+            )
+            for pkg in sorted(skipped_packages):
+                logger.warning(f"  - {pkg}")
+
     async def update(self, packages=None, makepkg_flags=None):
+        """
+        Update packages in the repository.
+
+        Args:
+            packages: Optional list of specific packages to update
+            makepkg_flags: Optional list of makepkg flags (--skippgpcheck, etc.)
+        """
+        # Initialization
+        await self.cleanup()
+        await self._pacsync()
+        self.aurutils_cache.mkdir(exist_ok=True, parents=True)
+
+        makepkg_args = []
+        if makepkg_flags:
+            makepkg_args.extend(makepkg_flags)
+
+        sync_dbs = self.pkg_db.get_official_dbs()
+
+        # Remove packages now in official repos
+        packages_in_official_repos = set()
+        repo_packages = {pkg.name for pkg in self.packages()}
+
+        for pkg_name in repo_packages:
+            for sync_db in sync_dbs:
+                if sync_db.name != self.name and sync_db.get_pkg(pkg_name):
+                    packages_in_official_repos.add(pkg_name)
+                    break
+
+        if packages_in_official_repos:
+            logger.info(
+                f"Found {len(packages_in_official_repos)} packages now in official repos, removing from sol:"
+            )
+            for pkg in sorted(packages_in_official_repos):
+                logger.info(f"  - {pkg}")
+            await self.remove(*packages_in_official_repos)
+            repo_packages = {pkg.name for pkg in self.packages()}
+
+        # Determine which packages to check
+        if packages:
+            packages_to_check = set(packages) & repo_packages
+            not_in_repo = set(packages) - repo_packages
+            if not_in_repo:
+                logger.warning(f"{len(not_in_repo)} package(s) not in repository:")
+                for pkg in sorted(not_in_repo):
+                    logger.warning(f"  - {pkg}")
+        else:
+            packages_to_check = repo_packages - self.config.manual
+
+        # STEP 1: Check all packages for updates
+        logger.info("Checking for package updates...")
+        pkg_updates: dict[str, PackageUpdateInfo] = await self._check_package_updates(
+            packages_to_check
+        )
+
+        if not pkg_updates:
+            logger.info("No updates available")
+            return
+
+        # Print what we found
+        logger.info(f"Found updates for {len(pkg_updates)} package(s):")
+        for pkg_name, info in sorted(pkg_updates.items()):
+            logger.info(f"  {pkg_name}: {info.current_version} -> {info.new_version}")
+
+        # STEP 2: Calculate post-update dependency tree
+        logger.debug("Calculating post-update dependency tree...")
+        needed_after_update: set[str] = await self._calculate_post_update_tree(
+            pkg_updates
+        )
+
+        # STEP 3: Filter to packages that will still be needed
+        logger.debug(
+            f"Filtering updates (needed after update: {len(needed_after_update)} packages)..."
+        )
+        packages_to_update: set[str] = self._filter_updates_to_needed(
+            pkg_updates, needed_after_update
+        )
+
+        if not packages_to_update:
+            logger.info(
+                "No packages to update (all updates would result in orphaned packages)"
+            )
+            return
+
+        # STEP 4: Sort by dependency depth
+        sorted_packages: list[str] = self._sort_by_dependency_depth(
+            packages_to_update, pkg_updates
+        )
+
+        # STEP 5: Build packages
+        failed: set[str]
+        skipped: list[str]
+        failed, skipped = await self._build_packages(
+            sorted_packages, pkg_updates, makepkg_args
+        )
+
+        # Cleanup and sync
+        if sorted_packages:
+            await self._pacsync()
+            await self._paccache()
+            await self.sync_to_nullsum_net()
+
+        # Report results
+        self._report_failures_and_skips(failed, skipped)
+
+        return
+
+    async def _old_update_REMOVE_ME(self, packages=None, makepkg_flags=None):
+        """OLD VERSION - TO BE REMOVED AFTER TESTING"""
         await self.cleanup()
         await self._pacsync()
         self.aurutils_cache.mkdir(exist_ok=True, parents=True)
@@ -716,11 +1253,11 @@ class Database:
 
         sync_dbs = self.pkg_db.get_official_dbs()
 
+        # Step 1: Remove packages now in official repos
         packages_in_official_repos = set()
         repo_packages = {pkg.name for pkg in self.packages()}
 
         for pkg_name in repo_packages:
-            # Check if package is now in any official repo
             for sync_db in sync_dbs:
                 if sync_db.name != self.name and sync_db.get_pkg(pkg_name):
                     packages_in_official_repos.add(pkg_name)
@@ -733,39 +1270,31 @@ class Database:
             for pkg in sorted(packages_in_official_repos):
                 print(f"  - {pkg}")
             await self.remove(*packages_in_official_repos)
+            repo_packages = {
+                pkg.name for pkg in self.packages()
+            }  # Refresh after removal
 
-        # If specific packages were requested, use those
+        # Step 2: Check all packages for updates and fetch PKGBUILDs
+        print("Checking for package updates...")
+
+        # Determine which packages to check
         if packages:
-            # Filter to only packages that exist in the repo
-            repo_packages = {pkg.name for pkg in self.packages()}
-            packages_to_update = set(packages) & repo_packages
-
-            # Warn about packages not in repo
+            # Only check specified packages
+            packages_to_check = set(packages) & repo_packages
             not_in_repo = set(packages) - repo_packages
             if not_in_repo:
                 print(f"Warning: {len(not_in_repo)} package(s) not in repository:")
                 for pkg in sorted(not_in_repo):
                     print(f"  - {pkg}")
         else:
-            # Calculate what packages we need
-            needed_packages = self._calculate_needed_packages()
+            # Check all packages in repo (excluding manual)
+            packages_to_check = repo_packages - self.config.manual
 
-            # Get packages currently in the repo
-            repo_packages = {pkg.name for pkg in self.packages()}
-
-            # Only update packages that are currently in the repo and are AUR packages
-            packages_to_update = (needed_packages & repo_packages) - self.config.manual
-
-        # Check for unsatisfied dependencies and add them to packages_to_update
-        # Only check dependencies if we're doing a full update (not specific packages)
-        sync_dbs = self.pkg_db.get_official_dbs()
-
-        missing_deps = set()
-
-        # Only check all packages for missing deps if not updating specific packages
-        packages_to_check = packages_to_update if packages else repo_packages
-
-        for pkg_name in packages_to_check:
+        # Check VCS packages
+        vcs_packages_to_check = [
+            p for p in packages_to_check if self._is_vcs_package(p)
+        ]
+        for pkg_name in vcs_packages_to_check:
             sol_pkg = self.pkg_db.get_package(pkg_name)
             if not sol_pkg:
                 continue
@@ -912,7 +1441,9 @@ class Database:
 
         # Split packages into VCS and non-VCS
         vcs_packages = [pkg for pkg in sorted_packages if self._is_vcs_package(pkg)]
-        non_vcs_packages = [pkg for pkg in sorted_packages if not self._is_vcs_package(pkg)]
+        non_vcs_packages = [
+            pkg for pkg in sorted_packages if not self._is_vcs_package(pkg)
+        ]
 
         # For VCS packages, check if they need updating by comparing versions
         vcs_to_build = []
@@ -931,7 +1462,9 @@ class Database:
                 # Get current VCS version by running pkgver()
                 current_version = await self._get_vcs_pkgver(pkg_name)
                 if not current_version:
-                    print(f"  Warning: Could not determine version for {pkg_name}, skipping")
+                    print(
+                        f"  Warning: Could not determine version for {pkg_name}, skipping"
+                    )
                     continue
 
                 # Compare versions using pyalpm
@@ -1034,7 +1567,9 @@ class Database:
                 print(f"  - {pkg}")
 
         if skipped_packages:
-            print(f"\n{len(skipped_packages)} package(s) skipped due to failed dependencies:")
+            print(
+                f"\n{len(skipped_packages)} package(s) skipped due to failed dependencies:"
+            )
             for pkg in sorted(skipped_packages):
                 print(f"  - {pkg}")
 
@@ -1276,11 +1811,20 @@ async def db_remove(packages):
 
 
 async def db_add(
-    packages, delete=False, as_deps=False, as_explicit=False, parents=None, makepkg_flags=None
+    packages,
+    delete=False,
+    as_deps=False,
+    as_explicit=False,
+    parents=None,
+    makepkg_flags=None,
 ):
     database = Database(DATABASE)
     await database.add(
-        *packages, as_deps=as_deps, as_explicit=as_explicit, parents=parents, makepkg_flags=makepkg_flags
+        *packages,
+        as_deps=as_deps,
+        as_explicit=as_explicit,
+        parents=parents,
+        makepkg_flags=makepkg_flags,
     )
     if delete:
         for package in packages:
@@ -1307,6 +1851,9 @@ async def db_sign(all=False):
 
 def main():
     parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "-v", "--verbose", action="store_true", help="Enable verbose/debug output"
+    )
     subparsers = parser.add_subparsers(dest="command", metavar="COMMAND", required=True)
 
     add_parser = subparsers.add_parser("add", help="Add packages to the repository")
@@ -1323,9 +1870,15 @@ def main():
         dest="parents",
         help="Add as dependency of parent package (can be specified multiple times)",
     )
-    add_parser.add_argument("--skippgpcheck", action="store_true", help="Skip PGP signature checks")
-    add_parser.add_argument("--skipinteg", action="store_true", help="Skip integrity checks")
-    add_parser.add_argument("--skipchecksums", action="store_true", help="Skip checksum checks")
+    add_parser.add_argument(
+        "--skippgpcheck", action="store_true", help="Skip PGP signature checks"
+    )
+    add_parser.add_argument(
+        "--skipinteg", action="store_true", help="Skip integrity checks"
+    )
+    add_parser.add_argument(
+        "--skipchecksums", action="store_true", help="Skip checksum checks"
+    )
     add_parser.add_argument("package", nargs="+")
 
     list_parser = subparsers.add_parser("list", help="List packages in the repository")
@@ -1372,11 +1925,22 @@ def main():
     update_parser.add_argument(
         "package", nargs="*", help="Specific packages to update (optional)"
     )
-    update_parser.add_argument("--skippgpcheck", action="store_true", help="Skip PGP signature checks")
-    update_parser.add_argument("--skipinteg", action="store_true", help="Skip integrity checks")
-    update_parser.add_argument("--skipchecksums", action="store_true", help="Skip checksum checks")
+    update_parser.add_argument(
+        "--skippgpcheck", action="store_true", help="Skip PGP signature checks"
+    )
+    update_parser.add_argument(
+        "--skipinteg", action="store_true", help="Skip integrity checks"
+    )
+    update_parser.add_argument(
+        "--skipchecksums", action="store_true", help="Skip checksum checks"
+    )
 
     args = parser.parse_args()
+
+    # Set logging level based on verbose flag
+    if args.verbose:
+        logging.getLogger().setLevel(logging.DEBUG)
+        logger.debug("Verbose logging enabled")
 
     match args.command:
         case "list":
@@ -1392,7 +1956,12 @@ def main():
                 makepkg_flags.append("--skipinteg")
             if args.skipchecksums:
                 makepkg_flags.append("--skipchecksums")
-            asyncio.run(db_update(packages=packages, makepkg_flags=makepkg_flags if makepkg_flags else None))
+            asyncio.run(
+                db_update(
+                    packages=packages,
+                    makepkg_flags=makepkg_flags if makepkg_flags else None,
+                )
+            )
         case "add":
             makepkg_flags = []
             if args.skippgpcheck:

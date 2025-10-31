@@ -122,9 +122,7 @@ class ffprobe:
             if line.startswith("    creation_time   : ")
         ]
         if match:
-            value = (
-                match[0].split(":", maxsplit=1)[-1].strip().removesuffix("Z")
-            )
+            value = match[0].split(":", maxsplit=1)[-1].strip().removesuffix("Z")
             return datetime.datetime.fromisoformat(value)
 
 
@@ -152,9 +150,7 @@ async def parse_date(path):
     try:
         name = path.name
         if name.startswith(("DOC", "IMG", "VID")) and name[3] in ("-", "_"):
-            dt = datetime.datetime(
-                int(name[4:8]), int(name[8:10]), int(name[10:12])
-            )
+            dt = datetime.datetime(int(name[4:8]), int(name[8:10]), int(name[10:12]))
         elif not set(name[:10]) - set(string.digits):
             dt = datetime.datetime.fromtimestamp(int(name[:10]))
         else:
@@ -217,9 +213,7 @@ async def process_file(path, target_root, dry_run, only_copy):
 
     target_path = target_path.with_suffix(target_path.suffix.lower())
     while target_path.exists():
-        target_path = target_path.with_name(
-            target_path.stem + "_" + target_path.suffix
-        )
+        target_path = target_path.with_name(target_path.stem + "_" + target_path.suffix)
     if target_path.exists():
         raise RuntimeError(f"path exists: {path} {target_path}")
     if not dry_run:
@@ -262,9 +256,7 @@ async def main():
         elif suffix not in PHOTO_EXT and suffix not in VIDEO_EXT:
             print(f'warning: unhandled suffix in "{path}"', file=sys.stderr)
             continue
-        executor.submit(
-            process_file, path, args.target, args.dry_run, args.copy
-        )
+        executor.submit(process_file, path, args.target, args.dry_run, args.copy)
 
     async for task in tqdm.asyncio.tqdm(executor):
         try:
