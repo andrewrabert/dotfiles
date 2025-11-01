@@ -5,4 +5,5 @@ fi
 
 flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
 flatpak update --user --assumeyes
+# flatpak repair --user
 flatpak uninstall --unused --user --assumeyes
