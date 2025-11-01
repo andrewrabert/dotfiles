@@ -1,6 +1,6 @@
 {
 	"KPlugin": {
-		"Name": "Toggle Centered Scaled",
+		"Name": "ToggleCenterScaled",
 		"Description": "Toggle windows with centered, scaled geometry.",
 		"Icon": "preferences-system-windows",
 
@@ -14,7 +14,7 @@
 				"Name": "Andrew Rabert"
 			}
 		],
-		"Id": "toggle-centered-scaled",
+		"Id": "ToggleCenterScaled",
 		"Version": "0.0.0",
 		"License": "GPL",
 		"Website": "https://github.com/nvllsvm/dotfiles"

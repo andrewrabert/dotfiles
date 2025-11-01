@@ -27,8 +27,6 @@ if (Array.isArray(rawClasses)) {
 const maxAspect = readConfig("maxAspect", 1.6);
 const scaleFactor = readConfig("scaleFactor", 0.8);
 
-print("Scratchpad loaded: resourceClasses=[" + resourceClasses.join(", ") + "], maxAspect=" + maxAspect + ", scaleFactor=" + scaleFactor);
-
 function isScratchpad(client) {
     if (!client || client.deleted || !client.normalWindow) {
         return false;
@@ -207,20 +205,17 @@ function init() {
     // Register a shortcut for each resource class
     resourceClasses.forEach((resClass, index) => {
         const trimmedClass = resClass.trim();
-        const shortcutName = "Toggle " + trimmedClass;
+        const shortcutName = "ToggleCenterScaled: Toggle " + trimmedClass;
         const shortcutDescription = "Toggle scratchpad for " + trimmedClass;
         const defaultShortcut = index === 0 ? "Meta+Return" : "";
 
         registerShortcut(shortcutName, shortcutDescription, defaultShortcut, function() {
             toggleScratchpad(trimmedClass);
         });
-
-        print("Registered shortcut for " + trimmedClass);
     });
 
     // Register shortcut for activating current window
-    registerShortcut("Activate Current Window", "Apply scratchpad geometry to current window", "", activateCurrentWindow);
-    print("Registered shortcut for activating current window");
+    registerShortcut("ToggleCenterScaled: Activate Current Window", "Apply scratchpad geometry to current window", "", activateCurrentWindow);
 }
 
 init();
