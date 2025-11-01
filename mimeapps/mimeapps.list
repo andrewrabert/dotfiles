@@ -86,4 +86,3 @@ x-scheme-handler/signalcaptcha=signal-desktop.desktop
 x-scheme-handler/slack=slack.desktop
 x-scheme-handler/terminal=foot.desktop
 x-scheme-handler/unknown=firefox.desktop
-desktop

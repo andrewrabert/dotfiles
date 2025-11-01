@@ -44,7 +44,7 @@ function setupClient(client) {
     configure_as_normal_window(client);
     hide(client);
     client.activeChanged.connect(function() {
-        if (!isNormal && !client.active) {
+        if (!client.active) {
             hide(client);
         }
     });
