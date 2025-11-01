@@ -5,9 +5,9 @@
                           http://www.kde.org/standards/kcfg/1.0/kcfg.xsd">
   <kcfgfile name="kwinrc"/>
   <group name="Script-toggle-centered-scaled">
-    <entry name="resourceClasses" type="StringList">
+    <entry name="resourceClasses" type="string">
       <label>Resource Classes (one per line)</label>
-      <default>tmux-scratchpad</default>
+      <default></default>
     </entry>
     <entry name="maxAspect" type="Double">
       <label>Maximum Aspect Ratio</label>

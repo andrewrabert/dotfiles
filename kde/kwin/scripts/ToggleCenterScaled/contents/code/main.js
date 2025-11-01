@@ -1,7 +1,8 @@
 // Parse resourceClasses - handle both StringList and newline-separated string
-let rawClasses = readConfig("resourceClasses", ["tmux-scratchpad"]);
+let rawClasses = readConfig("resourceClasses", "");
 let resourceClasses = [];
 
+print("FUCK", rawClasses);
 if (Array.isArray(rawClasses)) {
     // If it's already an array, flatten any entries with newlines
     rawClasses.forEach(item => {
@@ -209,6 +210,7 @@ function init() {
         //const shortcutDescription = "Toggle scratchpad for " + trimmedClass;
         const shortcutDescription = shortcutName;
         //const defaultShortcut = index === 0 ? "Meta+Return" : "";
+        const defaultShortcut = "";
 
         registerShortcut(shortcutName, shortcutDescription, defaultShortcut, function() {
             toggleScratchpad(trimmedClass);
