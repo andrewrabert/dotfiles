@@ -80,6 +80,7 @@ class SrcName(enum.StrEnum):
     CODEBERG = "codeberg"
     GITHUB = "github"
     GITLAB = "gitlab"
+    KDE_INVENT = "invent.kde.org"
     NULLSUM_NET = "git.nullsum.net"
 
 
@@ -182,6 +183,12 @@ def parse_repo(repo):
                     if len(parts) < 2:
                         raise RuntimeError("invalid git.nullsum.net url")
                     path = "/".join(parts)
+                case "invent.kde.org" | "www.gitlab.com":
+                    host = SrcName.KDE_INVENT
+                    parts = path.split("/")
+                    if len(parts) < 2:
+                        raise RuntimeError("invalid invent.kde.org url")
+                    path = "/".join(parts[0:])
                 case _:
                     raise NotImplementedError(
                         f"unhandled netloc: {parsed.netloc}"
@@ -358,7 +365,10 @@ def main():
                     cache.remove(repo)
         else:
             if not repo_dir.exists():
-                repo = f"{host}:{path}"
+                if host == SrcName.KDE_INVENT:
+                    repo = f"https://{host}/{path}"
+                else:
+                    repo = f"{host}:{path}"
                 Git.clone(repo, repo_dir)
 
             if is_backup:

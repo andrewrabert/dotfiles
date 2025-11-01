@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>KWinScriptSettings</class>
+ <widget class="QWidget" name="KWinScriptSettings">
+  <layout class="QFormLayout" name="formLayout">
+   <item row="0" column="0">
+    <widget class="QLabel" name="label_resourceClasses">
+     <property name="text">
+      <string>Resource Classes:</string>
+     </property>
+    </widget>
+   </item>
+   <item row="0" column="1">
+    <widget class="QPlainTextEdit" name="kcfg_resourceClasses">
+     <property name="placeholderText">
+      <string>One per line (e.g., tmux-scratchpad)</string>
+     </property>
+     <property name="maximumHeight">
+      <number>100</number>
+     </property>
+    </widget>
+   </item>
+   <item row="1" column="0">
+    <widget class="QLabel" name="label_maxAspect">
+     <property name="text">
+      <string>Maximum Aspect Ratio:</string>
+     </property>
+    </widget>
+   </item>
+   <item row="1" column="1">
+    <widget class="QDoubleSpinBox" name="kcfg_maxAspect">
+     <property name="minimum">
+      <double>1.0</double>
+     </property>
+     <property name="maximum">
+      <double>5.0</double>
+     </property>
+     <property name="singleStep">
+      <double>0.1</double>
+     </property>
+     <property name="value">
+      <double>1.6</double>
+     </property>
+    </widget>
+   </item>
+   <item row="2" column="0">
+    <widget class="QLabel" name="label_scaleFactor">
+     <property name="text">
+      <string>Scale Factor:</string>
+     </property>
+    </widget>
+   </item>
+   <item row="2" column="1">
+    <widget class="QDoubleSpinBox" name="kcfg_scaleFactor">
+     <property name="minimum">
+      <double>0.1</double>
+     </property>
+     <property name="maximum">
+      <double>1.0</double>
+     </property>
+     <property name="singleStep">
+      <double>0.05</double>
+     </property>
+     <property name="value">
+      <double>0.8</double>
+     </property>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

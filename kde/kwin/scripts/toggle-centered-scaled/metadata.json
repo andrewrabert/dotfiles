@@ -1,7 +1,7 @@
 {
 	"KPlugin": {
-		"Name": "Toggle Obsidian",
-		"Description": "Toggle visibility of Obsidian.",
+		"Name": "Toggle Centered Scaled",
+		"Description": "Toggle windows with centered, scaled geometry.",
 		"Icon": "preferences-system-windows",
 
 		"Authors" : [
@@ -14,7 +14,7 @@
 				"Name": "Andrew Rabert"
 			}
 		],
-		"Id": "toggle-obsidian",
+		"Id": "toggle-centered-scaled",
 		"Version": "0.0.0",
 		"License": "GPL",
 		"Website": "https://github.com/nvllsvm/dotfiles"
@@ -22,5 +22,6 @@
 
 	"X-Plasma-API": "javascript",
 	"X-Plasma-MainScript": "code/main.js",
+	"X-KDE-ConfigModule": "kwin/effects/configs/kcm_kwin4_genericscripted",
 	"KPackageStructure": "KWin/Script"
 }

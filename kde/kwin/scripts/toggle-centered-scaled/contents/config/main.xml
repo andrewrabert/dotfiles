@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kcfg xmlns="http://www.kde.org/standards/kcfg/1.0"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="http://www.kde.org/standards/kcfg/1.0
+                          http://www.kde.org/standards/kcfg/1.0/kcfg.xsd">
+  <kcfgfile name="kwinrc"/>
+  <group name="Script-toggle-centered-scaled">
+    <entry name="resourceClasses" type="StringList">
+      <label>Resource Classes (one per line)</label>
+      <default>tmux-scratchpad</default>
+    </entry>
+    <entry name="maxAspect" type="Double">
+      <label>Maximum Aspect Ratio</label>
+      <default>1.6</default>
+    </entry>
+    <entry name="scaleFactor" type="Double">
+      <label>Scale Factor</label>
+      <default>0.8</default>
+    </entry>
+  </group>
+</kcfg>
