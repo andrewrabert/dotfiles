@@ -251,6 +251,14 @@ EXPECTED_PACKAGE_DEPENDENCIES = {
         "xfsprogs",
         "xorg-xhost",
     },
+    "libvips": {
+        "imagemagick",
+        "libheif",
+        "libjxl",
+        "openslide",
+        "poppler-glib",
+        "python",
+    },
     "libvirt": {
         "dmidecode",
         "dnsmasq",
