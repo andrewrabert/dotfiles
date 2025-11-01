@@ -206,8 +206,9 @@ function init() {
     resourceClasses.forEach((resClass, index) => {
         const trimmedClass = resClass.trim();
         const shortcutName = "ToggleCenterScaled: Toggle " + trimmedClass;
-        const shortcutDescription = "Toggle scratchpad for " + trimmedClass;
-        const defaultShortcut = index === 0 ? "Meta+Return" : "";
+        //const shortcutDescription = "Toggle scratchpad for " + trimmedClass;
+        const shortcutDescription = shortcutName;
+        //const defaultShortcut = index === 0 ? "Meta+Return" : "";
 
         registerShortcut(shortcutName, shortcutDescription, defaultShortcut, function() {
             toggleScratchpad(trimmedClass);
@@ -215,7 +216,8 @@ function init() {
     });
 
     // Register shortcut for activating current window
-    registerShortcut("ToggleCenterScaled: Activate Current Window", "Apply scratchpad geometry to current window", "", activateCurrentWindow);
+    const shortcutName = "ToggleCenterScaled: Activate Current Window";
+    registerShortcut(shortcutName, shortcutName, "", activateCurrentWindow);
 }
 
 init();
