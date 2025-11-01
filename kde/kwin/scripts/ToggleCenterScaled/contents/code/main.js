@@ -87,7 +87,7 @@ function setupClient(client) {
     hide(client);
     client.activeChanged.connect(function() {
         if (!client.active) {
-            hide(client);
+            //hide(client);
         }
     });
 }
@@ -153,6 +153,9 @@ function toggleScratchpad(resClass) {
             if (scratchpad) {
                 set_geometry_and_screen(scratchpad);
                 activate(scratchpad);
+            } else {
+                // No scratchpad found - launch firefox
+                workspace.exec("firefox");
             }
         }
     }
