@@ -1,29 +1,12 @@
-// Parse resourceClasses - handle both StringList and newline-separated string
-let rawClasses = readConfig("resourceClasses", "");
+// Parse resourceClasses from string config (newline or comma-separated)
 let resourceClasses = [];
-
-print("FUCK", rawClasses);
-if (Array.isArray(rawClasses)) {
-    // If it's already an array, flatten any entries with newlines
-    rawClasses.forEach(item => {
-        if (typeof item === 'string') {
-            item.split(/[\n,]/).forEach(part => {
-                const trimmed = part.trim();
-                if (trimmed.length > 0) {
-                    resourceClasses.push(trimmed);
-                }
-            });
-        }
-    });
-} else if (typeof rawClasses === 'string') {
-    // If it's a string, split by newlines
-    rawClasses.split(/[\n,]/).forEach(part => {
-        const trimmed = part.trim();
-        if (trimmed.length > 0) {
-            resourceClasses.push(trimmed);
-        }
-    });
-}
+let rawClasses = readConfig("resourceClasses", "");
+rawClasses.split(/[\n,]/).forEach(part => {
+    const trimmed = part.trim();
+    if (trimmed.length > 0) {
+        resourceClasses.push(trimmed);
+    }
+});
 
 const maxAspect = readConfig("maxAspect", 1.6);
 const scaleFactor = readConfig("scaleFactor", 0.8);
