@@ -326,7 +326,7 @@ EXPECTED_PACKAGE_DEPENDENCIES = {
         "python-aiodns",
     },
     "udiskie": {
-        "libappindicator-gtk3",
+        "libappindicator",
     },
     "wine": {
         "alsa-plugins",
