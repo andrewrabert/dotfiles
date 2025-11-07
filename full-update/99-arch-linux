@@ -188,7 +188,6 @@ if HOSTNAME in ("mars", "phobos"):
             "vlc",
             "wine",
             "xboxdrv",
-            "zed",
         }
     )
 
