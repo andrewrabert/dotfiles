@@ -1,0 +1,1 @@
+git tag -l --format='%(refname:short) %(creatordate:iso8601)'

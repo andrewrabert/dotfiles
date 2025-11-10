@@ -132,3 +132,4 @@ pwd_osc_7
 # allows backspace to work properly when exiting vim mode
 bindkey '^?' backward-delete-char
 bindkey '^H' backward-delete-char
+export PATH=/Users/andrewr/.local/bin:$PATH
