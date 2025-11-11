@@ -52,6 +52,7 @@ if HOSTNAME in ("sol", "mars", "phobos"):
             "gifsicle",
             "git",
             "git-lfs",
+            "github-cli",
             "guestfs-tools",
             "htop",
             "hugo",
