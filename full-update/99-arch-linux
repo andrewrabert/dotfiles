@@ -181,7 +181,6 @@ if HOSTNAME in ("mars", "phobos"):
             "podman",
             "rawtherapee",
             "signal-desktop",
-            "slack-desktop",
             "spectacle",
             "stern",
             "talosctl",
@@ -199,6 +198,9 @@ EXPECTED_FLATPAKS = {
 if HOSTNAME in ("mars", "phobos"):
     EXPECTED_FLATPAKS["flathub"].update(
         {
+            "com.bitwarden.desktop",
+            "com.bitwig.BitwigStudio",
+            "md.obsidian.Obsidian",
             "org.equeim.Tremotesf",
             "org.fooyin.fooyin",
         }
@@ -485,6 +487,7 @@ if HOSTNAME == "phobos":
         {
             "linux-flowx13",
             "linux-flowx13-headers",
+            "plasma-keyboard",
         }
     )
 
