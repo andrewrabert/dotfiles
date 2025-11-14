@@ -1,0 +1,227 @@
+#!/usr/bin/env python3
+import argparse
+import os
+import pathlib
+import re
+import sys
+import tempfile
+
+
+def all_paths(*paths, include_files=True, include_dirs=False):
+    stack = []
+    results = set()
+    for path in paths:
+        if not path.exists():
+            raise ValueError(f"path does not exist: {path}")
+        elif path.is_file() and include_files:
+            results.add(path)
+        elif path.is_dir():
+            if include_dirs:
+                results.add(path)
+            stack.append(path)
+    while stack:
+        for path in stack.pop().iterdir():
+            if path.is_dir():
+                if include_dirs:
+                    results.add(path)
+                stack.append(path)
+            elif include_files:
+                results.add(path)
+    return sorted(results)
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Rename files using Python regex substitution"
+    )
+    parser.add_argument(
+        "-f",
+        "--force",
+        action="store_true",
+        help="overwrite target files if they exist",
+    )
+    parser.add_argument(
+        "-n",
+        "--dry-run",
+        action="store_true",
+        help="show what would be renamed without doing it",
+    )
+    parser.add_argument(
+        "-r",
+        "--recursive",
+        action="store_true",
+        help="recursively process directories",
+    )
+    parser.add_argument(
+        "-i",
+        "--ignore-case",
+        action="store_true",
+        help="case-insensitive pattern matching",
+    )
+    parser.add_argument(
+        "-t",
+        "--type",
+        action="append",
+        choices=["file", "dir"],
+        help="types to process: file, dir (can be specified multiple times, default: all types)",
+    )
+    parser.add_argument(
+        "-0",
+        "--null",
+        action="store_true",
+        help="paths from stdin are null-delimited instead of newline-delimited",
+    )
+
+    op_group = parser.add_mutually_exclusive_group(required=True)
+    op_group.add_argument(
+        "--replace",
+        metavar="STRING",
+        help="replacement string",
+    )
+    op_group.add_argument(
+        "--lower",
+        action="store_true",
+        help="lowercase the matched text",
+    )
+    op_group.add_argument(
+        "--upper",
+        action="store_true",
+        help="uppercase the matched text",
+    )
+
+    parser.add_argument("pattern", help="Python regex pattern to match")
+    parser.add_argument(
+        "paths", nargs="*", help="files to rename (or read from stdin)"
+    )
+
+    args = parser.parse_args()
+
+    # Get paths from stdin or args
+    if not args.paths:
+        # Read from stdin
+        if args.null:
+            path_strings = sys.stdin.read().split("\0")
+        else:
+            path_strings = sys.stdin.read().splitlines()
+        path_strings = [p for p in path_strings if p]  # filter empty strings
+    else:
+        path_strings = args.paths
+
+    # Default to all types if --type not specified
+    if args.type is None:
+        include_files = True
+        include_dirs = True
+    else:
+        include_files = "file" in args.type
+        include_dirs = "dir" in args.type
+
+    regex_flags = re.IGNORECASE if args.ignore_case else 0
+    regex = re.compile(args.pattern, regex_flags)
+
+    if args.recursive:
+        paths = all_paths(
+            *[pathlib.Path(p) for p in path_strings],
+            include_files=include_files,
+            include_dirs=include_dirs,
+        )
+    else:
+        all_paths_list = [pathlib.Path(p) for p in path_strings]
+        paths = [
+            p
+            for p in all_paths_list
+            if (p.is_file() and include_files) or (p.is_dir() and include_dirs)
+        ]
+
+    for path in paths:
+        match (args.lower, args.upper):
+            case (True, _):
+                transform = lambda m: m.group(0).lower()
+            case (_, True):
+                transform = lambda m: m.group(0).upper()
+            case _:
+                transform = args.replace
+
+        new_name = regex.sub(transform, path.name)
+
+        if new_name == path.name:
+            continue
+
+        new_path = path.parent / new_name
+
+        # Check if target exists and is different file
+        if new_path.exists():
+            # On case-insensitive fs, check if same file (just different case)
+            try:
+                same_file = path.samefile(new_path)
+            except OSError:
+                same_file = False
+
+            if same_file:
+                # Same file, use temp rename to change case
+                if args.dry_run:
+                    print(f'"{path}" -> "{new_path}"')
+                else:
+                    old_name = path.name
+                    fd, temp_name = tempfile.mkstemp(
+                        dir=path.parent, prefix=".tmp_"
+                    )
+                    os.close(fd)
+                    temp_path = pathlib.Path(temp_name)
+                    temp_path.unlink()
+                    try:
+                        path.rename(temp_path)
+                        temp_path.rename(new_path)
+                        print(old_name)
+                        print(new_path.name)
+                        print()
+                    except OSError as e:
+                        print(
+                            f'error: rename failed for "{path.name}": {e}',
+                            file=sys.stderr,
+                        )
+                        # Try to restore original if temp rename succeeded
+                        if temp_path.exists():
+                            temp_path.rename(path)
+            else:
+                # Different file exists at target
+                if args.force:
+                    if args.dry_run:
+                        print(f'"{path}" -> "{new_path}"')
+                    else:
+                        old_name = path.name
+                        try:
+                            new_path.unlink()
+                            path.rename(new_path)
+                            print(old_name)
+                            print(new_path.name)
+                            print()
+                        except OSError as e:
+                            print(
+                                f'error: rename failed for "{path.name}": {e}',
+                                file=sys.stderr,
+                            )
+                else:
+                    print(
+                        f'error: target exists "{new_name}" (original "{path.name}")',
+                        file=sys.stderr,
+                    )
+        else:
+            # Target doesn't exist, direct rename
+            if args.dry_run:
+                print(f'"{path}" -> "{new_path}"')
+            else:
+                old_name = path.name
+                try:
+                    path.rename(new_path)
+                    print(old_name)
+                    print(new_path.name)
+                    print()
+                except OSError as e:
+                    print(
+                        f'error: rename failed for "{path.name}": {e}',
+                        file=sys.stderr,
+                    )
+
+
+if __name__ == "__main__":
+    main()

@@ -79,34 +79,40 @@ import zipfile
 import zlib
 import zoneinfo
 
+non_stdlib = [
+    "arrow",
+    "httpx",
+    "iso8601",
+    "magic",
+    "mutagen",
+    "psutil",
+    "requests",
+    "sqlitedict",
+    "tabulate",
+    "toml",
+    "tqdm",
+    "yaml",
+    "yarl",
+]
 if (sys.version_info.major, sys.version_info.minor) >= (3, 11):
     import tomllib
 
+if (sys.version_info.major, sys.version_info.minor) >= (3, 14):
+    import zstandard
+else:
+    non_stdlib.append("zstandard")
 
-for name in [
-        'arrow',
-        'httpx',
-        'iso8601',
-        'magic',
-        'mutagen',
-        'psutil',
-        'requests',
-        'sqlitedict',
-        'tabulate',
-        'toml',
-        'tqdm',
-        'yaml',
-        'yarl',
-        'zstandard',
-]:
+
+for name in non_stdlib:
     try:
-        exec(f'import {name}')
+        exec(f"import {name}")
     except ModuleNotFoundError:
         pass
 
 
 try:
     import rich
+
     print = rich.print
 except ModuleNotFoundError:
     pass
@@ -121,7 +127,7 @@ else:
 
 
 def pp(*args, **kwargs):
-    kwargs.setdefault('sort_dicts', True)
+    kwargs.setdefault("sort_dicts", True)
     return pprint.pp(*args, **kwargs)
 
 
@@ -150,17 +156,15 @@ def ls(all=False):
     if all:
         pp(paths())
     else:
-        pp(paths('*'))
+        pp(paths("*"))
 
 
 def files(*args, **kwargs):
-    return sorted(p for p in paths(*args, **kwargs)
-                  if p.is_file())
+    return sorted(p for p in paths(*args, **kwargs) if p.is_file())
 
 
 def dirs(*args, **kwargs):
-    return sorted(p for p in paths(*args, **kwargs)
-                  if p.is_dir())
+    return sorted(p for p in paths(*args, **kwargs) if p.is_dir())
 
 
 def path(pattern):
@@ -176,22 +180,23 @@ def pretty_json(data):
     def _default_json(obj):
         if isinstance(obj, set):
             return sorted(obj)
-        elif hasattr(obj, 'isoformat'):
+        elif hasattr(obj, "isoformat"):
             return obj.isoformat()
+
     return json.dumps(
         data,
         indent=2,
         sort_keys=True,
         default=_default_json,
-        ensure_ascii=False
+        ensure_ascii=False,
     )
 
 
 def cat(pattern):
-    return b''.join(p.read_bytes() for p in paths(pattern))
+    return b"".join(p.read_bytes() for p in paths(pattern))
 
 
-def cd(pattern='~'):
+def cd(pattern="~"):
     os.chdir(path(pattern))
     return pathlib.Path.cwd()
 
@@ -221,10 +226,7 @@ def timeshift(dt, *args, **kwargs):
 def cbcopy(data):
     if not isinstance(data, bytes):
         data = data.encode()
-    subprocess.run(
-        ['cbcopy'],
-        input=data,
-        check=True)
+    subprocess.run(["cbcopy"], input=data, check=True)
 
 
 def read_json(path):
@@ -232,19 +234,16 @@ def read_json(path):
 
 
 def cbpaste():
-    proc = subprocess.run(
-        ['cbpaste'],
-        stdout=subprocess.PIPE,
-        check=True)
+    proc = subprocess.run(["cbpaste"], stdout=subprocess.PIPE, check=True)
     return proc.stdout
 
 
 def bytes_to_human(num):
-    for unit in ['B', 'KB', 'MB', 'GB', 'TB', 'PB']:
+    for unit in ["B", "KB", "MB", "GB", "TB", "PB"]:
         if abs(num) < 1024.0:
             break
         num /= 1024.0
-    return f'{num:.1f}{unit}'
+    return f"{num:.1f}{unit}"
 
 
 def safe_write_bytes(path, data):

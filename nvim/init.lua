@@ -47,6 +47,7 @@ do
 	local colorscheme = "base16-default-dark"
 
 	vim.g.tinted_italic = 0
+	vim.g.tinted_strikethrough = 0
 	if vim.env.BASE16_THEME or is_tmux() or is_ssh() then
 		vim.o.termguicolors = false
 		vim.g.tinted_colorspace = 256
@@ -63,6 +64,12 @@ do
 		end
 	end
 	vim.cmd.colorscheme(colorscheme)
+
+	-- fix DiagnosticDeprecated highlighting (dark bg, orange text, no strikethrough)
+	vim.api.nvim_set_hl(0, "DiagnosticDeprecated", {
+		--ctermfg = 0,
+		ctermbg = 17, -- dark background
+	})
 end
 
 vim.api.nvim_set_keymap("n", "<C-n>", ":set number!<CR>:set relativenumber!<CR>", { noremap = true, silent = true })
@@ -76,8 +83,12 @@ vim.keymap.set("n", "<leader>R", function()
 	require("fzf-lua").live_grep({ search = word })
 end, { noremap = true, silent = true })
 
-vim.keymap.set("n", "<leader>dt", function()
-	vim.diagnostic.enable(not vim.diagnostic.is_enabled())
+local diagnostic_auto_popup = true
+vim.keymap.set("n", "<leader>D", function()
+	local enabled = vim.diagnostic.is_enabled()
+	vim.diagnostic.enable(not enabled)
+	-- always disable auto-popup when toggling diagnostics
+	diagnostic_auto_popup = false
 end)
 
 local augroup = vim.api.nvim_create_augroup("Main", {})
@@ -108,6 +119,27 @@ vim.api.nvim_create_autocmd("VimResized", {
 	pattern = "*",
 	command = "wincmd =",
 })
+
+-- toggle diagnostic popup on cursor hold (default: disabled)
+vim.keymap.set("n", "<leader>d", function()
+	diagnostic_auto_popup = not diagnostic_auto_popup
+	if diagnostic_auto_popup and not vim.diagnostic.is_enabled() then
+		-- enabling auto-popup also enables diagnostics
+		vim.diagnostic.enable(true)
+	end
+	print("Diagnostic auto-popup: " .. (diagnostic_auto_popup and "enabled" or "disabled"))
+end, { desc = "Toggle diagnostic auto-popup" })
+
+vim.api.nvim_create_autocmd("CursorHold", {
+	group = augroup,
+	callback = function()
+		if diagnostic_auto_popup and vim.diagnostic.is_enabled() then
+			vim.diagnostic.open_float(nil, { focus = false })
+		end
+	end,
+})
+-- show diagnostic popups faster (default 4000)
+vim.o.updatetime = 500
 
 vim.g.clipboard = {
 	copy = {
