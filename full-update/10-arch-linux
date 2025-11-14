@@ -6,12 +6,25 @@ if ! command -v pacman > /dev/null; then
 fi
 
 MAGENTA='\033[1;35m'
+YELLOW='\033[1;33m'
 RESET='\033[0m'
 
 export PKGEXT='.pkg.tar'
 
+# Parse flags
+UPDATE_AUR=false
+for arg in "$@"; do
+    if [ "$arg" = "--aur" ]; then
+        UPDATE_AUR=true
+    fi
+done
+
 log() {
     printf "${MAGENTA}$1 ...${RESET}\n"
+}
+
+warn() {
+    printf "${YELLOW}$1${RESET}\n"
 }
 
 if ! [ -d ~/.config/pacman ] || [ "$(realpath ~/.config/pacman)" != "${DOTFILES}/pacman" ]; then
@@ -32,8 +45,28 @@ if ! command -v yay > /dev/null 2>&1; then
     cd -
 fi
 
-log 'Updating packages'
-yay -Syu --noconfirm --devel
+log 'Updating repository packages'
+sudo pacman -Syu --noconfirm
+
+# Check for AUR updates
+if command -v yay > /dev/null 2>&1; then
+    log 'Checking for AUR updates'
+    AUR_PACKAGE_LIST=$(yay -Qua 2>/dev/null | sort)
+    AUR_UPDATES=$(echo "$AUR_PACKAGE_LIST" | grep -v '^$' | wc -l)
+
+    if [ "$AUR_UPDATES" -gt 0 ]; then
+        if [ "$UPDATE_AUR" = true ]; then
+            log "Updating $AUR_UPDATES AUR packages"
+            yay -Sua --noconfirm --devel
+        else
+            warn "⚠️  $AUR_UPDATES AUR package(s) have updates available:"
+            echo "$AUR_PACKAGE_LIST"
+            warn "Run with --aur flag to update them."
+        fi
+    else
+        log 'No AUR updates available'
+    fi
+fi
 
 if command -v pkgfile > /dev/null; then
     log 'Updating file cache'
