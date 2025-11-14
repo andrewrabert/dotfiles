@@ -79,7 +79,17 @@ import zipfile
 import zlib
 import zoneinfo
 
-non_stdlib = [
+if (sys.version_info.major, sys.version_info.minor) >= (3, 11):
+    import tomllib
+
+if (sys.version_info.major, sys.version_info.minor) >= (3, 14):
+    import compression.bz2
+    import compression.gzip
+    import compression.lzma
+    import compression.zlib
+    import compression.zstd
+
+for name in [
     "arrow",
     "httpx",
     "iso8601",
@@ -93,22 +103,12 @@ non_stdlib = [
     "tqdm",
     "yaml",
     "yarl",
-]
-if (sys.version_info.major, sys.version_info.minor) >= (3, 11):
-    import tomllib
-
-if (sys.version_info.major, sys.version_info.minor) >= (3, 14):
-    import zstandard
-else:
-    non_stdlib.append("zstandard")
-
-
-for name in non_stdlib:
+    "zstandard",
+]:
     try:
         exec(f"import {name}")
     except ModuleNotFoundError:
         pass
-
 
 try:
     import rich
