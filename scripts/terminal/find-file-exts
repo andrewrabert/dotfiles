@@ -5,6 +5,9 @@ import json
 import pathlib
 import sys
 
+# Filenames to treat as suffixes without prefix
+FILENAME_AS_SUFFIX = {".DS_Store"}
+
 
 def _default_json(obj):
     if isinstance(obj, set):
@@ -20,7 +23,11 @@ def _default_json(obj):
 
 def pretty_json(data):
     return json.dumps(
-        data, indent=2, sort_keys=True, default=_default_json, ensure_ascii=False
+        data,
+        indent=2,
+        sort_keys=True,
+        default=_default_json,
+        ensure_ascii=False,
     )
 
 
@@ -68,14 +75,19 @@ def main():
 
     suffix_paths = collections.defaultdict(set)
     for path in files:
-        suffix = path.suffix
+        if path.name in FILENAME_AS_SUFFIX:
+            suffix = path.name
+        else:
+            suffix = path.suffix
         if suffix:
             if args.ignore_case:
                 suffix = suffix.lower()
         suffix_paths[suffix].add(path)
 
     if args.count:
-        for suffix, paths in sorted(suffix_paths.items(), key=lambda x: len(x[1])):
+        for suffix, paths in sorted(
+            suffix_paths.items(), key=lambda x: len(x[1])
+        ):
             print((suffix or '""') + "\t\t" + str(len(paths)))
     elif args.json:
         print(pretty_json(suffix_paths))

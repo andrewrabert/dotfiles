@@ -190,6 +190,13 @@ preview_file() {
             iccdump -t desc "$file"
             ;;
         image/jxl)
+            identify_without_filename "$file"
+            exiv2 "$file" 2> /dev/null | grep -v \
+                -e '^File name       : ' \
+                -e '^Image size      : ' \
+                -e '^File size       : ' \
+                -e '^MIME type       : ' \
+                || true
             jxlinfo --verbose "$file"
             ;;
         image/tiff)
