@@ -1,95 +1,8 @@
 #!/usr/bin/env python3
-import asyncio
-import atexit
-import base64
-import binascii
-import collections
-import collections.abc
-import concurrent.futures
-import configparser
-import contextlib
-import contextvars
-import copy
-import ctypes
-import datetime
-import decimal
-import difflib
-import email
-import email.message
-import email.mime
-import email.mime.multipart
-import email.mime.text
-import email.utils
-import enum
-import errno
-import fnmatch
-import getpass
-import glob
-import grp
-import gzip
-import hashlib
-import importlib
-import importlib.metadata
-import importlib.resources
-import io
-import ipaddress
-import itertools
-import json
-import locale
-import logging
-import logging.config
-import lzma
-import math
-import mimetypes
-import multiprocessing
-import operator
-import os
-import pathlib
-import pickle
-import pkgutil
-import plistlib
-import pprint
-import pwd
-import random
-import re
-import secrets
-import shlex
-import shutil
-import smtplib
-import socket
-import stat
-import string
-import struct
-import subprocess
 import sys
-import tarfile
-import tempfile
-import textwrap
-import time
-import traceback
-import types
-import typing
-import unicodedata
-import unittest
-import unittest.mock
-import urllib.parse
-import urllib.request
-import uuid
-import zipfile
-import zlib
-import zoneinfo
-
-if (sys.version_info.major, sys.version_info.minor) >= (3, 11):
-    import tomllib
-
-if (sys.version_info.major, sys.version_info.minor) >= (3, 14):
-    import compression.bz2
-    import compression.gzip
-    import compression.lzma
-    import compression.zlib
-    import compression.zstd
 
 for name in [
+    *sorted(sys.stdlib_module_names),
     "arrow",
     "httpx",
     "iso8601",
@@ -105,25 +18,21 @@ for name in [
     "yarl",
     "zstandard",
 ]:
+    if name in [
+        "this",  # useless
+        "antigravity",  # joke module
+        "nturl2path",  # deprecated
+        "sre_compile",  # deprecated
+        "sre_constants",  # deprecated
+        "sre_parse",  # deprecated
+    ]:
+        continue
+    if name.startswith("_"):
+        continue
     try:
         exec(f"import {name}")
-    except ModuleNotFoundError:
+    except (ImportError, ModuleNotFoundError):
         pass
-
-try:
-    import rich
-
-    print = rich.print
-except ModuleNotFoundError:
-    pass
-
-
-try:
-    import faker as _faker
-except ModuleNotFoundError:
-    pass
-else:
-    faker = _faker.Faker()
 
 
 def pp(*args, **kwargs):
