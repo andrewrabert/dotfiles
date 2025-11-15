@@ -30,6 +30,25 @@ BREW_GNUBIN='/opt/homebrew/opt/coreutils/libexec/gnubin'
 if [ -d "$BREW_GNUBIN" ]; then
 	export PATH="$BREW_GNUBIN:$PATH"
 fi
+
+# Setup ro/rw handling for pikvm
+if [ "$HOST_DOTFILES" = "pikvm" ]; then
+    was_readonly=0
+    if grep -q ' / .*\bro\b' /proc/mounts; then
+        was_readonly=1
+        rw
+    fi
+
+    cleanup() {
+        if [ $was_readonly -eq 1 ]; then
+            ro
+        fi
+    }
+
+    trap 'cleanup' EXIT
+    trap 'cleanup; exit 1' INT TERM
+fi
+
 while [ $# -gt 0 ]; do
     case "$1" in
         --help)
@@ -52,22 +71,6 @@ done
 
 # Special case for pikvm: run specific scripts only
 if [ "$HOST_DOTFILES" = "pikvm" ]; then
-    # Check if root filesystem is mounted read-only
-    was_readonly=0
-    if grep -q ' / .*\bro\b' /proc/mounts; then
-        was_readonly=1
-        rw
-    fi
-
-    cleanup() {
-        if [ $was_readonly -eq 1 ]; then
-            ro
-        fi
-    }
-
-    trap 'cleanup' EXIT
-    trap 'cleanup; exit 1' INT TERM
-
     "$0" 00-dotfiles
     "$0" 10-pikvm
     "$0" 60-tmux
