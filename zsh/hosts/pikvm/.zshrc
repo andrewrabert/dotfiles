@@ -7,9 +7,9 @@ get_rw_status() {
         fields=(${(s: :)line})
         if [[ $fields[2] == / ]]; then
             if [[ $fields[4] == ro,* || $fields[4] == *,ro,* || $fields[4] == *,ro ]]; then
-                echo '[ro]'
+                echo '%F{yellow}[ro]%f'
             else
-                echo '[rw]'
+                echo '%F{red}[rw]%f'
             fi
             return
         fi
