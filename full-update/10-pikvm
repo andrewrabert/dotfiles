@@ -4,26 +4,9 @@ if [ "$HOST_DOTFILES" != 'pikvm' ]; then
     exit
 fi
 
-RED='\033[0;31m'
-GREEN='\033[0;32m'
 BLUE='\033[0;34m'
+RED='\033[0;31m'
 NC='\033[0m'
-
-# Check if root filesystem is mounted read-only
-was_readonly=0
-if grep -q ' / .*\bro\b' /proc/mounts; then
-    was_readonly=1
-    rw
-fi
-
-cleanup() {
-    if [ $was_readonly -eq 1 ]; then
-        ro
-    fi
-}
-
-trap 'cleanup; printf "\n${RED}ERROR: Script exited with error on line $LINENO${NC}\n"; exit 1' ERR
-trap 'cleanup' EXIT
 
 printf "${BLUE}==> Updating all installed packages...${NC}\n"
 pacman -Syu --noconfirm
@@ -55,5 +38,3 @@ echo ""
 printf "${BLUE}==> Checking for .pacnew and .pacsave files...${NC}\n"
 find /etc -regextype posix-extended -regex ".+\.pac(new|save)" 2> /dev/null || true
 echo ""
-
-printf "${GREEN}==> System update complete${NC}\n"
