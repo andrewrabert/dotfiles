@@ -613,6 +613,7 @@ EXPECTED_PACKAGE_DEPENDENCIES = {
         "python-websockets",
         "python-xattr",
         "rtmpdump",
+        "yt-dlp-ejs",
     },
 }
 

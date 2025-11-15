@@ -11,6 +11,9 @@ import subprocess
 import tempfile
 import uuid
 
+DOTFILES = pathlib.Path(os.environ["DOTFILES"])
+DOTFILES_COLOR_SCHEMES = DOTFILES / "kde/color-schemes"
+
 
 def safe_write_text(path, data):
     path = pathlib.Path(path)
@@ -475,7 +478,26 @@ def main():
         ):
             kwinrules_changed = True
 
+    # Copy Dotfiles - *.colors files from dotfiles repo
+    if DOTFILES_COLOR_SCHEMES.exists():
+        for source_file in DOTFILES_COLOR_SCHEMES.glob("Dotfiles - *.colors"):
+            dest_file = output_dir / source_file.name
+            new_content = source_file.read_text()
+
+            if dest_file.exists() and dest_file.read_text() == new_content:
+                created_files.add(dest_file)
+            else:
+                safe_write_text(dest_file, new_content)
+                created_files.add(dest_file)
+                colors_changed = True
+
     for file in output_dir.glob("Titlebar - *.colors"):
+        if file not in created_files:
+            file.unlink()
+            print(f"Removed {file}")
+            colors_changed = True
+
+    for file in output_dir.glob("Dotfiles - *.colors"):
         if file not in created_files:
             file.unlink()
             print(f"Removed {file}")
