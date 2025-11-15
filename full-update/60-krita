@@ -1,0 +1,39 @@
+#!/usr/bin/env python3
+import pathlib
+import shutil
+
+MIME_TYPES = [
+    "image/avif",
+    "image/bmp",
+    "image/gif",
+    "image/heif",
+    "image/jpeg",
+    "image/jxl",
+    "image/openraster",
+    "image/png",
+    "image/tiff",
+    "image/vnd.adobe.photoshop",
+    "image/webp",
+    "image/x-exr",
+    "image/x-tga",
+    "image/x-xcf",
+]
+
+DESKTOP_FILE = pathlib.Path.home() / ".local/share/applications/krita_dotfiles.desktop"
+
+if shutil.which("krita"):
+    DESKTOP_FILE.parent.mkdir(parents=True, exist_ok=True)
+    mime_types = ";".join(MIME_TYPES) + ";"
+    DESKTOP_FILE.write_text(f"""\
+[Desktop Entry]
+Type=Application
+Name=Krita
+Exec=krita %F
+Icon=krita
+Categories=Graphics;
+MimeType={mime_types}
+NoDisplay=true
+StartupNotify=true
+""")
+else:
+    DESKTOP_FILE.unlink(missing_ok=True)
