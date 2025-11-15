@@ -1,0 +1,1 @@
+HISTFILE=/tmp/.zhistory-$USER
