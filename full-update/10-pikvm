@@ -1,8 +1,7 @@
 #!/usr/bin/env sh
 
-# Only run on pikvm host
-if ! command -v hostname >/dev/null 2>&1 || [ "$(hostname)" != "pikvm" ]; then
-    exit 0
+if [ "$HOST_DOTFILES" != 'pikvm' ]; then
+    exit
 fi
 
 RED='\033[0;31m'
