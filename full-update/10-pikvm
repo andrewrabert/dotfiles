@@ -1,0 +1,52 @@
+#!/usr/bin/env sh
+
+# Only run on pikvm host
+if ! command -v hostname >/dev/null 2>&1 || [ "$(hostname)" != "pikvm" ]; then
+    exit 0
+fi
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+trap 'printf "\n${RED}ERROR: Script exited with error on line $LINENO${NC}\n"; exit 1' ERR
+
+printf "${BLUE}==> Updating dotfiles...${NC}\n"
+full-update 00-dotfiles
+echo ""
+
+printf "${BLUE}==> Symlinking .bash_profile...${NC}\n"
+ln -sf "$HOME/.dotfiles/public/bash/hosts/pikvm/.bash_profile" "$HOME/.bash_profile"
+echo ""
+
+printf "${BLUE}==> Running full-update 60-tmux...${NC}\n"
+full-update 60-tmux
+echo ""
+
+printf "${BLUE}==> Updating all installed packages...${NC}\n"
+pacman -Syu --noconfirm
+echo ""
+
+printf "${BLUE}==> Checking for foreign packages (not in repos)...${NC}\n"
+pacman -Qm || true
+echo ""
+
+printf "${BLUE}==> Checking for packages with missing dependencies...${NC}\n"
+pacman -Dk
+echo ""
+
+printf "${BLUE}==> Ensuring all installed packages are cached...${NC}\n"
+pacman -Sw --noconfirm $(pacman -Qq)
+echo ""
+
+printf "${BLUE}==> Pruning pacman cache to only installed packages...${NC}\n"
+paccache -rk0
+pacman -Sc --noconfirm
+echo ""
+
+printf "${BLUE}==> Checking for .pacnew and .pacsave files...${NC}\n"
+find /etc -regextype posix-extended -regex ".+\.pac(new|save)" 2> /dev/null || true
+echo ""
+
+printf "${GREEN}==> System update complete${NC}\n"
