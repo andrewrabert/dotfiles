@@ -732,7 +732,9 @@ async def ensure_flatpak_permissions():
         current_perms = await get_flatpak_permissions(app)
 
         for path in paths:
-            if path not in current_perms:
+            # Normalize path for comparison - remove slash before :ro/:rw suffix
+            normalized_path = path.replace("/:", ":")
+            if not any(p == normalized_path for p in current_perms):
                 print(f"Granting {app} access to {path}")
                 proc = await asyncio.create_subprocess_exec(
                     "flatpak",
