@@ -40,8 +40,9 @@ pacman -Sw --noconfirm $(pacman -Qq)
 echo ""
 
 printf "${BLUE}==> Pruning pacman cache to only installed packages...${NC}\n"
-paccache -rk0
-pacman -Sc --noconfirm
+paccache \
+    --remove \
+    --keep 1
 echo ""
 
 printf "${BLUE}==> Checking for .pacnew and .pacsave files...${NC}\n"
