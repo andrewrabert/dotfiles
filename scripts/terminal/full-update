@@ -50,6 +50,11 @@ while [ $# -gt 0 ]; do
     esac
 done
 
+# Special case for pikvm: run only 10-pikvm by default
+if [ "$HOST_DOTFILES" = "pikvm" ]; then
+    exec "$0" 10-pikvm
+fi
+
 process() {
     if ! [ -d "$1"/full-update ]; then
         return
