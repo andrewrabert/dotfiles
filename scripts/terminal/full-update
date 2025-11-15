@@ -50,9 +50,13 @@ while [ $# -gt 0 ]; do
     esac
 done
 
-# Special case for pikvm: run only 10-pikvm by default
+# Special case for pikvm: run specific scripts only
 if [ "$HOST_DOTFILES" = "pikvm" ]; then
-    exec "$0" 10-pikvm
+    "$0" 00-dotfiles
+    "$0" 10-pikvm
+    "$0" 60-tmux
+    "$0" 60-zsh
+    exit
 fi
 
 process() {
