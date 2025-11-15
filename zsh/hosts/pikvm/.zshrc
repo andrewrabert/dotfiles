@@ -16,4 +16,4 @@ get_rw_status() {
     done < /proc/mounts
 }
 
-PROMPT='$(get_rw_status) '"$PROMPT"
+PROMPT='$(get_rw_status)'"$PROMPT"
