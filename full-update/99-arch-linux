@@ -527,6 +527,32 @@ async def install_efi_shell():
         shutil.copyfile(source, target)
 
 
+async def ensure_python_freethreaded():
+    """Install Python 3.14+ freethreaded via uv if not already installed."""
+    proc = await asyncio.create_subprocess_exec(
+        "uv",
+        "python",
+        "find",
+        "3.14t",
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.DEVNULL,
+    )
+    await proc.communicate()
+    if proc.returncode == 0:
+        return
+
+    print("Installing Python 3.14 freethreaded via uv")
+    proc = await asyncio.create_subprocess_exec(
+        "uv",
+        "python",
+        "install",
+        "3.14t",
+    )
+    await proc.communicate()
+    if proc.returncode:
+        raise RuntimeError(f"Failed to install Python 3.14t: exit {proc.returncode}")
+
+
 async def ensure_using_systemd_resolved():
     unit = "systemd-resolved"
     if await is_unit_enabled(unit):
@@ -837,6 +863,9 @@ async def main():
             await ensure_packages()
             await ensure_package_dependencies()
             await ensure_flatpaks()
+
+            if HOSTNAME in ("mars", "phobos", "sol"):
+                await ensure_python_freethreaded()
 
             for service in EXPECTED_SERVICES:
                 await enable_unit(service, now=True)
