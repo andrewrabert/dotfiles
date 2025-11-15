@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import asyncio
 import pathlib
 import subprocess
 import sys
@@ -22,7 +23,7 @@ def files_to_mtime(root):
     return files
 
 
-def run_lgogdownloader(*, pull=True, shell=False):
+async def run_lgogdownloader(*, pull=True, shell=False):
     args = [
         "podman",
         "run",
@@ -46,22 +47,36 @@ def run_lgogdownloader(*, pull=True, shell=False):
     if shell:
         args.extend(["--", "sh", "-l"])
 
-    subprocess.run(args, check=True)
+    proc = await asyncio.create_subprocess_exec(*args)
+    await proc.wait()
+    if proc.returncode != 0:
+        raise subprocess.CalledProcessError(proc.returncode, args)
 
 
-def main():
+async def record_file_hashes():
+    proc = await asyncio.create_subprocess_exec(
+        "file-hash-recorder", str(GOG_DIR)
+    )
+    await proc.wait()
+    if proc.returncode != 0:
+        raise subprocess.CalledProcessError(
+            proc.returncode, ["file-hash-recorder", str(GOG_DIR)]
+        )
+
+
+async def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--shell", action="store_true")
     args = parser.parse_args()
 
     if args.shell:
-        run_lgogdownloader(shell=True)
+        await run_lgogdownloader(shell=True)
         sys.exit()
 
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
     before = files_to_mtime(GOG_DIR)
-    run_lgogdownloader()
+    await run_lgogdownloader()
     after = files_to_mtime(GOG_DIR)
 
     for path in sorted(set([*before.keys(), *after.keys()])):
@@ -80,6 +95,8 @@ def main():
         if before_mtime != after_mtime:
             print("Modified:", path)
 
+    await record_file_hashes()
+
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

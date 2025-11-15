@@ -36,7 +36,9 @@ class PackageUpdateInfo:
     new_version: str
     has_update: bool
     is_vcs: bool
-    deps: DependencyInfo | None  # None if no update, otherwise new deps from .SRCINFO
+    deps: (
+        DependencyInfo | None
+    )  # None if no update, otherwise new deps from .SRCINFO
 
 
 DATABASE = "sol"
@@ -290,7 +292,9 @@ class Database:
             for subpath in (path / "src", path / "pkg"):
                 if not subpath.exists():
                     continue
-                await run_cmd("chmod", "-R", "777", "--", str(subpath), check=True)
+                await run_cmd(
+                    "chmod", "-R", "777", "--", str(subpath), check=True
+                )
                 try:
                     shutil.rmtree(subpath)
                 except FileNotFoundError:
@@ -317,7 +321,10 @@ class Database:
                     if dep_name and dep_name != package_name:
                         optional.append(dep_name)
 
-                return {"required": sorted(required), "optional": sorted(optional)}
+                return {
+                    "required": sorted(required),
+                    "optional": sorted(optional),
+                }
 
         # Fallback to aur depends for packages not in sol database
         # Get required dependencies only
@@ -336,7 +343,12 @@ class Database:
 
         # Get all dependencies (required + optional)
         proc_all = await run_cmd(
-            "aur", "depends", "--optdeps", "--", package_name, capture_output=True
+            "aur",
+            "depends",
+            "--optdeps",
+            "--",
+            package_name,
+            capture_output=True,
         )
 
         all_deps = set()
@@ -454,7 +466,9 @@ class Database:
 
             # Check if package is needed by name, pkgbase, or any provides
             identifiers = [pkg.name, pkg.pkgbase, *pkg.provides]
-            is_needed = any(identifier in to_keep for identifier in identifiers)
+            is_needed = any(
+                identifier in to_keep for identifier in identifiers
+            )
 
             if not is_needed:
                 orphans.add(name)
@@ -467,18 +481,25 @@ class Database:
 
         if to_remove:
             if dry_run:
-                logger.info(f"Would remove {len(to_remove)} packages not in config:")
+                logger.info(
+                    f"Would remove {len(to_remove)} packages not in config:"
+                )
                 for package in sorted(to_remove):
                     logger.info(f"  - {package}")
                 return
             else:
-                logger.info(f"Removing {len(to_remove)} packages not in config:")
+                logger.info(
+                    f"Removing {len(to_remove)} packages not in config:"
+                )
                 for package in sorted(to_remove):
                     logger.info(f"  - {package}")
 
                 # Batch remove from database
                 await run_cmd(
-                    "repo-remove", "--sign", str(self.db_tar), *sorted(to_remove)
+                    "repo-remove",
+                    "--sign",
+                    str(self.db_tar),
+                    *sorted(to_remove),
                 )
 
                 # Remove package files and cache
@@ -521,17 +542,24 @@ class Database:
         )
 
     async def remove(self, *packages):
-        packages_to_remove = self.config.aur.intersection(set(packages))
+        # Remove packages that are actually in the repository database
+        repo_packages = {pkg.name for pkg in self.packages()}
+        packages_to_remove = repo_packages.intersection(set(packages))
+
         if packages_to_remove:
             logger.info(f"Removing {len(packages_to_remove)} package(s):")
             for pkg in sorted(packages_to_remove):
                 logger.info(f"  - {pkg}")
 
+            # Remove from config (both aur and manual sections)
             self.config.remove_packages(*packages_to_remove)
             self.config.remove_no_update(*packages_to_remove)
 
             await run_cmd(
-                "repo-remove", "--sign", str(self.db_tar), *sorted(packages_to_remove)
+                "repo-remove",
+                "--sign",
+                str(self.db_tar),
+                *sorted(packages_to_remove),
             )
 
             for package in packages_to_remove:
@@ -567,6 +595,9 @@ class Database:
         *packages,
         as_deps=False,
         as_explicit=False,
+        as_noaur=False,
+        as_manual=False,
+        as_no_manual=False,
         parents=None,
         makepkg_flags=None,
     ):
@@ -583,6 +614,7 @@ class Database:
 
         # Get all packages currently in the repository database
         repo_packages = {pkg.name for pkg in self.packages()}
+        repo_pkgbases = {pkg.pkgbase for pkg in self.packages()}
 
         packages_and_deps = set()
         new_packages = []
@@ -596,9 +628,15 @@ class Database:
             if maybe_path.is_file():
                 # Handle package file
                 await run_cmd(
-                    "sudo", "cp", str(maybe_path), str(self.directory), check=True
+                    "sudo",
+                    "cp",
+                    str(maybe_path),
+                    str(self.directory),
+                    check=True,
                 )
-                await run_cmd("repo-add", str(self.db_tar), str(maybe_path), check=True)
+                await run_cmd(
+                    "repo-add", str(self.db_tar), str(maybe_path), check=True
+                )
                 await self._sign(self.directory / maybe_path.name)
 
                 # Extract package name and pkgbase using pyalpm
@@ -607,31 +645,68 @@ class Database:
                 pkgbase = pkg_file.base
 
                 new_files.append(pkg_name_only)
-                self.config.add_no_update(pkgbase)
 
-                if not as_deps:
+                # Handle aur section (explicit vs dependency)
+                if as_explicit:
+                    # MUST be in aur
                     self.config.add_packages(pkgbase)
+                elif as_deps or as_noaur:
+                    # MUST NOT be in aur
+                    self.config.remove_packages(pkgbase)
+                # else: Default: no change (existing file) or don't add (new file)
+
+                # Handle manual section (manual vs updateable)
+                if as_manual:
+                    # MUST be in manual
+                    self.config.add_no_update(pkgbase)
+                elif as_no_manual:
+                    # MUST NOT be in manual
+                    self.config.remove_no_update(pkgbase)
+                else:
+                    # Default: add to manual only if NEW file package
+                    if pkgbase not in repo_pkgbases:
+                        self.config.add_no_update(pkgbase)
             else:
                 # Check if package already exists in repository
                 if package in repo_packages:
                     # Package is already built and in the repo
-                    is_in_list = package in self.config.aur
+                    is_in_aur = package in self.config.aur
+                    is_in_manual = package in self.config.manual
+                    changed = False
 
-                    if as_deps or as_explicit:
-                        # User wants to change category
-                        if as_deps and is_in_list:
-                            # Change from explicit to dependency (remove from list)
-                            self.config.remove_packages(package)
-                            reclassified.append((package, "explicit", "dependency"))
-                        elif (as_explicit or (not as_deps)) and not is_in_list:
-                            # Change to explicit (add to list)
+                    # Handle aur section (explicit vs dependency)
+                    if as_explicit:
+                        # MUST be in aur
+                        if not is_in_aur:
                             self.config.add_packages(package)
-                            reclassified.append((package, "dependency", "explicit"))
-                        else:
-                            # Already in the correct category
-                            already_exists.append(package)
-                    else:
-                        # Package exists and no category change requested
+                            reclassified.append(
+                                (package, "dependency", "explicit")
+                            )
+                            changed = True
+                    elif as_deps or as_noaur:
+                        # MUST NOT be in aur
+                        if is_in_aur:
+                            self.config.remove_packages(package)
+                            reclassified.append(
+                                (package, "explicit", "dependency")
+                            )
+                            changed = True
+                    # else: no change to aur section
+
+                    # Handle manual section (manual vs updateable)
+                    if as_manual:
+                        # MUST be in manual
+                        if not is_in_manual:
+                            self.config.add_no_update(package)
+                            changed = True
+                    elif as_no_manual:
+                        # MUST NOT be in manual
+                        if is_in_manual:
+                            self.config.remove_no_update(package)
+                            changed = True
+                    # else: no change to manual section
+
+                    if not changed:
                         already_exists.append(package)
                     continue
 
@@ -641,8 +716,25 @@ class Database:
                 packages_and_deps.add(package)
                 new_packages.append(package)
 
-                if not as_deps:
+                # Handle aur section (explicit vs dependency)
+                if as_explicit:
+                    # MUST be in aur
                     self.config.add_packages(package)
+                elif as_deps or as_noaur:
+                    # MUST NOT be in aur (don't add)
+                    pass
+                else:
+                    # Default: add to aur
+                    self.config.add_packages(package)
+
+                # Handle manual section (manual vs updateable)
+                if as_manual:
+                    # MUST be in manual
+                    self.config.add_no_update(package)
+                elif as_no_manual:
+                    # MUST NOT be in manual (don't add)
+                    pass
+                # else: default is to not add to manual for new AUR packages
 
         if packages_and_deps:
             cmd = [
@@ -797,7 +889,9 @@ class Database:
             if pkg_name in pkg_updates and pkg_updates[pkg_name].deps:
                 deps_info = pkg_updates[pkg_name].deps
                 all_deps = (
-                    deps_info.depends + deps_info.optdepends + deps_info.makedepends
+                    deps_info.depends
+                    + deps_info.optdepends
+                    + deps_info.makedepends
                 )
             else:
                 # Use current repo dependencies
@@ -911,7 +1005,9 @@ class Database:
         return pkg_updates
 
     def _filter_updates_to_needed(
-        self, pkg_updates: dict[str, PackageUpdateInfo], needed_packages: set[str]
+        self,
+        pkg_updates: dict[str, PackageUpdateInfo],
+        needed_packages: set[str],
     ) -> set[str]:
         """
         Filter package updates to only those that will still be needed after the update.
@@ -988,7 +1084,10 @@ class Database:
 
                 # Check if pkg is in this package's dependencies
                 if pkg in all_deps:
-                    dist = calculate_distance(potential_parent, visited.copy()) + 1
+                    dist = (
+                        calculate_distance(potential_parent, visited.copy())
+                        + 1
+                    )
                     max_dist = max(max_dist, dist)
 
             distances[pkg] = max_dist
@@ -1002,7 +1101,9 @@ class Database:
         # Ensure each package appears only once
         seen = set()
         sorted_packages = []
-        for pkg in sorted(packages, key=lambda p: distances.get(p, 0), reverse=True):
+        for pkg in sorted(
+            packages, key=lambda p: distances.get(p, 0), reverse=True
+        ):
             if pkg not in seen:
                 seen.add(pkg)
                 sorted_packages.append(pkg)
@@ -1062,10 +1163,14 @@ class Database:
 
         # Build non-VCS packages
         if non_vcs_packages:
-            logger.info(f"Updating {len(non_vcs_packages)} non-VCS package(s)...")
+            logger.info(
+                f"Updating {len(non_vcs_packages)} non-VCS package(s)..."
+            )
             for pkg_name in non_vcs_packages:
                 if has_failed_dependency(pkg_name, failed_packages):
-                    logger.warning(f"  Skipping {pkg_name} (depends on failed package)")
+                    logger.warning(
+                        f"  Skipping {pkg_name} (depends on failed package)"
+                    )
                     skipped_packages.append(pkg_name)
                     continue
 
@@ -1093,7 +1198,9 @@ class Database:
             logger.info(f"Building {len(vcs_packages)} VCS package(s)...")
             for pkg_name in vcs_packages:
                 if has_failed_dependency(pkg_name, failed_packages):
-                    logger.warning(f"  Skipping {pkg_name} (depends on failed package)")
+                    logger.warning(
+                        f"  Skipping {pkg_name} (depends on failed package)"
+                    )
                     skipped_packages.append(pkg_name)
                     continue
 
@@ -1176,7 +1283,9 @@ class Database:
             packages_to_check = set(packages) & repo_packages
             not_in_repo = set(packages) - repo_packages
             if not_in_repo:
-                logger.warning(f"{len(not_in_repo)} package(s) not in repository:")
+                logger.warning(
+                    f"{len(not_in_repo)} package(s) not in repository:"
+                )
                 for pkg in sorted(not_in_repo):
                     logger.warning(f"  - {pkg}")
         else:
@@ -1184,9 +1293,9 @@ class Database:
 
         # STEP 1: Check all packages for updates
         logger.info("Checking for package updates...")
-        pkg_updates: dict[str, PackageUpdateInfo] = await self._check_package_updates(
-            packages_to_check
-        )
+        pkg_updates: dict[
+            str, PackageUpdateInfo
+        ] = await self._check_package_updates(packages_to_check)
 
         if not pkg_updates:
             logger.info("No updates available")
@@ -1195,7 +1304,9 @@ class Database:
         # Print what we found
         logger.info(f"Found updates for {len(pkg_updates)} package(s):")
         for pkg_name, info in sorted(pkg_updates.items()):
-            logger.info(f"  {pkg_name}: {info.current_version} -> {info.new_version}")
+            logger.info(
+                f"  {pkg_name}: {info.current_version} -> {info.new_version}"
+            )
 
         # STEP 2: Calculate post-update dependency tree
         logger.debug("Calculating post-update dependency tree...")
@@ -1283,7 +1394,9 @@ class Database:
             packages_to_check = set(packages) & repo_packages
             not_in_repo = set(packages) - repo_packages
             if not_in_repo:
-                print(f"Warning: {len(not_in_repo)} package(s) not in repository:")
+                print(
+                    f"Warning: {len(not_in_repo)} package(s) not in repository:"
+                )
                 for pkg in sorted(not_in_repo):
                     print(f"  - {pkg}")
         else:
@@ -1410,14 +1523,20 @@ class Database:
                         dep_name = strip_version(dep)
                         if dep_name == pkg:
                             dist = (
-                                calculate_distance(potential_parent, visited.copy()) + 1
+                                calculate_distance(
+                                    potential_parent, visited.copy()
+                                )
+                                + 1
                             )
                             max_dist = max(max_dist, dist)
                     for optdep in parent_pkg.optdepends:
                         dep_name = strip_version(optdep)
                         if dep_name == pkg:
                             dist = (
-                                calculate_distance(potential_parent, visited.copy()) + 1
+                                calculate_distance(
+                                    potential_parent, visited.copy()
+                                )
+                                + 1
                             )
                             max_dist = max(max_dist, dist)
 
@@ -1440,7 +1559,9 @@ class Database:
                 sorted_packages.append(pkg)
 
         # Split packages into VCS and non-VCS
-        vcs_packages = [pkg for pkg in sorted_packages if self._is_vcs_package(pkg)]
+        vcs_packages = [
+            pkg for pkg in sorted_packages if self._is_vcs_package(pkg)
+        ]
         non_vcs_packages = [
             pkg for pkg in sorted_packages if not self._is_vcs_package(pkg)
         ]
@@ -1448,7 +1569,9 @@ class Database:
         # For VCS packages, check if they need updating by comparing versions
         vcs_to_build = []
         if vcs_packages:
-            print(f"Checking {len(vcs_packages)} VCS package(s) for updates...")
+            print(
+                f"Checking {len(vcs_packages)} VCS package(s) for updates..."
+            )
             for pkg_name in vcs_packages:
                 # Get current version in sol repo
                 sol_pkg = self.pkg_db.get_package(pkg_name)
@@ -1588,7 +1711,11 @@ class Database:
 
     async def _pacsync(self):
         await run_cmd(
-            "sudo", "pacsync", self.name, stderr=asyncio.subprocess.DEVNULL, check=True
+            "sudo",
+            "pacsync",
+            self.name,
+            stderr=asyncio.subprocess.DEVNULL,
+            check=True,
         )
 
 
@@ -1704,7 +1831,10 @@ def db_show_deps(packages=None):
             if dep_name:
                 optional.append(dep_name)
 
-        result["packages"][pkg_name] = {"required": required, "optional": optional}
+        result["packages"][pkg_name] = {
+            "required": required,
+            "optional": optional,
+        }
 
     print(json.dumps(result, indent=2))
 
@@ -1815,6 +1945,9 @@ async def db_add(
     delete=False,
     as_deps=False,
     as_explicit=False,
+    as_noaur=False,
+    as_manual=False,
+    as_no_manual=False,
     parents=None,
     makepkg_flags=None,
 ):
@@ -1823,6 +1956,9 @@ async def db_add(
         *packages,
         as_deps=as_deps,
         as_explicit=as_explicit,
+        as_noaur=as_noaur,
+        as_manual=as_manual,
+        as_no_manual=as_no_manual,
         parents=parents,
         makepkg_flags=makepkg_flags,
     )
@@ -1852,17 +1988,37 @@ async def db_sign(all=False):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "-v", "--verbose", action="store_true", help="Enable verbose/debug output"
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="Enable verbose/debug output",
     )
-    subparsers = parser.add_subparsers(dest="command", metavar="COMMAND", required=True)
+    subparsers = parser.add_subparsers(
+        dest="command", metavar="COMMAND", required=True
+    )
 
-    add_parser = subparsers.add_parser("add", help="Add packages to the repository")
+    add_parser = subparsers.add_parser(
+        "add", help="Add packages to the repository"
+    )
     add_parser.add_argument(
         "--rm", action="store_true", help="Delete package file after adding"
     )
-    add_parser.add_argument("--asdeps", action="store_true", help="Add as dependency")
+    add_parser.add_argument(
+        "--asdeps", action="store_true", help="Add as dependency"
+    )
     add_parser.add_argument(
         "--asexplicit", action="store_true", help="Add as explicit (default)"
+    )
+    add_parser.add_argument(
+        "--noaur", action="store_true", help="Ensure not in aur section"
+    )
+    add_parser.add_argument(
+        "--manual",
+        action="store_true",
+        help="Add to manual (no-update) section",
+    )
+    add_parser.add_argument(
+        "--nomanual", action="store_true", help="Ensure not in manual section"
     )
     add_parser.add_argument(
         "--parent",
@@ -1881,12 +2037,19 @@ def main():
     )
     add_parser.add_argument("package", nargs="+")
 
-    list_parser = subparsers.add_parser("list", help="List packages in the repository")
-    list_parser.add_argument(
-        "-o", "--orphans", action="store_true", help="Show orphaned packages only"
+    list_parser = subparsers.add_parser(
+        "list", help="List packages in the repository"
     )
     list_parser.add_argument(
-        "--json", action="store_true", help="Output package dependencies as JSON"
+        "-o",
+        "--orphans",
+        action="store_true",
+        help="Show orphaned packages only",
+    )
+    list_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Output package dependencies as JSON",
     )
     list_parser.add_argument(
         "-a",
@@ -1895,7 +2058,9 @@ def main():
         help="Include all dependencies (not just sol packages)",
     )
 
-    prune_parser = subparsers.add_parser("prune", help="Remove packages not in config")
+    prune_parser = subparsers.add_parser(
+        "prune", help="Remove packages not in config"
+    )
     prune_parser.add_argument(
         "--dry-run",
         action="store_true",
@@ -1906,10 +2071,14 @@ def main():
         "show-deps", help="Show dependencies as JSON"
     )
     show_deps_parser.add_argument(
-        "package", nargs="*", help="Specific packages (optional, defaults to all)"
+        "package",
+        nargs="*",
+        help="Specific packages (optional, defaults to all)",
     )
 
-    subparsers.add_parser("check-deps", help="Check for unsatisfied dependencies")
+    subparsers.add_parser(
+        "check-deps", help="Check for unsatisfied dependencies"
+    )
 
     remove_parser = subparsers.add_parser(
         "remove", help="Remove packages from the repository"
@@ -1976,6 +2145,9 @@ def main():
                     delete=args.rm,
                     as_deps=args.asdeps,
                     as_explicit=args.asexplicit,
+                    as_noaur=args.noaur,
+                    as_manual=args.manual,
+                    as_no_manual=args.nomanual,
                     parents=args.parents,
                     makepkg_flags=makepkg_flags if makepkg_flags else None,
                 )
