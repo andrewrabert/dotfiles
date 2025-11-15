@@ -16,12 +16,12 @@ printf "${BLUE}==> Updating dotfiles...${NC}\n"
 full-update 00-dotfiles
 echo ""
 
-printf "${BLUE}==> Symlinking .bash_profile...${NC}\n"
-ln -sf "$HOME/.dotfiles/public/bash/hosts/pikvm/.bash_profile" "$HOME/.bash_profile"
-echo ""
-
 printf "${BLUE}==> Running full-update 60-tmux...${NC}\n"
 full-update 60-tmux
+echo ""
+
+printf "${BLUE}==> Running full-update 60-zsh...${NC}\n"
+full-update 60-zsh
 echo ""
 
 printf "${BLUE}==> Updating all installed packages...${NC}\n"
