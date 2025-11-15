@@ -69,9 +69,9 @@ else
     # Direct SSH connection
     case "$SSH_HOST" in
         mars|phobos|lounge-htpc)
-            exec ssh -t "${SSH_HOST}" -- systemd-inhibit --who='ssh-tmux-attach' --what=idle --mode=block zsh -lic tmux-attach
+            exec ssh -t "${SSH_HOST}" -- systemd-inhibit --who='ssh-tmux-attach' --what=idle --mode=block \$SHELL -lic tmux-attach
             ;;
         *)
-            exec ssh -t "${SSH_HOST}" -- zsh -lic tmux-attach
+            exec ssh -t "${SSH_HOST}" -- \$SHELL -lic tmux-attach
     esac
 fi
