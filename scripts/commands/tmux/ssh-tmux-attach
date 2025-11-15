@@ -46,12 +46,15 @@ SSH_HOST="$1"
 # Check if we're inside a tmux session and tmux handling is enabled
 if [ -n "$TMUX" ] && [ "$DISABLE_TMUX_CHECK" = false ]; then
     # Create new tab with name "ssh <host>" and set @renamed
+    #
+    # ${SHELL##*/} expands to target host user's shell
+    # works with zsh, bash
     case "$SSH_HOST" in
         mars|phobos|lounge-htpc)
-            tmux new-window -n "ssh $SSH_HOST" "ssh -t '$SSH_HOST' -- systemd-inhibit --who='ssh-tmux-attach' --what=idle --mode=block zsh -lic tmux-attach"
+            tmux new-window -n "ssh $SSH_HOST" "ssh -t '$SSH_HOST' -- systemd-inhibit --who='ssh-tmux-attach' --what=idle --mode=block ${SHELL##*/} -lic tmux-attach"
             ;;
         *)
-            tmux new-window -n "ssh $SSH_HOST" "ssh -t '$SSH_HOST' -- zsh -lic tmux-attach"
+            tmux new-window -n "ssh $SSH_HOST" "ssh -t '$SSH_HOST' -- ${SHELL##*/} -lic tmux-attach"
     esac
     tmux set-window-option @renamed on
     tmux set-window-option @nested_mode on
