@@ -35,8 +35,13 @@ printf "${BLUE}==> Checking for packages with missing dependencies...${NC}\n"
 pacman -Dk
 echo ""
 
-printf "${BLUE}==> Ensuring all installed packages are cached...${NC}\n"
-pacman -Sw --noconfirm $(pacman -Qq)
+printf "${BLUE}==> Checking if all installed packages are cached...${NC}\n"
+if ! pacman -Sp $(pacman -Qq) 2>/dev/null | grep -qv '^file://'; then
+    printf "All packages cached\n"
+else
+    printf "${RED}Some packages not cached, downloading...${NC}\n"
+    pacman -Sw --noconfirm $(pacman -Qq)
+fi
 echo ""
 
 printf "${BLUE}==> Pruning pacman cache to only installed packages...${NC}\n"
