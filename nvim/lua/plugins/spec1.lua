@@ -114,10 +114,12 @@ return {
 			formatters_by_ft = {
 				lua = { "stylua" },
 				python = { "ruff_format", "ruff_fix" },
+				-- javascript = { lsp_format = "fallback" },
+				-- typescript = { lsp_format = "fallback" },
 			},
 			format_on_save = {
 				timeout_ms = 500,
-				lsp_fallback = true,
+				lsp_fallback = false,
 			},
 			formatters = {
 				ruff_format = {
