@@ -393,6 +393,7 @@ if HOSTNAME in ("mars", "phobos"):
             "okular",
             "plasma6-runners-emojirunner",
             "podman",
+            "proton-vpn-gtk-app",
             "rawtherapee",
             "signal-desktop",
             "spectacle",

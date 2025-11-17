@@ -1,4 +1,12 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv --quiet run --script
+"""
+# /// script
+# dependencies = [
+#     "tqdm",
+# ]
+# ///
+"""
+
 import argparse
 import contextlib
 import json
@@ -17,7 +25,9 @@ DEFAULT_LANGUAGES = {
 
 
 def mkv_info(path):
-    proc = subprocess.run(["mkvmerge", "-J", path], stdout=subprocess.PIPE, check=True)
+    proc = subprocess.run(
+        ["mkvmerge", "-J", path], stdout=subprocess.PIPE, check=True
+    )
     return json.loads(proc.stdout)
 
 
@@ -28,13 +38,17 @@ class MKVFile:
 
     @property
     def languages(self):
-        return {track["properties"]["language"] for track in self.metadata["tracks"]}
+        return {
+            track["properties"]["language"]
+            for track in self.metadata["tracks"]
+        }
 
     def matching_audio_tracks(self, languages):
         return [
             track["id"]
             for track in self.metadata["tracks"]
-            if track["type"] == "audio" and track["properties"]["language"] in languages
+            if track["type"] == "audio"
+            and track["properties"]["language"] in languages
         ]
 
     def matching_subtitle_tracks(self, languages):
@@ -187,7 +201,9 @@ def main():
             pending.append((mkv, audio_track_remove, subtitle_track_remove))
 
     if pending:
-        for mkv, audio_track_remove, subtitle_track_remove in tqdm.tqdm(pending):
+        for mkv, audio_track_remove, subtitle_track_remove in tqdm.tqdm(
+            pending
+        ):
             log = [str(mkv.path)]
             if audio_track_remove:
                 log.append(f"(audio: {audio_track_remove})")
