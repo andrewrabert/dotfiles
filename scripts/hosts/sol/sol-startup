@@ -42,7 +42,7 @@ systemctl --user enable --now sol-update-remotes.timer
 systemctl --user enable --now sol-ytdl-sub.timer
 
 echo Starting wireguard ...
-sudo wg-quick up sol
+sudo systemctl enable --now wg-quick@wormhole
 
 echo Starting Docker ...
 sudo systemctl enable --now docker
