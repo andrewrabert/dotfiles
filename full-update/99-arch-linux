@@ -384,6 +384,7 @@ if HOSTNAME in ("mars", "phobos"):
             "kcolorchooser",
             "kdeconnect",
             "kid3",
+            "krfb",
             "krita",
             "kubectl",
             "mkvtoolnix-gui",
