@@ -11,6 +11,6 @@ for var in ${(M)${(k)parameters}:#DOTFILES*}; do
   fi
 done
 
-# Complete files from all DOTFILES*/full-update directories
+# Complete files from all DOTFILES*/full-update directories (excluding hidden files)
 _alternative \
-  "files:files:_path_files -W '(${(j: :)dotfiles_dirs})'"
+  "files:files:_path_files -W '(${(j: :)dotfiles_dirs})' -g '[^.]*'"
