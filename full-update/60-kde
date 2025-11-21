@@ -4,6 +4,7 @@ import dataclasses
 import os
 import pathlib
 import shutil
+import string
 import subprocess
 
 
@@ -144,12 +145,19 @@ async def kwriteconfig6(
         raise subprocess.CalledProcessError(proc.returncode, "kwriteconfig6")
 
 
-async def register_global_shortcut(name, description, shortcut):
+async def register_global_shortcut(name, exec, shortcut):
     """Register a global shortcut by creating desktop file and setting hotkey."""
-    desktop_file = LOCAL_SHARE / "applications" / f"net.local.{name}.desktop"
+    shortname = "".join(
+        c
+        for c in exec.split()[0].split("/")[-1]
+        if c in [*string.ascii_letters, *string.digits]
+    )
+    desktop_file = (
+        LOCAL_SHARE / "applications" / f"net.local.{shortname}.desktop"
+    )
     desktop_content = f"""[Desktop Entry]
-Exec={name}
-Name={description}
+Exec={exec}
+Name={name}
 NoDisplay=true
 StartupNotify=false
 Type=Application
@@ -158,7 +166,7 @@ X-KDE-GlobalAccel-CommandShortcut=true
     desktop_file.parent.mkdir(parents=True, exist_ok=True)
     desktop_file.write_text(desktop_content)
 
-    groups = ["services", f"net.local.{name}.desktop"]
+    groups = ["services", f"net.local.{shortname}.desktop"]
     await kwriteconfig6(
         file="kglobalshortcutsrc",
         groups=groups,
@@ -251,12 +259,14 @@ async def configure_kde():
                 [
                     GlobalShortcut(
                         name="Center and scale the focused window",
-                        exec="kde-center-scaled",
+                        exec=str(DOTFILES / "kde" / "kde-center-scaled"),
                         shortcut="Meta+Shift+C",
                     ),
                     GlobalShortcut(
                         name="Toggle tmux-scratchpad",
-                        exec="kde-toggle-tmux-scratchpad",
+                        exec=str(
+                            DOTFILES / "kde" / "kde-toggle-tmux-scratchpad"
+                        ),
                         shortcut="Meta+Return",
                     ),
                 ]
@@ -275,8 +285,8 @@ async def configure_kde():
 
     for shortcut in global_shortcuts:
         await register_global_shortcut(
-            name=shortcut.exec,
-            description=shortcut.name,
+            exec=shortcut.exec,
+            name=shortcut.name,
             shortcut=shortcut.shortcut,
         )
 
