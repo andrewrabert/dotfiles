@@ -43,34 +43,45 @@ def main():
         hostname = socket.gethostname()
 
     sources = [
-        dotfiles / "scripts" / "hosts" / hostname,
+        dotfiles / "scripts/hosts" / hostname,
     ]
     for d in other_dotfiles:
-        sources.append(d / "scripts" / "hosts" / hostname)
+        sources.append(d / "scripts/hosts" / hostname)
 
-    for path in (dotfiles / "scripts" / "commands").iterdir():
+    for path in (dotfiles / "scripts/commands").iterdir():
         if path.name in all_commands:
             sources.append(path)
 
-    sources.append(dotfiles / "scripts" / "terminal")
+    sources.append(dotfiles / "scripts/terminal")
     for d in other_dotfiles:
-        sources.append(d / "scripts" / "terminal")
+        sources.append(d / "scripts/terminal")
 
     match hostname:
         case "mars":
-            sources.extend([dotfiles / "scripts" / "media"])
+            sources.extend(
+                [
+                    dotfiles / "scripts/media",
+                    dotfiles / "rust-tools/ww-rs/target/release/ww-rs",
+                ]
+            )
         case "phobos":
-            sources.extend([dotfiles / "scripts" / "media"])
+            sources.extend(
+                [
+                    dotfiles / "scripts/media",
+                    dotfiles / "rust-tools/ww-rs/target/release/ww-rs",
+                ]
+            )
         case "sol":
-            sources.append(dotfiles / "scripts" / "media")
-
-    sources = [path for path in sources if path.is_dir()]
+            sources.extend([dotfiles / "scripts/media"])
 
     links = {}
     for source in sources:
-        if not source.is_dir():
-            continue
-        for path in source.iterdir():
+        source_paths = []
+        if source.is_file():
+            source_paths.append(source)
+        else:
+            source_paths.extend(list(source.iterdir()))
+        for path in source_paths:
             name = path.name
             if path.is_symlink():
                 path = path.readlink()

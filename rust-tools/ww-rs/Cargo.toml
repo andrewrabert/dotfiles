@@ -1,0 +1,17 @@
+[package]
+name = "ww-rs"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+tempfile = "3"
+rand = "0.8"
+zbus = { version = "5", features = ["blocking"] }
+
+[build-dependencies]
+vergen-git2 = { version = "1", features = ["build"] }
+
+[profile.release]
+lto = true
+strip = true

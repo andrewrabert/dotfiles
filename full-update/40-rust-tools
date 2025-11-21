@@ -1,0 +1,16 @@
+#!/usr/bin/env sh
+set -e
+
+RUST_TOOLS_DIR="${DOTFILES}/rust-tools"
+
+build_release() {
+    echo "Building $1"
+    cd "$RUST_TOOLS_DIR/$1"
+    cargo build -q --release
+}
+
+case "$HOST_DOTFILES" in
+    mars|phobos)
+        build_release ww-rs
+        ;;
+esac
