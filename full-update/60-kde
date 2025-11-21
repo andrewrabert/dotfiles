@@ -148,18 +148,62 @@ async def configure_kde():
                 "DefaultWebShortcut": "google",
                 "EnableWebShortcuts": "true",
                 "KeywordDelimiter": ":",
+                "PreferredWebShortcuts": "google,youtube,wikit,yahoo,wikipedia",
                 "UsePreferredWebShortcutsOnly": "false",
             }
         },
         "dolphinrc": {
-            "KDE": {"AnimationDurationFactor": "0"},
-            "MainWindow": {"MenuBar": "Disabled"},
+            "KDE": {
+                "AnimationDurationFactor": "0",
+            },
+            "MainWindow": {
+                "MenuBar": "Disabled",
+            },
             "General": {
                 "OpenNewTabAfterLastTab": "true",
                 "ShowFullPath": "true",
             },
         },
+        "kglobalshortcutsrc": {
+            "kwin": {
+                "Window Move Center": "Meta+C,,Move Window to the Center",
+            },
+            "services][net.local.kde-center-scaled.desktop": {
+                "_launch": "Meta+Shift+C",
+            },
+            "services][net.local.kde-toggle-tmux-scratchpad.desktop": {
+                "_launch": "Meta+Return",
+            },
+        },
     }
+
+    if HOSTNAME == "lounge-htpc":
+        settings["kglobalshortcutsrc"].update(
+            {
+                "services][net.local.lounge-htpc-brightness-max.sh.desktop": {
+                    "_launch": "Back",
+                },
+                "services][net.local.lounge-htpc-brightness-min.sh.desktop": {
+                    "_launch": "Home Page",
+                },
+                "services][net.local.lounge-htpc-picture-toggle.sh.desktop": {
+                    "_launch": "Menu",
+                },
+                "services][net.local.lounge-htpc-power-toggle.sh.desktop": {
+                    "_launch": "Menu",
+                },
+                "services][net.local.lounge-htpc-volume-down.sh.desktop": {
+                    "_launch": "Volume Down",
+                },
+                "services][net.local.lounge-htpc-volume-mute-toggle.sh.desktop": {
+                    "_launch": "Volume Mute",
+                },
+                "services][net.local.lounge-htpc-volume-up.sh.desktop": {
+                    "_launch": "Volume Up",
+                },
+            }
+        )
+
     for file, groups in settings.items():
         for group, keys in groups.items():
             for key, value in keys.items():
