@@ -76,6 +76,8 @@ def main():
 
     links = {}
     for source in sources:
+        if not source.exists():
+            continue
         source_paths = []
         if source.is_file():
             source_paths.append(source)
