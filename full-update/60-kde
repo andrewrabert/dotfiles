@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import asyncio
 import dataclasses
+import hashlib
 import os
 import pathlib
 import shutil
@@ -145,13 +146,10 @@ async def kwriteconfig6(
         raise subprocess.CalledProcessError(proc.returncode, "kwriteconfig6")
 
 
-async def register_global_shortcut(name, exec, shortcut):
-    """Register a global shortcut by creating desktop file and setting hotkey."""
-    shortname = "".join(
-        c
-        for c in exec.split()[0].split("/")[-1]
-        if c in [*string.ascii_letters, *string.digits]
-    )
+def write_desktop_file(name, exec):
+    """Write a .desktop file for global shortcut."""
+    exec_hash = hashlib.sha256(exec.encode()).hexdigest()[:16]
+    shortname = exec_hash
     desktop_file = (
         LOCAL_SHARE / "applications" / f"net.local.{shortname}.desktop"
     )
@@ -165,6 +163,12 @@ X-KDE-GlobalAccel-CommandShortcut=true
 """
     desktop_file.parent.mkdir(parents=True, exist_ok=True)
     desktop_file.write_text(desktop_content)
+    return shortname
+
+
+async def register_global_shortcut(name, exec, shortcut):
+    """Register a global shortcut by creating desktop file and setting hotkey."""
+    shortname = write_desktop_file(name, exec)
 
     groups = ["services", f"net.local.{shortname}.desktop"]
     await kwriteconfig6(
@@ -209,6 +213,19 @@ async def configure_kde():
                 "Window Move Center": "Meta+C,,Move Window to the Center",
             },
         },
+    }
+
+    kglobalshortcuts_nested = {
+        "plasmashell": {
+            "activate application launcher": "Alt+F1,Meta\tAlt+F1,Activate Application Launcher",
+        },
+        "services][org.kde.krunner.desktop": {
+            "_launch": "Search\tAlt+F2\tMeta+Space",
+        },
+    }
+
+    settings_nested_groups = {
+        "kglobalshortcutsrc": kglobalshortcuts_nested,
     }
 
     global_shortcuts = []
@@ -282,6 +299,24 @@ async def configure_kde():
                     value=value,
                     notify=True,
                 )
+
+    for file, file_groups in settings_nested_groups.items():
+        for group, keys in file_groups.items():
+            groups = group.split("][")
+            for key, value in keys.items():
+                await kwriteconfig6(
+                    file=file,
+                    groups=groups,
+                    key=key,
+                    value=value,
+                    notify=True,
+                )
+
+    for shortcut in global_shortcuts:
+        write_desktop_file(
+            name=shortcut.name,
+            exec=shortcut.exec,
+        )
 
     for shortcut in global_shortcuts:
         await register_global_shortcut(
