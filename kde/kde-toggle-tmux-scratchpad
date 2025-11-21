@@ -1,0 +1,5 @@
+#!/usr/bin/env sh
+ww-rs \
+    --toggle \
+    --filter tmux-scratchpad \
+    -- foot --title tmux --app-id tmux-scratchpad -- zsh -ic 'tmux-attach --prompt'

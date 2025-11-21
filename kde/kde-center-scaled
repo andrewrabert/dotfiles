@@ -1,0 +1,6 @@
+#!/usr/bin/env sh
+ww-rs \
+    --filter-focused \
+    --center \
+    --scale-factor 0.8 \
+    --max-aspect 1.6 
