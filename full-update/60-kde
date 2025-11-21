@@ -1,9 +1,18 @@
 #!/usr/bin/env python3
 import asyncio
+import dataclasses
 import os
 import pathlib
 import shutil
 import subprocess
+
+
+@dataclasses.dataclass
+class GlobalShortcut:
+    name: str
+    exec: str
+    shortcut: str
+
 
 HOSTNAME = os.environ["HOST_DOTFILES"]
 
@@ -99,41 +108,64 @@ async def update_desktop_database():
         )
 
 
-class KWriteConfig:
-    @staticmethod
-    async def write(
-        *,
-        delete=False,
-        file=None,
-        group=None,
-        key=None,
-        notify=False,
-        value_type=None,
-        value=None,
-    ):
-        args = ["kwriteconfig6"]
-        if file is not None:
-            args.extend(("--file", file))
-        if group is not None:
+async def kwriteconfig6(
+    *,
+    delete=False,
+    file=None,
+    groups=None,
+    key=None,
+    notify=False,
+    value_type=None,
+    value=None,
+):
+    args = ["kwriteconfig6"]
+    if file is not None:
+        args.extend(("--file", file))
+    if groups is not None:
+        if isinstance(groups, str):
+            groups = [groups]
+        for group in groups:
             args.extend(("--group", group))
-        if key is not None:
-            args.extend(("--key", key))
-        if value_type is not None:
-            args.extend(("--type", value_type))
-        if delete:
-            args.append("--delete")
-        if notify:
-            args.append("--notify")
-        if not delete and value:
-            args.append(value)
-        if value is not None:
-            args.append(value)
-        proc = await asyncio.create_subprocess_exec(*args)
-        await proc.wait()
-        if proc.returncode != 0:
-            raise subprocess.CalledProcessError(
-                proc.returncode, "kwriteconfig6"
-            )
+    if key is not None:
+        args.extend(("--key", key))
+    if value_type is not None:
+        args.extend(("--type", value_type))
+    if delete:
+        args.append("--delete")
+    if notify:
+        args.append("--notify")
+    if not delete and value:
+        args.append(value)
+    if value is not None:
+        args.append(value)
+    proc = await asyncio.create_subprocess_exec(*args)
+    await proc.wait()
+    if proc.returncode != 0:
+        raise subprocess.CalledProcessError(proc.returncode, "kwriteconfig6")
+
+
+async def register_global_shortcut(name, description, shortcut):
+    """Register a global shortcut by creating desktop file and setting hotkey."""
+    desktop_file = LOCAL_SHARE / "applications" / f"net.local.{name}.desktop"
+    desktop_content = f"""[Desktop Entry]
+Exec={name}
+Name={description}
+NoDisplay=true
+StartupNotify=false
+Type=Application
+X-KDE-GlobalAccel-CommandShortcut=true
+"""
+    desktop_file.parent.mkdir(parents=True, exist_ok=True)
+    desktop_file.write_text(desktop_content)
+
+    groups = ["services", f"net.local.{name}.desktop"]
+    await kwriteconfig6(
+        file="kglobalshortcutsrc",
+        groups=groups,
+        key="_launch",
+        value=shortcut,
+        notify=True,
+    )
 
 
 async def configure_kde():
@@ -168,52 +200,85 @@ async def configure_kde():
             "kwin": {
                 "Window Move Center": "Meta+C,,Move Window to the Center",
             },
-            "services][net.local.kde-center-scaled.desktop": {
-                "_launch": "Meta+Shift+C",
-            },
-            "services][net.local.kde-toggle-tmux-scratchpad.desktop": {
-                "_launch": "Meta+Return",
-            },
         },
     }
 
-    if HOSTNAME == "lounge-htpc":
-        settings["kglobalshortcutsrc"].update(
-            {
-                "services][net.local.lounge-htpc-brightness-max.sh.desktop": {
-                    "_launch": "Back",
-                },
-                "services][net.local.lounge-htpc-brightness-min.sh.desktop": {
-                    "_launch": "Home Page",
-                },
-                "services][net.local.lounge-htpc-picture-toggle.sh.desktop": {
-                    "_launch": "Menu",
-                },
-                "services][net.local.lounge-htpc-power-toggle.sh.desktop": {
-                    "_launch": "Menu",
-                },
-                "services][net.local.lounge-htpc-volume-down.sh.desktop": {
-                    "_launch": "Volume Down",
-                },
-                "services][net.local.lounge-htpc-volume-mute-toggle.sh.desktop": {
-                    "_launch": "Volume Mute",
-                },
-                "services][net.local.lounge-htpc-volume-up.sh.desktop": {
-                    "_launch": "Volume Up",
-                },
-            }
-        )
+    global_shortcuts = []
 
-    for file, groups in settings.items():
-        for group, keys in groups.items():
+    match HOSTNAME:
+        case "lounge-htpc":
+            global_shortcuts.extend(
+                [
+                    GlobalShortcut(
+                        name="Lounge HTPC Brightness Max",
+                        exec="lounge-htpc-brightness-max.sh",
+                        shortcut="Back",
+                    ),
+                    GlobalShortcut(
+                        name="Lounge HTPC Brightness Min",
+                        exec="lounge-htpc-brightness-min.sh",
+                        shortcut="Home Page",
+                    ),
+                    GlobalShortcut(
+                        name="Lounge HTPC Picture Toggle",
+                        exec="lounge-htpc-picture-toggle.sh",
+                        shortcut="Menu",
+                    ),
+                    GlobalShortcut(
+                        name="Lounge HTPC Power Toggle",
+                        exec="lounge-htpc-power-toggle.sh",
+                        shortcut="Menu",
+                    ),
+                    GlobalShortcut(
+                        name="Lounge HTPC Volume Down",
+                        exec="lounge-htpc-volume-down.sh",
+                        shortcut="Volume Down",
+                    ),
+                    GlobalShortcut(
+                        name="Lounge HTPC Volume Mute Toggle",
+                        exec="lounge-htpc-volume-mute-toggle.sh",
+                        shortcut="Volume Mute",
+                    ),
+                    GlobalShortcut(
+                        name="Lounge HTPC Volume Up",
+                        exec="lounge-htpc-volume-up.sh",
+                        shortcut="Volume Up",
+                    ),
+                ]
+            )
+        case "mars" | "sol":
+            global_shortcuts.extend(
+                [
+                    GlobalShortcut(
+                        name="Center and scale the focused window",
+                        exec="kde-center-scaled",
+                        shortcut="Meta+Shift+C",
+                    ),
+                    GlobalShortcut(
+                        name="Toggle tmux-scratchpad",
+                        exec="kde-toggle-tmux-scratchpad",
+                        shortcut="Meta+Return",
+                    ),
+                ]
+            )
+
+    for file, file_groups in settings.items():
+        for group, keys in file_groups.items():
             for key, value in keys.items():
-                await KWriteConfig.write(
+                await kwriteconfig6(
                     file=file,
-                    group=group,
+                    groups=group,
                     key=key,
                     value=value,
                     notify=True,
                 )
+
+    for shortcut in global_shortcuts:
+        await register_global_shortcut(
+            name=shortcut.exec,
+            description=shortcut.name,
+            shortcut=shortcut.shortcut,
+        )
 
 
 async def main():
