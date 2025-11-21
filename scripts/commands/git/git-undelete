@@ -92,6 +92,7 @@ async def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("-C", metavar="path", dest="repo_path")
     parser.add_argument("--list", action="store_true", help="list all deleted files")
+    parser.add_argument("-0", "--null", action="store_true", help="read null-delimited input from stdin")
     parser.add_argument("paths", nargs="*")
     args = parser.parse_args()
 
@@ -107,9 +108,13 @@ async def main():
             if not (repo_root / path).exists():
                 print(path)
     else:
-        paths = args.paths
-        if not sys.stdin.isatty():
-            paths.extend(sys.stdin.read().splitlines())
+        paths = list(args.paths)
+        if not paths and not sys.stdin.isatty():
+            stdin_data = sys.stdin.read()
+            if args.null:
+                paths = [p for p in stdin_data.split('\0') if p]
+            else:
+                paths = stdin_data.splitlines()
         for path in sorted(paths):
             print(path)
             commit = await repo.lastest_commit_for_path(path)
