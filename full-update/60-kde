@@ -17,8 +17,6 @@ if DOTFILES_PRIVATE := os.environ.get("DOTFILES_PRIVATE", None):
     DOTFILES_PRIVATE = pathlib.Path(DOTFILES_PRIVATE)
 
 LINKS = {
-    CONFIG / "kdesurc": DOTFILES / "kde" / "kdesurc",
-    CONFIG / "kuriikwsfilterrc": DOTFILES / "kde" / "kuriikwsfilterrc",
     LOCAL_SHARE / "icons": DOTFILES / "kde" / "icons",
     LOCAL_SHARE / "applications": DOTFILES / "kde" / "applications",
     LOCAL_SHARE / "kwin": DOTFILES / "kde" / "kwin",
@@ -138,21 +136,40 @@ class KWriteConfig:
             )
 
 
-async def configure_dolphin():
-    dolphin_settings = {
-        "KDE": {"AnimationDurationFactor": "0"},
-        "MainWindow": {"MenuBar": "Disabled"},
-        "General": {"OpenNewTabAfterLastTab": "true", "ShowFullPath": "true"},
+async def configure_kde():
+    settings = {
+        "kdesurc": {
+            "super-user-command": {
+                "super-user-command": "sudo",
+            }
+        },
+        "kuriikwsfilterrc": {
+            "General": {
+                "DefaultWebShortcut": "google",
+                "EnableWebShortcuts": "true",
+                "KeywordDelimiter": ":",
+                "UsePreferredWebShortcutsOnly": "false",
+            }
+        },
+        "dolphinrc": {
+            "KDE": {"AnimationDurationFactor": "0"},
+            "MainWindow": {"MenuBar": "Disabled"},
+            "General": {
+                "OpenNewTabAfterLastTab": "true",
+                "ShowFullPath": "true",
+            },
+        },
     }
-    for group, keys in dolphin_settings.items():
-        for key, value in keys.items():
-            await KWriteConfig.write(
-                file="dolphinrc",
-                group=group,
-                key=key,
-                value=value,
-                notify=True,
-            )
+    for file, groups in settings.items():
+        for group, keys in groups.items():
+            for key, value in keys.items():
+                await KWriteConfig.write(
+                    file=file,
+                    group=group,
+                    key=key,
+                    value=value,
+                    notify=True,
+                )
 
 
 async def main():
@@ -173,7 +190,7 @@ async def main():
     if HOSTNAME in ("mars", "phobos"):
         await update_desktop_database()
 
-    await configure_dolphin()
+    await configure_kde()
 
 
 if __name__ == "__main__":
