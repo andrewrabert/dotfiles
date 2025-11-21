@@ -246,7 +246,7 @@ async def configure_kde():
                     ),
                 ]
             )
-        case "mars" | "sol":
+        case "mars" | "phobos":
             global_shortcuts.extend(
                 [
                     GlobalShortcut(
