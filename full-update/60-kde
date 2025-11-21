@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
 import asyncio
 import dataclasses
-import hashlib
 import os
 import pathlib
 import shutil
-import string
 import subprocess
 
 
@@ -14,6 +12,12 @@ class GlobalShortcut:
     name: str
     exec: str
     shortcut: str
+
+    @property
+    def desktop_id(self):
+        command = self.exec.split()[0]
+        basename = pathlib.Path(command).name
+        return basename
 
 
 HOSTNAME = os.environ["HOST_DOTFILES"]
@@ -146,12 +150,12 @@ async def kwriteconfig6(
         raise subprocess.CalledProcessError(proc.returncode, "kwriteconfig6")
 
 
-def write_desktop_file(name, exec):
+def write_desktop_file(name, exec, desktop_id):
     """Write a .desktop file for global shortcut."""
-    exec_hash = hashlib.sha256(exec.encode()).hexdigest()[:16]
-    shortname = exec_hash
     desktop_file = (
-        LOCAL_SHARE / "applications" / f"net.local.{shortname}.desktop"
+        LOCAL_SHARE
+        / "applications"
+        / f"net.local.dotfiles.{desktop_id}.desktop"
     )
     desktop_content = f"""[Desktop Entry]
 Exec={exec}
@@ -163,21 +167,6 @@ X-KDE-GlobalAccel-CommandShortcut=true
 """
     desktop_file.parent.mkdir(parents=True, exist_ok=True)
     desktop_file.write_text(desktop_content)
-    return shortname
-
-
-async def register_global_shortcut(name, exec, shortcut):
-    """Register a global shortcut by creating desktop file and setting hotkey."""
-    shortname = write_desktop_file(name, exec)
-
-    groups = ["services", f"net.local.{shortname}.desktop"]
-    await kwriteconfig6(
-        file="kglobalshortcutsrc",
-        groups=groups,
-        key="_launch",
-        value=shortcut,
-        notify=True,
-    )
 
 
 async def configure_kde():
@@ -211,6 +200,8 @@ async def configure_kde():
         "kglobalshortcutsrc": {
             "kwin": {
                 "Window Move Center": "Meta+C,,Move Window to the Center",
+                "Window Fullscreen": "Meta+Shift+F,,Make Window Fullscreen",
+                "Window Maximize": "Meta+PgUp\tMeta+F,Meta+PgUp,Maximize Window",
             },
         },
     }
@@ -219,7 +210,7 @@ async def configure_kde():
         "plasmashell": {
             "activate application launcher": "Alt+F1,Meta\tAlt+F1,Activate Application Launcher",
         },
-        "services][org.kde.krunner.desktop": {
+        ("services", "org.kde.krunner.desktop"): {
             "_launch": "Search\tAlt+F2\tMeta+Space",
         },
     }
@@ -289,6 +280,25 @@ async def configure_kde():
                 ]
             )
 
+    desktop_id_counts = {}
+    for shortcut in global_shortcuts:
+        desktop_id = shortcut.desktop_id
+        desktop_id_counts[desktop_id] = (
+            desktop_id_counts.get(desktop_id, 0) + 1
+        )
+
+    desktop_id_usage = {}
+    unique_desktop_ids = []
+    for shortcut in global_shortcuts:
+        base_id = shortcut.desktop_id
+        if desktop_id_counts[base_id] > 1:
+            counter = desktop_id_usage.get(base_id, 0) + 1
+            desktop_id_usage[base_id] = counter
+            unique_id = f"{base_id}-{counter}"
+        else:
+            unique_id = base_id
+        unique_desktop_ids.append(unique_id)
+
     for file, file_groups in settings.items():
         for group, keys in file_groups.items():
             for key, value in keys.items():
@@ -302,7 +312,10 @@ async def configure_kde():
 
     for file, file_groups in settings_nested_groups.items():
         for group, keys in file_groups.items():
-            groups = group.split("][")
+            if isinstance(group, tuple):
+                groups = list(group)
+            else:
+                groups = group
             for key, value in keys.items():
                 await kwriteconfig6(
                     file=file,
@@ -312,18 +325,36 @@ async def configure_kde():
                     notify=True,
                 )
 
-    for shortcut in global_shortcuts:
+    for shortcut, unique_id in zip(global_shortcuts, unique_desktop_ids):
         write_desktop_file(
             name=shortcut.name,
             exec=shortcut.exec,
+            desktop_id=unique_id,
         )
 
-    for shortcut in global_shortcuts:
-        await register_global_shortcut(
-            exec=shortcut.exec,
-            name=shortcut.name,
-            shortcut=shortcut.shortcut,
+    for shortcut, unique_id in zip(global_shortcuts, unique_desktop_ids):
+        groups = ["services", f"net.local.dotfiles.{unique_id}.desktop"]
+        await kwriteconfig6(
+            file="kglobalshortcutsrc",
+            groups=groups,
+            key="_launch",
+            value=shortcut.shortcut,
+            notify=True,
         )
+
+    expected_files = {
+        LOCAL_SHARE
+        / "applications"
+        / f"net.local.dotfiles.{unique_id}.desktop"
+        for unique_id in unique_desktop_ids
+    }
+    applications_dir = LOCAL_SHARE / "applications"
+    if applications_dir.exists():
+        for desktop_file in applications_dir.glob(
+            "net.local.dotfiles.*.desktop"
+        ):
+            if desktop_file not in expected_files:
+                desktop_file.unlink()
 
 
 async def main():
