@@ -150,6 +150,30 @@ async def kwriteconfig6(
         raise subprocess.CalledProcessError(proc.returncode, "kwriteconfig6")
 
 
+async def kreadconfig6(*, file=None, groups=None, key=None, default=None):
+    args = ["kreadconfig6"]
+    if file is not None:
+        args.extend(("--file", file))
+    if groups is not None:
+        if isinstance(groups, str):
+            groups = [groups]
+        for group in groups:
+            args.extend(("--group", group))
+    if key is not None:
+        args.extend(("--key", key))
+    if default is not None:
+        args.extend(("--default", default))
+    proc = await asyncio.create_subprocess_exec(
+        *args,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await proc.communicate()
+    if proc.returncode != 0:
+        raise subprocess.CalledProcessError(proc.returncode, "kreadconfig6")
+    return stdout.decode().strip()
+
+
 def write_desktop_file(name, exec, desktop_id):
     """Write a .desktop file for global shortcut."""
     desktop_file = (
@@ -341,6 +365,41 @@ async def configure_kde():
             value=shortcut.shortcut,
             notify=True,
         )
+
+    # Track kwin PID to detect when restart needed
+    runtime_dir = pathlib.Path(
+        os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
+    )
+    pid_file = runtime_dir / "kde-shortcuts-kwin-pid"
+
+    # Get current kwin_wayland PID
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "pgrep",
+            "-x",
+            "kwin_wayland",
+            stdout=asyncio.subprocess.PIPE,
+        )
+        stdout, _ = await proc.communicate()
+        current_pid = stdout.decode().strip()
+    except Exception:
+        current_pid = ""
+
+    # Check if PID changed (indicates restart happened)
+    try:
+        stored_pid = pid_file.read_text().strip()
+    except FileNotFoundError:
+        stored_pid = ""
+
+    if current_pid and current_pid != stored_pid:
+        # PID changed or first run - update and warn
+        pid_file.write_text(current_pid)
+        if not stored_pid:
+            # First run - need restart
+            print("WARNING: Logout required to load updated shortcuts.")
+    elif stored_pid and current_pid == stored_pid:
+        # PID unchanged - shortcuts still need activation
+        print("WARNING: Logout required to load updated shortcuts.")
 
     expected_files = {
         LOCAL_SHARE
