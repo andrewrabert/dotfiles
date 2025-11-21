@@ -4,21 +4,9 @@ use std::process::Command;
 use zbus::blocking::Connection;
 use zbus::zvariant::Value;
 
-const fn build_version() -> &'static str {
-    const SHA: &str = env!("VERGEN_GIT_SHA");
-    const DIRTY: &str = env!("VERGEN_GIT_DIRTY");
-
-    if DIRTY.as_bytes()[0] == b't' {  // "true"
-        concat!(env!("VERGEN_GIT_SHA"), " (dirty)")
-    } else {
-        SHA
-    }
-}
-
 #[derive(Parser, Debug)]
 #[command(
-    about = "Utility to launch a window (or raise it, if it was minimized), or to show information about the active window, or to perform other operations with windows in KDE Plasma. It interacts with KWin using KWin scripts and it is compatible with X11 and Wayland.",
-    version = build_version()
+    about = "Utility to launch a window (or raise it, if it was minimized), or to show information about the active window, or to perform other operations with windows in KDE Plasma. It interacts with KWin using KWin scripts and it is compatible with X11 and Wayland."
 )]
 struct Args {
     /// Show information about the active window

@@ -195,6 +195,11 @@ X-KDE-GlobalAccel-CommandShortcut=true
 
 async def configure_kde():
     settings = {
+        "kwinrc": {
+            "Plugins": {
+                "dialogparentEnabled": "false",
+            }
+        },
         "kdesurc": {
             "super-user-command": {
                 "super-user-command": "sudo",
