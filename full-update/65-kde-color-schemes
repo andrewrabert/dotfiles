@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Generate KDE color scheme files for per-application titlebar colors."""
 
+import asyncio
 import configparser
 import dataclasses
 import io
@@ -224,7 +225,7 @@ def merge_config(
         base.set("General", key, value)
 
 
-def get_base16_colors() -> tuple[str | None, str | None, str | None]:
+async def get_base16_colors() -> tuple[str | None, str | None, str | None]:
     base16_theme_path = pathlib.Path.home() / ".base16_theme"
     if not base16_theme_path.exists():
         return None, None, None
@@ -233,53 +234,56 @@ def get_base16_colors() -> tuple[str | None, str | None, str | None]:
         env = os.environ.copy()
         env["BASE16_SHELL_ENABLE_VARS"] = "1"
 
-        result = subprocess.run(
-            [
-                "sh",
-                "-c",
-                ". ~/.base16_theme && echo $BASE16_COLOR_00_HEX && echo $BASE16_COLOR_05_HEX && echo $BASE16_COLOR_03_HEX",
-            ],
-            capture_output=True,
-            text=True,
+        proc = await asyncio.create_subprocess_exec(
+            "sh",
+            "-c",
+            ". ~/.base16_theme && echo $BASE16_COLOR_00_HEX && echo $BASE16_COLOR_05_HEX && echo $BASE16_COLOR_03_HEX",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
             env=env,
-            check=True,
         )
+        stdout, _ = await proc.communicate()
 
-        lines = result.stdout.strip().split("\n")
+        if proc.returncode != 0:
+            return None, None, None
+
+        lines = stdout.decode().strip().split("\n")
         if len(lines) >= 3:
             bg = f"#{lines[0]}" if lines[0] else None
             active_fg = f"#{lines[1]}" if lines[1] else None
             inactive_fg = f"#{lines[2]}" if lines[2] else None
             return bg, active_fg, inactive_fg
-    except (subprocess.CalledProcessError, FileNotFoundError):
+    except FileNotFoundError:
         pass
 
     return None, None, None
 
 
-def is_dark_mode() -> bool:
+async def is_dark_mode() -> bool:
     try:
-        result = subprocess.run(
-            [
-                "dbus-send",
-                "--session",
-                "--print-reply",
-                "--dest=org.freedesktop.portal.Desktop",
-                "/org/freedesktop/portal/desktop",
-                "org.freedesktop.portal.Settings.Read",
-                "string:org.freedesktop.appearance",
-                "string:color-scheme",
-            ],
-            capture_output=True,
-            text=True,
-            check=True,
+        proc = await asyncio.create_subprocess_exec(
+            "dbus-send",
+            "--session",
+            "--print-reply",
+            "--dest=org.freedesktop.portal.Desktop",
+            "/org/freedesktop/portal/desktop",
+            "org.freedesktop.portal.Settings.Read",
+            "string:org.freedesktop.appearance",
+            "string:color-scheme",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
-        for line in result.stdout.splitlines():
+        stdout, _ = await proc.communicate()
+
+        if proc.returncode != 0:
+            return True
+
+        for line in stdout.decode().splitlines():
             if "uint32" in line:
                 value = line.strip().split()[-1]
                 return value == "1"
         return True
-    except (subprocess.CalledProcessError, FileNotFoundError):
+    except FileNotFoundError:
         return True
 
 
@@ -393,12 +397,12 @@ def update_kwin_rules(
     return False
 
 
-def main():
+async def main():
     if not shutil.which("plasmashell"):
         exit()
 
-    dark_mode = is_dark_mode()
-    base16_bg, base16_active_fg, base16_inactive_fg = get_base16_colors()
+    dark_mode = await is_dark_mode()
+    base16_bg, base16_active_fg, base16_inactive_fg = await get_base16_colors()
 
     if base16_bg and "Foot" in TITLEBAR_CONFIGS:
         TITLEBAR_CONFIGS["Foot"].dark.active_bg = base16_bg
@@ -504,42 +508,39 @@ def main():
             colors_changed = True
 
     if colors_changed:
-        subprocess.run(
-            [
-                "dbus-send",
-                "--type=signal",
-                "/KGlobalSettings",
-                "org.kde.KGlobalSettings.notifyChange",
-                "int32:2",
-                "int32:0",
-            ]
+        proc = await asyncio.create_subprocess_exec(
+            "dbus-send",
+            "--type=signal",
+            "/KGlobalSettings",
+            "org.kde.KGlobalSettings.notifyChange",
+            "int32:2",
+            "int32:0",
         )
+        await proc.wait()
 
     if kwinrules_changed:
-        subprocess.run(
-            [
-                "kwriteconfig6",
-                "--notify",
-                "--file",
-                "kwinrulesrc",
-                "--group",
-                "General",
-                "--key",
-                "count",
-                str(len(managed_rules)),
-            ]
+        proc = await asyncio.create_subprocess_exec(
+            "kwriteconfig6",
+            "--notify",
+            "--file",
+            "kwinrulesrc",
+            "--group",
+            "General",
+            "--key",
+            "count",
+            str(len(managed_rules)),
         )
+        await proc.wait()
 
-    subprocess.run(
-        [
-            "dbus-send",
-            "--type=method_call",
-            "--dest=org.kde.KWin",
-            "/KWin",
-            "org.kde.KWin.reconfigure",
-        ]
+    proc = await asyncio.create_subprocess_exec(
+        "dbus-send",
+        "--type=method_call",
+        "--dest=org.kde.KWin",
+        "/KWin",
+        "org.kde.KWin.reconfigure",
     )
+    await proc.wait()
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

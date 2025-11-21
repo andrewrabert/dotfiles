@@ -1,22 +1,26 @@
 #!/usr/bin/env python3
+import asyncio
 import os
 import subprocess
 
 
-def is_unit_enabled(name, user=False):
-    proc = subprocess.run(
-        [
-            "systemctl",
-            "--user" if user else "--system",
-            "show",
-            "--property=UnitFileState",
-            "--",
-            name,
-        ],
-        stdout=subprocess.PIPE,
-        check=True,
+async def is_unit_enabled(name, user=False):
+    args = [
+        "systemctl",
+        "--user" if user else "--system",
+        "show",
+        "--property=UnitFileState",
+        "--",
+        name,
+    ]
+    proc = await asyncio.create_subprocess_exec(
+        *args,
+        stdout=asyncio.subprocess.PIPE,
     )
-    match proc.stdout.decode().strip():
+    stdout, _ = await proc.communicate()
+    if proc.returncode != 0:
+        raise subprocess.CalledProcessError(proc.returncode, args)
+    match stdout.decode().strip():
         case "UnitFileState=enabled":
             return True
         case "UnitFileState=disabled":
@@ -25,8 +29,8 @@ def is_unit_enabled(name, user=False):
             raise RuntimeError
 
 
-def enable_unit(name, now=False, user=False):
-    if is_unit_enabled(name, user=user):
+async def enable_unit(name, now=False, user=False):
+    if await is_unit_enabled(name, user=user):
         return
     print(f"Enabling unit {name} (user={user})")
     args = []
@@ -43,15 +47,18 @@ def enable_unit(name, now=False, user=False):
     if now:
         args.append("--now")
     args.extend(["--", name])
-    subprocess.run(args, check=True)
+    proc = await asyncio.create_subprocess_exec(*args)
+    await proc.communicate()
+    if proc.returncode != 0:
+        raise subprocess.CalledProcessError(proc.returncode, args)
 
 
-def main():
+async def main():
     if os.environ["HOST_DOTFILES"] != "mars":
         return
 
-    enable_unit("syncthing", user=True)
+    await enable_unit("syncthing", user=True)
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

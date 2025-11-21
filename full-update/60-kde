@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
+import asyncio
 import os
 import pathlib
 import shutil
 import subprocess
-
 
 HOSTNAME = os.environ["HOST_DOTFILES"]
 
@@ -44,7 +44,10 @@ match HOSTNAME:
     case "phobos":
         LINKS.update(
             {
-                CONFIG / "autostart": DOTFILES / "kde" / "autostart" / "phobos",
+                CONFIG / "autostart": DOTFILES
+                / "kde"
+                / "autostart"
+                / "phobos",
             }
         )
 
@@ -67,17 +70,92 @@ def symlink(source, target):
         source.symlink_to(target)
 
 
-def copy_into_replace_contents(source, target):
-    target.mkdir(exist_ok=True, parents=True)
-    subprocess.run(["rsync", "-avq", "--delete", f"{source}/", target], check=True)
+class Rsync:
+    @staticmethod
+    async def copy_into_replace_contents(source, target):
+        target.mkdir(exist_ok=True, parents=True)
+        proc = await asyncio.create_subprocess_exec(
+            "rsync", "-avq", "--delete", f"{source}/", str(target)
+        )
+        await proc.wait()
+        if proc.returncode != 0:
+            raise subprocess.CalledProcessError(proc.returncode, "rsync")
+
+    @staticmethod
+    async def copy_replace(source, target):
+        target.parent.mkdir(exist_ok=True, parents=True)
+        proc = await asyncio.create_subprocess_exec(
+            "rsync", "-avq", str(source), str(target)
+        )
+        await proc.wait()
+        if proc.returncode != 0:
+            raise subprocess.CalledProcessError(proc.returncode, "rsync")
 
 
-def copy_replace(source, target):
-    target.parent.mkdir(exist_ok=True, parents=True)
-    subprocess.run(["rsync", "-avq", source, target], check=True)
+async def update_desktop_database():
+    proc = await asyncio.create_subprocess_exec("update-desktop-database")
+    await proc.wait()
+    if proc.returncode != 0:
+        raise subprocess.CalledProcessError(
+            proc.returncode, "update-desktop-database"
+        )
 
 
-def main():
+class KWriteConfig:
+    @staticmethod
+    async def write(
+        *,
+        delete=False,
+        file=None,
+        group=None,
+        key=None,
+        notify=False,
+        value_type=None,
+        value=None,
+    ):
+        args = ["kwriteconfig6"]
+        if file is not None:
+            args.extend(("--file", file))
+        if group is not None:
+            args.extend(("--group", group))
+        if key is not None:
+            args.extend(("--key", key))
+        if value_type is not None:
+            args.extend(("--type", value_type))
+        if delete:
+            args.append("--delete")
+        if notify:
+            args.append("--notify")
+        if not delete and value:
+            args.append(value)
+        if value is not None:
+            args.append(value)
+        proc = await asyncio.create_subprocess_exec(*args)
+        await proc.wait()
+        if proc.returncode != 0:
+            raise subprocess.CalledProcessError(
+                proc.returncode, "kwriteconfig6"
+            )
+
+
+async def configure_dolphin():
+    dolphin_settings = {
+        "KDE": {"AnimationDurationFactor": "0"},
+        "MainWindow": {"MenuBar": "Disabled"},
+        "General": {"OpenNewTabAfterLastTab": "true", "ShowFullPath": "true"},
+    }
+    for group, keys in dolphin_settings.items():
+        for key, value in keys.items():
+            await KWriteConfig.write(
+                file="dolphinrc",
+                group=group,
+                key=key,
+                value=value,
+                notify=True,
+            )
+
+
+async def main():
     if not shutil.which("plasmashell"):
         exit()
 
@@ -88,13 +166,15 @@ def main():
         source = DOTFILES / "kde" / "applications_host" / HOSTNAME
         target = LOCAL_SHARE / "applications" / "dotfiles-localhost"
         if source.exists():
-            copy_into_replace_contents(source, target)
+            await Rsync.copy_into_replace_contents(source, target)
         else:
             delete(target)
 
     if HOSTNAME in ("mars", "phobos"):
-        subprocess.run(["update-desktop-database"], check=True)
+        await update_desktop_database()
+
+    await configure_dolphin()
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
