@@ -1,0 +1,323 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# dependencies = [
+#   "pytaglib",
+# ]
+# ///
+"""Dump and restore music tags to/from JSON file."""
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+import taglib
+
+
+def get_all_tags(file_path):
+    with taglib.File(str(file_path)) as song:
+        return {
+            k.lower(): v[0] if len(v) == 1 else v for k, v in song.tags.items()
+        }
+
+
+def set_all_tags(file_path, tags):
+    normalized_tags = {
+        k: [v] if isinstance(v, str) else v for k, v in tags.items()
+    }
+    with taglib.File(str(file_path), save_on_exit=True) as song:
+        song.tags = normalized_tags
+
+
+def dump_directory_tags(directory, output_file):
+    music_extensions = {
+        ".mp3",
+        ".flac",
+        ".ogg",
+        ".m4a",
+        ".wma",
+        ".wav",
+        ".ape",
+        ".opus",
+    }
+    directory_path = Path(directory).absolute()
+
+    if not directory_path.exists():
+        print(f"Directory does not exist: {directory}", file=sys.stderr)
+        sys.exit(1)
+
+    all_tags = {}
+
+    for ext in music_extensions:
+        for file_path in directory_path.rglob(f"*{ext}"):
+            print(f"Processing: {file_path}", file=sys.stderr)
+            tags = get_all_tags(file_path)
+            if tags:
+                all_tags[str(file_path.absolute())] = tags
+
+    if output_file:
+        with open(output_file, "w", encoding="utf-8") as f:
+            json.dump(all_tags, f, indent=2, ensure_ascii=False)
+        print(
+            f"\nDumped {len(all_tags)} files to {output_file}", file=sys.stderr
+        )
+    else:
+        json.dump(all_tags, sys.stdout, indent=2, ensure_ascii=False)
+        print(file=sys.stdout)
+
+
+def dump_single_file_tags(file_path, output_file):
+    file_path = Path(file_path).absolute()
+    tags = get_all_tags(file_path)
+
+    if output_file:
+        with open(output_file, "w", encoding="utf-8") as f:
+            json.dump({str(file_path): tags}, f, indent=2, ensure_ascii=False)
+        print(
+            f"Dumped tags from {file_path} to {output_file}", file=sys.stderr
+        )
+    else:
+        json.dump(
+            {str(file_path): tags}, sys.stdout, indent=2, ensure_ascii=False
+        )
+        print(file=sys.stdout)
+
+
+def cmd_dump(args):
+    path_obj = Path(args.path)
+
+    if path_obj.is_dir():
+        dump_directory_tags(args.path, args.output)
+    elif path_obj.is_file():
+        dump_single_file_tags(args.path, args.output)
+    else:
+        print(f"Invalid path: {args.path}", file=sys.stderr)
+        sys.exit(1)
+
+
+def normalize_tags(tags):
+    return {
+        k.upper(): [v] if isinstance(v, str) else v for k, v in tags.items()
+    }
+
+
+def cmd_restore(args):
+    if args.input:
+        with open(args.input, "r", encoding="utf-8") as f:
+            all_tags = json.load(f)
+    else:
+        all_tags = json.load(sys.stdin)
+
+    success_count = 0
+    skipped_count = 0
+
+    for file_path, new_tags in all_tags.items():
+        if not Path(file_path).exists():
+            print(f"File not found: {file_path}", file=sys.stderr)
+            continue
+
+        current_tags = get_all_tags(file_path)
+        new_tags_norm = normalize_tags(new_tags)
+        current_tags_norm = normalize_tags(current_tags)
+
+        if new_tags_norm == current_tags_norm:
+            skipped_count += 1
+            continue
+
+        print(f"Replacing: {file_path}", file=sys.stderr)
+
+        for key in sorted(
+            set(new_tags_norm.keys()) | set(current_tags_norm.keys())
+        ):
+            new_val = new_tags_norm.get(key)
+            cur_val = current_tags_norm.get(key)
+            if new_val != cur_val:
+                print(f"  {key}: {cur_val} -> {new_val}", file=sys.stderr)
+
+        set_all_tags(file_path, new_tags_norm)
+        success_count += 1
+
+    print(
+        f"\nReplaced {success_count} files, {skipped_count} unchanged",
+        file=sys.stderr,
+    )
+
+
+def cmd_merge(args):
+    if args.input:
+        with open(args.input, "r", encoding="utf-8") as f:
+            all_tags = json.load(f)
+    else:
+        all_tags = json.load(sys.stdin)
+
+    success_count = 0
+    skipped_count = 0
+
+    for file_path, new_tags in all_tags.items():
+        if not Path(file_path).exists():
+            print(f"File not found: {file_path}", file=sys.stderr)
+            continue
+
+        current_tags = get_all_tags(file_path)
+        current_tags_norm = normalize_tags(current_tags)
+
+        merged_tags = dict(current_tags_norm)
+        changes = []
+
+        for key, value in new_tags.items():
+            key_upper = key.upper()
+
+            if value is None:
+                if key_upper in merged_tags:
+                    changes.append(
+                        f"  {key_upper}: {merged_tags[key_upper]} -> [deleted]"
+                    )
+                    del merged_tags[key_upper]
+            else:
+                new_val = [value] if isinstance(value, str) else value
+                cur_val = merged_tags.get(key_upper)
+
+                if new_val != cur_val:
+                    changes.append(f"  {key_upper}: {cur_val} -> {new_val}")
+                    merged_tags[key_upper] = new_val
+
+        if not changes:
+            skipped_count += 1
+            continue
+
+        print(f"Merging: {file_path}", file=sys.stderr)
+        for change in changes:
+            print(change, file=sys.stderr)
+
+        set_all_tags(file_path, merged_tags)
+        success_count += 1
+
+    print(
+        f"\nMerged {success_count} files, {skipped_count} unchanged",
+        file=sys.stderr,
+    )
+
+
+def cmd_set(args):
+    success_count = 0
+    skipped_count = 0
+
+    tag_updates = {}
+
+    if args.set:
+        for tag, value in args.set:
+            tag_updates[tag.upper()] = [value]
+
+    if args.delete:
+        for tag in args.delete:
+            tag_updates[tag.upper()] = None
+
+    if not tag_updates:
+        print("No tag changes specified", file=sys.stderr)
+        return
+
+    for file_path in args.files:
+        if not file_path.exists():
+            print(f"File not found: {file_path}", file=sys.stderr)
+            continue
+
+        current_tags = get_all_tags(file_path)
+        current_tags_norm = normalize_tags(current_tags)
+
+        merged_tags = dict(current_tags_norm)
+        changes = []
+
+        for tag, value in tag_updates.items():
+            if value is None:
+                if tag in merged_tags:
+                    changes.append(f"  {tag}: {merged_tags[tag]} -> [deleted]")
+                    del merged_tags[tag]
+            else:
+                cur_val = merged_tags.get(tag)
+                if value != cur_val:
+                    changes.append(f"  {tag}: {cur_val} -> {value}")
+                    merged_tags[tag] = value
+
+        if not changes:
+            skipped_count += 1
+            continue
+
+        print(f"Setting: {file_path}", file=sys.stderr)
+        for change in changes:
+            print(change, file=sys.stderr)
+
+        set_all_tags(file_path, merged_tags)
+        success_count += 1
+
+    print(
+        f"\nSet {success_count} files, {skipped_count} unchanged",
+        file=sys.stderr,
+    )
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Dump and restore music tags to/from JSON"
+    )
+
+    parser.add_argument(
+        "-i",
+        "--input",
+        metavar="FILE",
+        help='Input JSON file for replace/merge (use "-" for stdin)',
+    )
+    parser.add_argument(
+        "-o",
+        "--output",
+        metavar="FILE",
+        help="Output JSON file for dump (default: stdout)",
+    )
+    parser.add_argument(
+        "--merge",
+        action="store_true",
+        help="Merge mode: only update/delete specified tags (requires -i)",
+    )
+    parser.add_argument(
+        "-s",
+        "--set",
+        action="append",
+        nargs=2,
+        metavar=("TAG", "VALUE"),
+        help="Set tag to value (can be specified multiple times)",
+    )
+    parser.add_argument(
+        "-d",
+        "--delete",
+        action="append",
+        metavar="TAG",
+        help="Delete tag (can be specified multiple times)",
+    )
+    parser.add_argument(
+        "path", nargs="*", help="Music file(s) or directory for dump/set mode"
+    )
+
+    args = parser.parse_args()
+
+    if args.set or args.delete:
+        if not args.path:
+            parser.error("Set mode requires file paths")
+        args.files = [Path(p) for p in args.path]
+        cmd_set(args)
+    elif args.input:
+        if args.input == "-":
+            args.input = None
+        if args.merge:
+            cmd_merge(args)
+        else:
+            cmd_restore(args)
+    else:
+        if not args.path:
+            parser.error("Dump mode requires a path")
+        if len(args.path) > 1:
+            parser.error("Dump mode accepts only one path")
+        args.path = args.path[0]
+        cmd_dump(args)
+
+
+if __name__ == "__main__":
+    main()

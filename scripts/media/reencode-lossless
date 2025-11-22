@@ -3,7 +3,7 @@
 # /// script
 # dependencies = [
 #     "async_executor",
-#     "mutagen",
+#     "pytaglib",
 # ]
 # ///
 """
@@ -18,20 +18,17 @@ import pathlib
 import tempfile
 
 import async_executor
-import mutagen
+import taglib
 
 LOGGER = logging.getLogger("reencode-lossless")
 FLAC_DECODE_THROUGH_ERRORS = False
 
 
 def copy_tags(source, target):
-    metadata_source = mutagen.File(source)
-    metadata_target = mutagen.File(target)
-    for key, value in metadata_source.items():
-        if isinstance(value, mutagen.apev2.APETextValue):
-            value = str(value)
-        metadata_target[key] = value
-    metadata_target.save()
+    with taglib.File(str(source)) as src:
+        tags = dict(src.tags)
+    with taglib.File(str(target), save_on_exit=True) as tgt:
+        tgt.tags = tags
 
 
 class ffprobe:
@@ -88,12 +85,18 @@ async def decode_m4a(source, fd):
                     raise InvalidFileType("multiple ALAC streams")
                 alac_stream = stream
             else:
-                raise InvalidFileType(f"unhandled audio type: {stream['codec_name']}")
+                raise InvalidFileType(
+                    f"unhandled audio type: {stream['codec_name']}"
+                )
         elif stream["codec_type"] == "video":
             if stream["codec_name"] not in ("mjpeg", "png"):
-                raise InvalidFileType(f"unhandled video type: {stream['codec_name']}")
+                raise InvalidFileType(
+                    f"unhandled video type: {stream['codec_name']}"
+                )
         else:
-            raise InvalidFileType(f"unhandled stream type: {stream['codec_type']}")
+            raise InvalidFileType(
+                f"unhandled stream type: {stream['codec_type']}"
+            )
 
     if alac_stream is None:
         raise InvalidFileType("not ALAC file")

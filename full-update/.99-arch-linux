@@ -606,7 +606,6 @@ EXPECTED_PACKAGE_DEPENDENCIES = {
         "ffmpeg",
         "python-brotli",
         "python-brotlicffi",
-        "python-mutagen",
         "python-pycryptodome",
         "python-pycryptodomex",
         "python-pyxattr",

@@ -6,7 +6,7 @@ Music library organization tool with metadata support.
 # dependencies = [
 #     "charset_normalizer",
 #     "python-magic",
-#     "mutagen",
+#     "pytaglib",
 # ]
 # ///
 """
@@ -24,8 +24,7 @@ import unicodedata
 
 import charset_normalizer
 import magic  # package: python-magic
-import mutagen.flac
-import mutagen.mp3
+import taglib
 
 LIBRARY = pathlib.Path("/storage/Audio/Library")
 
@@ -203,6 +202,7 @@ def check_metadata(path, metadata):
 
 
 def fix_metadata(path, metadata, dry_run=False):
+    changed = False
     for tag, values in metadata.items():
         new_values = sorted(
             {
@@ -217,8 +217,7 @@ def fix_metadata(path, metadata, dry_run=False):
             LOGGER.info(
                 f'Fixing whitespace/unicode normalization in "{tag}": "{path}"'
             )
-            if not dry_run:
-                metadata.save()
+            changed = True
 
         for v in (tag, *values):
             for c in v:
@@ -226,6 +225,10 @@ def fix_metadata(path, metadata, dry_run=False):
                     LOGGER.error(
                         f'Non-printable character detected in "{tag}": "{path}"'
                     )
+
+    if changed and not dry_run:
+        with taglib.File(str(path), save_on_exit=True) as song:
+            song.tags = {k.upper(): v for k, v in metadata.items()}
 
 
 def fix_tracknumber(path, metadata, dry_run=False):
@@ -242,10 +245,11 @@ def fix_tracknumber(path, metadata, dry_run=False):
         except ValueError:
             LOGGER.error(f'Unhandled tracknumber: "{tracknumber}"')
 
-        metadata["tracknumber"] = tracknumber
+        metadata["tracknumber"] = [tracknumber]
         LOGGER.info(f'Fixing track number: "{path}"')
         if not dry_run:
-            metadata.save()
+            with taglib.File(str(path), save_on_exit=True) as song:
+                song.tags = {k.upper(): v for k, v in metadata.items()}
 
 
 def rename_extensions(path, dry_run=False):
@@ -399,7 +403,8 @@ def main():
                     continue
                 set_permissions(path)
                 if path.suffix in AUDIO_EXT:
-                    metadata = mutagen.File(path, easy=True)
+                    with taglib.File(str(path)) as song:
+                        metadata = {k.lower(): v for k, v in song.tags.items()}
                     check_metadata(path, metadata)
                     fix_metadata(path, metadata, args.dry_run)
                     fix_tracknumber(path, metadata, args.dry_run)
@@ -526,13 +531,12 @@ def main():
             ):
                 artist = list(artists)[0]
                 for path in tracks:
-                    metadata = mutagen.File(path, easy=True)
                     LOGGER.info(
                         'Setting albumartist to "%s" (%s)', artist, path
                     )
-                    metadata["albumartist"] = artist
                     if not args.dry_run:
-                        metadata.save()
+                        with taglib.File(str(path), save_on_exit=True) as song:
+                            song.tags["ALBUMARTIST"] = [artist]
 
             if len(albumartists) == 1 and args.library:
                 relative_root = root_path.relative_to(LIBRARY)
