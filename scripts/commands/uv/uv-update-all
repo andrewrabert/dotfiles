@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Update all PEP 723 scripts managed by uv in a directory."""
 
+import argparse
 import asyncio
 import pathlib
 import sys
@@ -35,7 +36,11 @@ async def find_uv_scripts(directory: pathlib.Path) -> list[pathlib.Path]:
                 parts = handle.readline().strip().split()
             except UnicodeDecodeError:
                 continue
-            if parts[0] == "#!/usr/bin/env" and "uv" in parts and "run" in parts:
+            if (
+                parts[0] == "#!/usr/bin/env"
+                and "uv" in parts
+                and "run" in parts
+            ):
                 uv_scripts.append(file_path.resolve().absolute())
     return sorted(set(uv_scripts))
 
@@ -60,64 +65,51 @@ async def update_script(script_path: pathlib.Path) -> bool:
         return False
 
 
-async def update_all_scripts(scripts: list[pathlib.Path]) -> tuple[int, list[str]]:
+async def update_all_scripts(scripts: list[pathlib.Path]) -> bool:
     """Update all scripts concurrently."""
     tasks = []
     for script in scripts:
         task = asyncio.create_task(update_script(script))
         tasks.append((script, task))
 
-    updated_count = 0
-    failed_scripts = []
+    had_error = False
 
     for script, task in tasks:
         script_name = script.name
-        print(f"📦 Updating dependencies for: {script_name}")
-
         try:
             success = await task
             if success:
-                print(f"✅ Successfully updated: {script_name}")
-                updated_count += 1
+                print(f"updated: {script_name}")
             else:
-                print(f"❌ Failed to update: {script_name}")
-                failed_scripts.append(script_name)
+                print(f"failed: {script_name}")
+                had_error = True
         except Exception:
-            print(f"❌ Failed to update: {script_name}")
-            failed_scripts.append(script_name)
-        print()
+            print(f"failed: {script_name}")
+            had_error = True
 
-    return updated_count, failed_scripts
+    return had_error
 
 
 async def main():
     """Main function."""
-    script_dir = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else ".")
+    parser = argparse.ArgumentParser(description="update all PEP 723 scripts")
+    parser.add_argument(
+        "directory",
+        nargs="?",
+        default=".",
+        type=pathlib.Path,
+        help="directory to scan",
+    )
+    args = parser.parse_args()
 
-    print(f"🔍 Scanning for PEP 723 scripts in: {script_dir}")
-    print()
+    scripts = await find_uv_scripts(args.directory)
 
-    scripts = await find_uv_scripts(script_dir)
+    had_error = False
+    if scripts:
+        had_error = await update_all_scripts(scripts)
 
-    if not scripts:
-        print("No PEP 723 scripts found with uv run shebang.")
-        return
-
-    print(f"Found {len(scripts)} PEP 723 scripts:")
-    for script in scripts:
-        print(f"  - {script.name}")
-    print()
-
-    updated_count, failed_scripts = await update_all_scripts(scripts)
-
-    print("📊 Update Summary:")
-    print(f"   ✅ Successfully updated: {updated_count} scripts")
-    print(f"   ❌ Failed to update: {len(failed_scripts)} scripts")
-
-    if failed_scripts:
-        print("   Failed scripts:")
-        for script_name in failed_scripts:
-            print(f"      - {script_name}")
+    if had_error:
+        sys.exit(1)
 
 
 if __name__ == "__main__":
