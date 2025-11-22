@@ -1,0 +1,266 @@
+#!/usr/bin/env python3
+
+import argparse
+import asyncio
+import json
+import sys
+import tempfile
+from pathlib import Path
+
+
+def encode_path(path: Path) -> str:
+    return str(path).replace("/", "-")
+
+
+def decode_path(encoded: str) -> Path:
+    return Path(encoded.replace("-", "/"))
+
+
+async def check_remote_exists(host: str, path: str) -> bool:
+    proc = await asyncio.create_subprocess_exec(
+        "rsync",
+        "--list-only",
+        f"{host}:{path}",
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.DEVNULL,
+    )
+    return await proc.wait() == 0
+
+
+async def list_remote_projects(host: str, prefix: str) -> list[str]:
+    proc = await asyncio.create_subprocess_exec(
+        "ssh",
+        host,
+        f"ls -1 ~/.claude/projects/ | grep '^{prefix}'",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.DEVNULL,
+    )
+    stdout, _ = await proc.communicate()
+    if proc.returncode != 0:
+        return []
+    return [line.strip() for line in stdout.decode().splitlines() if line.strip()]
+
+
+async def sync_project_config(host: str, repo_path: Path, direction: str, arrow: str) -> None:
+    local_config = Path.home() / ".claude.json"
+    remote_config = f"{host}:~/.claude.json"
+    project_key = str(repo_path)
+
+    with tempfile.NamedTemporaryFile(mode='w+', suffix='.json', delete=False) as tmp:
+        tmp_path = tmp.name
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "rsync", "-az", remote_config, tmp_path,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        if await proc.wait() != 0:
+            return
+
+        with open(tmp_path) as f:
+            remote_data = json.load(f)
+
+        with open(local_config) as f:
+            local_data = json.load(f)
+
+        if direction == "from":
+            if project_key in remote_data.get("projects", {}):
+                if "projects" not in local_data:
+                    local_data["projects"] = {}
+                local_data["projects"][project_key] = remote_data["projects"][project_key]
+                with open(local_config, 'w') as f:
+                    json.dump(local_data, f, indent=2)
+                print(f"Syncing .claude.json {arrow} {project_key}")
+        elif direction == "to":
+            if project_key in local_data.get("projects", {}):
+                if "projects" not in remote_data:
+                    remote_data["projects"] = {}
+                remote_data["projects"][project_key] = local_data["projects"][project_key]
+                with open(tmp_path, 'w') as f:
+                    json.dump(remote_data, f, indent=2)
+                proc = await asyncio.create_subprocess_exec(
+                    "rsync", "-az", tmp_path, remote_config,
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.DEVNULL,
+                )
+                await proc.wait()
+                print(f"Syncing .claude.json {arrow} {project_key}")
+    finally:
+        Path(tmp_path).unlink(missing_ok=True)
+
+
+def get_local_session_ids(project_dir: Path) -> list[str]:
+    if not project_dir.exists():
+        return []
+    session_files = [
+        f.stem
+        for f in project_dir.glob("*.jsonl")
+        if not f.name.startswith("agent-")
+    ]
+    return session_files
+
+
+async def sync(
+    project_dir: Path,
+    repo_dir: Path,
+    host: str,
+    project: str,
+    direction: str,
+    delete: bool,
+    dry_run: bool,
+) -> None:
+    opts = ["-az", "--progress"]
+    if delete:
+        opts.append("--delete")
+    if dry_run:
+        opts.append("--dry-run")
+
+    arrow = "→" if direction == "to" else "←"
+
+    local = f"{project_dir}/"
+    remote = f"{host}:~/.claude/projects/{project}/"
+
+    if direction == "to":
+        if not project_dir.exists():
+            return
+        src, dst = local, remote
+    else:
+        if not await check_remote_exists(host, f"~/.claude/projects/{project}/"):
+            return
+        src, dst = remote, local
+
+    print(f"Syncing session {arrow} {project_dir}/")
+
+    proc = await asyncio.create_subprocess_exec("rsync", *opts, src, dst)
+    if await proc.wait() != 0:
+        sys.exit(1)
+
+    if not repo_dir.is_dir():
+        return
+
+    session_ids = get_local_session_ids(project_dir)
+    claude_dir = Path.home() / ".claude"
+
+    for session_id in session_ids:
+        file_history_local = claude_dir / "file-history" / session_id
+        file_history_remote = f"{host}:~/.claude/file-history/{session_id}/"
+
+        if direction == "to":
+            if file_history_local.exists():
+                proc = await asyncio.create_subprocess_exec(
+                    "rsync", *opts, f"{file_history_local}/", file_history_remote,
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.DEVNULL,
+                )
+                await proc.wait()
+        else:
+            proc = await asyncio.create_subprocess_exec(
+                "rsync", *opts, file_history_remote, f"{file_history_local}/",
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            await proc.wait()
+
+        if direction == "to":
+            for todo_file in claude_dir.glob(f"todos/{session_id}*.json"):
+                remote_todo = f"{host}:~/.claude/todos/{todo_file.name}"
+                proc = await asyncio.create_subprocess_exec(
+                    "rsync", *opts, str(todo_file), remote_todo,
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.DEVNULL,
+                )
+                await proc.wait()
+        else:
+            todos_dir = claude_dir / "todos"
+            todos_dir.mkdir(exist_ok=True)
+            remote_todos = f"{host}:~/.claude/todos/{session_id}*.json"
+            proc = await asyncio.create_subprocess_exec(
+                "rsync", *opts, remote_todos, f"{todos_dir}/",
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            await proc.wait()
+
+    config_files = [
+        (repo_dir / ".claude" / "settings.local.json", ".claude/settings.local.json"),
+        (repo_dir / "CLAUDE.local.md", "CLAUDE.local.md"),
+    ]
+
+    for local_file, rel_path in config_files:
+        remote_file = f"{host}:{repo_dir}/{rel_path}"
+
+        if direction == "to" and local_file.exists():
+            print(f"Syncing config  {arrow} {local_file}")
+            proc = await asyncio.create_subprocess_exec(
+                "rsync", *opts, str(local_file), remote_file
+            )
+            if await proc.wait() != 0:
+                sys.exit(1)
+        elif direction == "from":
+            remote_exists = await check_remote_exists(host, remote_file)
+            if remote_exists:
+                print(f"Syncing config  {arrow} {local_file}")
+                proc = await asyncio.create_subprocess_exec(
+                    "rsync", *opts, remote_file, str(local_file)
+                )
+                if await proc.wait() != 0:
+                    sys.exit(1)
+            elif delete and local_file.exists():
+                local_file.unlink()
+                print(f"Deleted config  {local_file}")
+
+    await sync_project_config(host, repo_dir, direction, arrow)
+
+
+async def main():
+    parser = argparse.ArgumentParser(
+        description="Sync Claude session history",
+        epilog="Example: claude-sync push remotemachine1 ~/src/",
+    )
+    parser.add_argument("direction", choices=["push", "pull"])
+    parser.add_argument("host")
+    parser.add_argument("local_dir", nargs="?", default=".")
+    parser.add_argument("--delete", action="store_true")
+    parser.add_argument("--dry-run", action="store_true")
+    args = parser.parse_args()
+
+    local_dir = Path(args.local_dir).expanduser().resolve()
+    if not local_dir.is_dir():
+        print(f"Error: {local_dir} does not exist", file=sys.stderr)
+        sys.exit(1)
+
+    prefix = encode_path(local_dir)
+    projects_dir = Path.home() / ".claude" / "projects"
+
+    local_projects = {
+        p.name for p in projects_dir.iterdir() if p.is_dir() and p.name.startswith(prefix)
+    }
+
+    remote_projects = set(await list_remote_projects(args.host, prefix))
+
+    all_projects = local_projects | remote_projects
+
+    if not all_projects:
+        print(f"Error: No Claude projects found under {local_dir}", file=sys.stderr)
+        sys.exit(1)
+
+    direction = "to" if args.direction == "push" else "from"
+
+    for project_name in sorted(all_projects):
+        project_dir = projects_dir / project_name
+        repo_path = decode_path(project_name)
+
+        await sync(
+            project_dir,
+            repo_path,
+            args.host,
+            project_name,
+            direction,
+            args.delete,
+            args.dry_run,
+        )
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
