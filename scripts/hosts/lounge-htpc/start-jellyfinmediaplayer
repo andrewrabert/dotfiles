@@ -1,6 +1,0 @@
-#!/usr/bin/env sh
-SCALING_FACTOR=3
-CURSOR_SIZE=96
-DPI=192
-gsettings set org.gnome.desktop.interface color-scheme prefer-light
-exec jellyfinmediaplayer
