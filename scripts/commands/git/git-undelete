@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 import argparse
 import asyncio
+import os
 import pathlib
 import sys
 
@@ -12,7 +13,10 @@ class GitRepo:
 
     async def working_tree_dir(self):
         if not self._working_tree_dir:
-            args = ["git", "rev-parse", "--show-toplevel"]
+            args = ["git"]
+            if self.path:
+                args.extend(["-C", str(self.path)])
+            args.extend(["rev-parse", "--show-toplevel"])
             proc = await asyncio.create_subprocess_exec(
                 *args, stdout=asyncio.subprocess.PIPE
             )
@@ -31,58 +35,101 @@ class GitRepo:
             [
                 "log",
                 "--pretty=format:",
-                "--name-only",
-                "--diff-filter=A",
+                "--name-status",
             ]
         )
 
         proc = await asyncio.create_subprocess_exec(
-            *args, stdout=asyncio.subprocess.PIPE
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            cwd=await self.working_tree_dir(),
         )
         stdout, _ = await proc.communicate()
         if proc.returncode:
             raise RuntimeError(proc.returncode)
 
-        return {line for line in stdout.decode().splitlines() if line}
+        paths = set()
+        for line in stdout.decode().splitlines():
+            if not line:
+                continue
+            parts = line.split("\t")
+            if len(parts) >= 2:
+                # For adds, modifications, deletes: status\tpath
+                # For renames: R###\told_path\tnew_path
+                if parts[0].startswith("R"):
+                    # Rename: include both old and new paths
+                    if len(parts) == 3:
+                        paths.add(parts[1])  # old path
+                        paths.add(parts[2])  # new path
+                else:
+                    # Add, modify, delete: include the path
+                    paths.add(parts[1])
+
+        return paths
 
     async def lastest_commit_for_path(self, path):
+        """Find the last commit where this exact path existed"""
         args = ["git"]
         if self.path:
             args.extend(["-C", str(self.path)])
         args.extend(
             [
-                "rev-list",
-                "-n",
-                "1",
-                "HEAD",
-                "--",
-                str(path),
+                "log",
+                "--pretty=format:%H",
+                "--name-status",
             ]
         )
 
         proc = await asyncio.create_subprocess_exec(
-            *args, stdout=asyncio.subprocess.PIPE
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            cwd=await self.working_tree_dir(),
         )
-        await proc.wait()
+        stdout, _ = await proc.communicate()
         if proc.returncode:
             raise RuntimeError(proc.returncode)
-        stdout = await proc.stdout.read()
-        return stdout.strip().decode()
+
+        lines = stdout.decode().splitlines()
+        current_commit = None
+        path_str = str(path)
+
+        for line in lines:
+            if not line:
+                continue
+            if "\t" not in line:
+                # Commit hash
+                current_commit = line
+                continue
+
+            parts = line.split("\t")
+            # Look for when this path was deleted or renamed
+            if (
+                parts[0].startswith("D")
+                and len(parts) == 2
+                and parts[1] == path_str
+            ):
+                # Path was deleted, restore from parent
+                return current_commit + "^"
+            elif (
+                parts[0].startswith("R")
+                and len(parts) == 3
+                and parts[1] == path_str
+            ):
+                # Path was renamed away, restore from parent
+                return current_commit + "^"
+            # If we see the path in any other operation (add, modify)
+            elif len(parts) >= 2 and parts[1] == path_str:
+                return current_commit
+
+        return None
 
     async def restore_path(self, path, commit):
-        args = ["git"]
-        if self.path:
-            args.extend(["-C", str(self.path)])
-        args.extend(
-            [
-                "checkout",
-                f"{commit}^",
-                "--",
-                str(path),
-            ]
-        )
+        repo_root = await self.working_tree_dir()
+        args = ["git", "-C", repo_root, "checkout", commit, "--", str(path)]
 
-        proc = await asyncio.create_subprocess_exec(*args)
+        proc = await asyncio.create_subprocess_exec(
+            *args, cwd=await self.working_tree_dir()
+        )
         await proc.wait()
         if proc.returncode:
             raise RuntimeError(proc.returncode)
@@ -91,34 +138,73 @@ class GitRepo:
 async def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("-C", metavar="path", dest="repo_path")
-    parser.add_argument("--list", action="store_true", help="list all deleted files")
-    parser.add_argument("-0", "--null", action="store_true", help="read null-delimited input from stdin")
-    parser.add_argument("paths", nargs="*")
+    parser.add_argument(
+        "-l", "--list", action="store_true", help="list all deleted files"
+    )
+    parser.add_argument(
+        "-0",
+        "--null",
+        action="store_true",
+        help="read null-delimited input from stdin",
+    )
+    parser.add_argument("paths", nargs="+", type=pathlib.Path)
     args = parser.parse_args()
 
     repo = GitRepo(path=args.repo_path)
+    repo_root = pathlib.Path(await repo.working_tree_dir())
+
+    # Normalize all paths to repo-relative
+    normalized_paths = []
+    filters = set()
+    for path in args.paths:
+        abs_path = pathlib.Path(os.path.normpath(path.absolute()))
+        if abs_path != repo_root and repo_root not in abs_path.parents:
+            parser.error(f"path is outside of the repo root: {path}")
+        rel_path = abs_path.relative_to(repo_root)
+        normalized_paths.append(str(rel_path))
+        filters.add(rel_path)
 
     if args.list:
-        if args.paths:
-            parser.error("paths cannot be specified when using --list")
-            parser.exit(1)
-
-        repo_root = pathlib.Path(await repo.working_tree_dir())
         for path in sorted(await repo.historic_paths()):
-            if not (repo_root / path).exists():
+            path = pathlib.Path(path)
+            if (repo_root / path).exists():
+                continue
+            if (
+                not filters
+                or path in filters
+                or filters.intersection(set(path.parents))
+            ):
                 print(path)
     else:
-        paths = list(args.paths)
-        if not paths and not sys.stdin.isatty():
+        # If user provided paths, expand directories to deleted files
+        if normalized_paths:
+            all_historic = await repo.historic_paths()
+            paths_to_restore = []
+            for historic_path in all_historic:
+                historic_path_obj = pathlib.Path(historic_path)
+                if (repo_root / historic_path_obj).exists():
+                    continue
+                # Check if this historic path matches any filter
+                if (
+                    not filters
+                    or historic_path_obj in filters
+                    or filters.intersection(set(historic_path_obj.parents))
+                ):
+                    paths_to_restore.append(historic_path)
+        elif not sys.stdin.isatty():
             stdin_data = sys.stdin.read()
             if args.null:
-                paths = [p for p in stdin_data.split('\0') if p]
+                paths_to_restore = [p for p in stdin_data.split("\0") if p]
             else:
-                paths = stdin_data.splitlines()
-        for path in sorted(paths):
+                paths_to_restore = stdin_data.splitlines()
+        else:
+            paths_to_restore = []
+
+        for path in sorted(paths_to_restore):
             print(path)
             commit = await repo.lastest_commit_for_path(path)
-            await repo.restore_path(path, commit)
+            if commit:
+                await repo.restore_path(path, commit)
 
 
 if __name__ == "__main__":
