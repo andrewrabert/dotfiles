@@ -18,8 +18,6 @@ vim.wo.foldlevel = 99
 -- case insensitive search
 vim.o.ignorecase = true
 
-vim.g.tex_flavor = "latex"
-
 -- line numbers
 vim.o.number = true
 vim.o.relativenumber = true

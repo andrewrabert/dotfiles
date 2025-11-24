@@ -196,9 +196,13 @@ X-KDE-GlobalAccel-CommandShortcut=true
 async def configure_kde():
     settings = {
         "kwinrc": {
+            "org.kde.kdecoration2": {
+                "ButtonsOnLeft": "FS",
+                "ShowToolTips": "false",
+            },
             "Plugins": {
                 "dialogparentEnabled": "false",
-            }
+            },
         },
         "kdesurc": {
             "super-user-command": {

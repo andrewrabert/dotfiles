@@ -63,7 +63,6 @@ return {
 					"dockerfile",
 					"html",
 					"json",
-					"latex",
 					"lua",
 					"lua",
 					"markdown",
