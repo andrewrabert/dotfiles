@@ -228,9 +228,10 @@ async def configure_kde():
         },
         "kglobalshortcutsrc": {
             "kwin": {
-                "Window Move Center": "Meta+C,,Move Window to the Center",
+                "Window Above Other Windows": "Meta+A,,Keep Window Above Others",
                 "Window Fullscreen": "Meta+Shift+F,,Make Window Fullscreen",
                 "Window Maximize": "Meta+PgUp\tMeta+F,Meta+PgUp,Maximize Window",
+                "Window Move Center": "Meta+C,,Move Window to the Center",
             },
         },
     }
