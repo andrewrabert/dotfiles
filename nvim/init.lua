@@ -74,6 +74,10 @@ vim.api.nvim_set_keymap("n", "<C-n>", ":set number!<CR>:set relativenumber!<CR>"
 vim.api.nvim_set_keymap("n", "<C-c>", ":set cursorcolumn!<CR>", { noremap = true, silent = true })
 
 vim.api.nvim_set_keymap("n", "<leader>z", ":lua require('fzf-lua').files()<CR>", { noremap = true, silent = true })
+vim.keymap.set("n", "<leader>Z", function()
+	local dir = vim.fn.expand("%:p:h")
+	require("fzf-lua").files({ cwd = dir })
+end, { noremap = true, silent = true })
 vim.api.nvim_set_keymap("n", "<leader>x", ":Notes<CR>", { noremap = true, silent = true })
 vim.api.nvim_set_keymap("n", "<leader>r", ":lua require('fzf-lua').live_grep()<CR>", { noremap = true, silent = true })
 vim.keymap.set("n", "<leader>R", function()
