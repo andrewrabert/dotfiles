@@ -1,7 +1,17 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv --quiet run --script
+"""
+# /// script
+# dependencies = [
+#     "pyalpm",
+#     "tqdm",
+# ]
+# ///
+"""
+
 import argparse
 import asyncio
 import dataclasses
+import fcntl
 import json
 import logging
 import os
@@ -12,6 +22,12 @@ import subprocess
 import sys
 
 import pyalpm
+import tqdm
+
+LOCK_FILE = (
+    pathlib.Path(os.environ.get("XDG_RUNTIME_DIR", "/tmp"))
+    / "sol-repotool.lock"
+)
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -94,6 +110,89 @@ async def run_cmd(*cmd, check=False, capture_output=False, **kwargs):
             self.stderr = stderr
 
     return Result(proc.returncode, stdout, stderr)
+
+
+class AURCLI:
+    """Static methods for aurutils CLI commands."""
+
+    @staticmethod
+    async def _run(*args, cwd=None, capture_output=True):
+        """Run an aur command and return (returncode, stdout, stderr)."""
+        kwargs = {}
+        if cwd:
+            kwargs["cwd"] = str(cwd)
+        if capture_output:
+            kwargs["stdout"] = asyncio.subprocess.PIPE
+            kwargs["stderr"] = asyncio.subprocess.PIPE
+
+        proc = await asyncio.create_subprocess_exec("aur", *args, **kwargs)
+        stdout, stderr = await proc.communicate()
+        return proc.returncode, stdout, stderr
+
+    @staticmethod
+    async def fetch(pkgbase: str, cwd: pathlib.Path, reset: bool = False):
+        """Fetch a package from AUR. Returns True on success."""
+        args = ["fetch"]
+        if reset:
+            args.append("--reset")
+        args.extend(["--", pkgbase])
+        returncode, _, _ = await AURCLI._run(*args, cwd=cwd)
+        return returncode == 0
+
+    @staticmethod
+    async def sync(
+        packages: list[str],
+        database: str,
+        cwd: pathlib.Path = None,
+        makepkg_args: list[str] = None,
+        no_ver: bool = False,
+    ):
+        """Sync packages from AUR. Returns True on success."""
+        args = ["sync", "--no-view", "--no-confirm", f"--database={database}"]
+        if no_ver:
+            args.append("--no-ver")
+        if makepkg_args:
+            args.extend(["--margs", *makepkg_args])
+        args.extend(["--", *packages])
+        returncode, _, _ = await AURCLI._run(
+            *args, cwd=cwd, capture_output=False
+        )
+        return returncode == 0
+
+    @staticmethod
+    async def build(
+        database: str,
+        cwd: pathlib.Path,
+        makepkg_args: list[str] = None,
+        force: bool = False,
+    ):
+        """Build a package in the given directory. Returns True on success."""
+        args = ["build", f"--database={database}"]
+        if force:
+            args.append("--force")
+        if makepkg_args:
+            args.extend(["--margs", *makepkg_args])
+        returncode, _, _ = await AURCLI._run(
+            *args, cwd=cwd, capture_output=False
+        )
+        return returncode == 0
+
+    @staticmethod
+    async def depends(package: str, optdeps: bool = False):
+        """Get dependencies for a package. Returns (required, optional) sets."""
+        args = ["depends"]
+        if optdeps:
+            args.append("--optdeps")
+        args.extend(["--", package])
+        returncode, stdout, _ = await AURCLI._run(*args)
+
+        deps = set()
+        if returncode == 0 and stdout:
+            for line in stdout.decode().splitlines():
+                parts = line.split()
+                if len(parts) >= 2:
+                    deps.add(parts[1])
+        return deps
 
 
 @dataclasses.dataclass
@@ -299,6 +398,8 @@ class Database:
                     shutil.rmtree(subpath)
                 except FileNotFoundError:
                     pass
+                except OSError as e:
+                    logger.warning(f"Failed to remove {subpath}: {e}")
 
     async def _get_dependencies(self, package_name, pkg_db=None):
         """
@@ -327,38 +428,11 @@ class Database:
                 }
 
         # Fallback to aur depends for packages not in sol database
-        # Get required dependencies only
-        proc_required = await run_cmd(
-            "aur", "depends", "--", package_name, capture_output=True
-        )
+        required_deps = await AURCLI.depends(package_name)
+        required_deps.discard(package_name)
 
-        required_deps = set()
-        if proc_required.returncode == 0:
-            for line in proc_required.stdout.decode().splitlines():
-                parts = line.split()
-                if len(parts) >= 2:
-                    _, name = parts[0], parts[1]
-                    if name != package_name:
-                        required_deps.add(name)
-
-        # Get all dependencies (required + optional)
-        proc_all = await run_cmd(
-            "aur",
-            "depends",
-            "--optdeps",
-            "--",
-            package_name,
-            capture_output=True,
-        )
-
-        all_deps = set()
-        if proc_all.returncode == 0:
-            for line in proc_all.stdout.decode().splitlines():
-                parts = line.split()
-                if len(parts) >= 2:
-                    _, name = parts[0], parts[1]
-                    if name != package_name:
-                        all_deps.add(name)
+        all_deps = await AURCLI.depends(package_name, optdeps=True)
+        all_deps.discard(package_name)
 
         # Optional deps are those in all_deps but not in required_deps
         optional_deps = all_deps - required_deps
@@ -494,6 +568,13 @@ class Database:
                 for package in sorted(to_remove):
                     logger.info(f"  - {package}")
 
+                # Get exact filenames from database before removing
+                pkg_files_to_remove = {}
+                for package in to_remove:
+                    pkg = self.pkg_db.get_package(package)
+                    if pkg:
+                        pkg_files_to_remove[package] = pkg.filename
+
                 # Batch remove from database
                 await run_cmd(
                     "repo-remove",
@@ -502,12 +583,14 @@ class Database:
                     *sorted(to_remove),
                 )
 
-                # Remove package files and cache
-                for package in to_remove:
-                    # Remove package files
-                    paths = (self.directory).glob(f"{package}*.pkg.*")
-                    for path in paths:
-                        path.unlink()
+                # Remove exact package files
+                for package, filename in pkg_files_to_remove.items():
+                    pkg_file = self.directory / filename
+                    if pkg_file.exists():
+                        pkg_file.unlink()
+                    sig_file = pkg_file.with_name(pkg_file.name + ".sig")
+                    if sig_file.exists():
+                        sig_file.unlink()
 
                     # Remove from cache
                     try:
@@ -516,6 +599,38 @@ class Database:
                         pass
         else:
             logger.info("No packages to prune")
+
+        # Remove unknown package files not in database
+        known_files = set()
+        for pkg in self.packages():
+            alpm_pkg = self.pkg_db.get_package(pkg.name)
+            if alpm_pkg:
+                known_files.add(alpm_pkg.filename)
+        unknown_files = []
+        for path in self.directory.iterdir():
+            if path.name.endswith(".pkg.tar.zst") or path.name.endswith(
+                ".pkg.tar.xz"
+            ):
+                if path.name not in known_files:
+                    unknown_files.append(path)
+
+        if unknown_files:
+            if dry_run:
+                logger.info(
+                    f"Would remove {len(unknown_files)} unknown files:"
+                )
+                for path in sorted(unknown_files):
+                    logger.info(f"  - {path.name}")
+            else:
+                logger.info(f"Removing {len(unknown_files)} unknown files:")
+                for path in sorted(unknown_files):
+                    logger.info(f"  - {path.name}")
+                    path.unlink()
+                    sig_file = path.with_name(path.name + ".sig")
+                    if sig_file.exists():
+                        sig_file.unlink()
+
+        if dry_run:
             return
 
         # Clean up cache for packages that are no longer needed
@@ -563,9 +678,14 @@ class Database:
             )
 
             for package in packages_to_remove:
-                paths = (self.directory).glob(f"{package}*.pkg.*")
-                for path in paths:
-                    path.unlink()
+                pkg = self.pkg_db.get_package(package)
+                if pkg:
+                    pkg_file = self.directory / pkg.filename
+                    if pkg_file.exists():
+                        pkg_file.unlink()
+                    sig_file = pkg_file.with_name(pkg_file.name + ".sig")
+                    if sig_file.exists():
+                        sig_file.unlink()
                 try:
                     shutil.rmtree(self.aurutils_cache / package)
                 except FileNotFoundError:
@@ -737,18 +857,12 @@ class Database:
                 # else: default is to not add to manual for new AUR packages
 
         if packages_and_deps:
-            cmd = [
-                "aur",
-                "sync",
-                "--no-view",
-                "--no-confirm",
-                "--no-ver",
-                f"--database={self.name}",
-            ]
-            if makepkg_args:
-                cmd.extend(["--margs", *makepkg_args])
-            cmd.extend(["--", *packages_and_deps])
-            await run_cmd(*cmd)
+            await AURCLI.sync(
+                list(packages_and_deps),
+                database=self.name,
+                makepkg_args=makepkg_args,
+                no_ver=True,
+            )
 
         # Report reclassified packages
         if reclassified:
@@ -784,24 +898,17 @@ class Database:
         vcs_suffixes = ("-git", "-svn", "-hg", "-bzr", "-cvs", "-darcs")
         return pkg_name.endswith(vcs_suffixes)
 
-    async def _get_vcs_pkgver(self, pkg_name):
+    async def _get_vcs_pkgver(self, pkgbase):
         """
         Fetch VCS package and run pkgver() to get the current version.
         Returns the version string or None if it fails.
         """
-        pkg_dir = self.aurutils_cache / pkg_name
+        pkg_dir = self.aurutils_cache / pkgbase
 
-        # Fetch the package (downloads PKGBUILD and updates sources)
-        fetch_result = await run_cmd(
-            "aur",
-            "fetch",
-            "--",
-            pkg_name,
-            cwd=str(self.aurutils_cache),
-            capture_output=True,
-        )
-
-        if fetch_result.returncode != 0:
+        # Fetch the package and reset to remote
+        if not await AURCLI.fetch(
+            pkgbase, cwd=self.aurutils_cache, reset=True
+        ):
             return None
 
         # Run makepkg -od to execute pkgver() function
@@ -915,39 +1022,44 @@ class Database:
         return needed
 
     async def _check_package_updates(
-        self, packages_to_check: set[str]
+        self, pkgbases_to_check: set[str]
     ) -> dict[str, PackageUpdateInfo]:
         """
-        Check which packages have updates available.
+        Check which pkgbases have updates available.
 
         Args:
-            packages_to_check: Set of package names to check
+            pkgbases_to_check: Set of pkgbases to check
 
         Returns:
-            Dict mapping package name to PackageUpdateInfo for packages with updates
+            Dict mapping pkgbase to PackageUpdateInfo for pkgbases with updates
         """
         pkg_updates = {}
 
-        for pkg_name in packages_to_check:
-            sol_pkg = self.pkg_db.get_package(pkg_name)
-            if not sol_pkg:
+        for pkgbase in tqdm.tqdm(pkgbases_to_check):
+            # Find current version from any package with this pkgbase
+            current_version = None
+            for pkg in self.pkg_db.sol_db.pkgcache:
+                if pkg.base == pkgbase:
+                    current_version = pkg.version
+                    break
+
+            if not current_version:
                 continue
 
-            current_version = sol_pkg.version
-            is_vcs = self._is_vcs_package(pkg_name)
+            is_vcs = self._is_vcs_package(pkgbase)
 
             if is_vcs:
                 # Check VCS package for new commits
-                new_version = await self._get_vcs_pkgver(pkg_name)
+                new_version = await self._get_vcs_pkgver(pkgbase)
                 if not new_version:
                     continue
 
                 # Compare versions
                 if pyalpm.vercmp(new_version, current_version) > 0:
                     # Has update - parse new dependencies
-                    deps = await self._parse_srcinfo(pkg_name)
-                    pkg_updates[pkg_name] = PackageUpdateInfo(
-                        name=pkg_name,
+                    deps = await self._parse_srcinfo(pkgbase)
+                    pkg_updates[pkgbase] = PackageUpdateInfo(
+                        name=pkgbase,
                         current_version=current_version,
                         new_version=new_version,
                         has_update=True,
@@ -956,20 +1068,14 @@ class Database:
                     )
             else:
                 # Check non-VCS package by fetching PKGBUILD
-                fetch_result = await run_cmd(
-                    "aur",
-                    "fetch",
-                    "--",
-                    pkg_name,
-                    cwd=str(self.aurutils_cache),
-                    capture_output=True,
-                )
-
-                if fetch_result.returncode != 0:
+                if not await AURCLI.fetch(
+                    pkgbase, cwd=self.aurutils_cache, reset=True
+                ):
+                    logger.error(f"Failed to fetch {pkgbase}")
                     continue
 
                 # Parse .SRCINFO to get version
-                srcinfo_path = self.aurutils_cache / pkg_name / ".SRCINFO"
+                srcinfo_path = self.aurutils_cache / pkgbase / ".SRCINFO"
                 if not srcinfo_path.exists():
                     continue
 
@@ -992,9 +1098,9 @@ class Database:
                 # Compare versions
                 if pyalpm.vercmp(new_version, current_version) > 0:
                     # Has update - parse dependencies
-                    deps = await self._parse_srcinfo(pkg_name)
-                    pkg_updates[pkg_name] = PackageUpdateInfo(
-                        name=pkg_name,
+                    deps = await self._parse_srcinfo(pkgbase)
+                    pkg_updates[pkgbase] = PackageUpdateInfo(
+                        name=pkgbase,
                         current_version=current_version,
                         new_version=new_version,
                         has_update=True,
@@ -1175,21 +1281,13 @@ class Database:
                     continue
 
                 logger.debug(f"  Building {pkg_name}...")
-                cmd = [
-                    "aur",
-                    "sync",
-                    "--no-view",
-                    "--no-confirm",
-                    f"--database={self.name}",
-                ]
-                if makepkg_args:
-                    cmd.extend(["--margs", *makepkg_args])
-                cmd.extend(["--", pkg_name])
-                result = await run_cmd(
-                    *cmd,
-                    cwd=str(self.aurutils_cache),
+                success = await AURCLI.sync(
+                    [pkg_name],
+                    database=self.name,
+                    cwd=self.aurutils_cache,
+                    makepkg_args=makepkg_args,
                 )
-                if result.returncode != 0:
+                if not success:
                     logger.error(f"  Failed to build {pkg_name}")
                     failed_packages.add(pkg_name)
 
@@ -1206,19 +1304,13 @@ class Database:
 
                 logger.debug(f"  Building {pkg_name}...")
                 pkg_dir = self.aurutils_cache / pkg_name
-                cmd = [
-                    "aur",
-                    "build",
-                    "--force",
-                    f"--database={self.name}",
-                ]
-                if makepkg_args:
-                    cmd.extend(["--margs", *makepkg_args])
-                result = await run_cmd(
-                    *cmd,
-                    cwd=str(pkg_dir),
+                success = await AURCLI.build(
+                    database=self.name,
+                    cwd=pkg_dir,
+                    makepkg_args=makepkg_args,
+                    force=True,
                 )
-                if result.returncode != 0:
+                if not success:
                     logger.error(f"  Failed to build {pkg_name}")
                     failed_packages.add(pkg_name)
 
@@ -1278,10 +1370,30 @@ class Database:
             await self.remove(*packages_in_official_repos)
             repo_packages = {pkg.name for pkg in self.packages()}
 
-        # Determine which packages to check
+        # Determine which pkgbases to check
+        # Build mapping of pkgbase -> packages and package -> pkgbase
+        pkgbase_to_packages = {}
+        package_to_pkgbase = {}
+        for pkg in self.packages():
+            package_to_pkgbase[pkg.name] = pkg.pkgbase
+            if pkg.pkgbase not in pkgbase_to_packages:
+                pkgbase_to_packages[pkg.pkgbase] = []
+            pkgbase_to_packages[pkg.pkgbase].append(pkg.name)
+
+        repo_pkgbases = set(pkgbase_to_packages.keys())
+
         if packages:
-            packages_to_check = set(packages) & repo_packages
-            not_in_repo = set(packages) - repo_packages
+            # Resolve package names to pkgbases
+            pkgbases_to_check = set()
+            not_in_repo = set()
+            for pkg in packages:
+                if pkg in package_to_pkgbase:
+                    pkgbases_to_check.add(package_to_pkgbase[pkg])
+                elif pkg in repo_pkgbases:
+                    # User passed a pkgbase directly
+                    pkgbases_to_check.add(pkg)
+                else:
+                    not_in_repo.add(pkg)
             if not_in_repo:
                 logger.warning(
                     f"{len(not_in_repo)} package(s) not in repository:"
@@ -1289,13 +1401,13 @@ class Database:
                 for pkg in sorted(not_in_repo):
                     logger.warning(f"  - {pkg}")
         else:
-            packages_to_check = repo_packages - self.config.manual
+            pkgbases_to_check = repo_pkgbases - self.config.manual
 
-        # STEP 1: Check all packages for updates
+        # STEP 1: Check all pkgbases for updates
         logger.info("Checking for package updates...")
         pkg_updates: dict[
             str, PackageUpdateInfo
-        ] = await self._check_package_updates(packages_to_check)
+        ] = await self._check_package_updates(pkgbases_to_check)
 
         if not pkg_updates:
             logger.info("No updates available")
@@ -2110,6 +2222,14 @@ def main():
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
         logger.debug("Verbose logging enabled")
+
+    # Acquire exclusive lock
+    lock_fd = open(LOCK_FILE, "w")
+    try:
+        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        logger.error("Another sol-repotool instance is running")
+        sys.exit(1)
 
     match args.command:
         case "list":
