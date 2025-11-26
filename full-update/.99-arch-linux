@@ -399,6 +399,7 @@ if HOSTNAME in ("mars", "phobos"):
             "spectacle",
             "stern",
             "talosctl",
+            "typst",
             "virt-manager",
             "vlc",
             "wine",

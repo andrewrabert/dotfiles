@@ -133,3 +133,4 @@ pwd_osc_7
 bindkey '^?' backward-delete-char
 bindkey '^H' backward-delete-char
 export PATH=/Users/andrewr/.local/bin:$PATH
+
