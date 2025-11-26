@@ -13,6 +13,18 @@ from pathlib import Path
 
 import taglib
 
+AUDIO_EXT = {
+    ".aac",
+    ".ape",
+    ".flac",
+    ".m4a",
+    ".mp3",
+    ".ogg",
+    ".opus",
+    ".wav",
+    ".wma",
+}
+
 
 def get_all_tags(file_path):
     with taglib.File(str(file_path)) as song:
@@ -29,17 +41,28 @@ def set_all_tags(file_path, tags):
         song.tags = normalized_tags
 
 
+def all_files(*roots):
+    files = set()
+    stack = []
+    for path in roots:
+        if path.is_file:
+            files.add(path)
+        else:
+            stack.append(path)
+    while stack:
+        for path in stack.pop().iterdir():
+            if path.is_file:
+                files.add(path)
+            else:
+                stack.append(path)
+    return files
+
+
+def is_audio_file(path):
+    return path.is_file() and path.suffix.lower() in AUDIO_EXT
+
+
 def dump_directory_tags(directory, output_file):
-    music_extensions = {
-        ".mp3",
-        ".flac",
-        ".ogg",
-        ".m4a",
-        ".wma",
-        ".wav",
-        ".ape",
-        ".opus",
-    }
     directory_path = Path(directory).absolute()
 
     if not directory_path.exists():
@@ -48,12 +71,10 @@ def dump_directory_tags(directory, output_file):
 
     all_tags = {}
 
-    for ext in music_extensions:
-        for file_path in directory_path.rglob(f"*{ext}"):
-            print(f"Processing: {file_path}", file=sys.stderr)
-            tags = get_all_tags(file_path)
-            if tags:
-                all_tags[str(file_path.absolute())] = tags
+    for path in all_files(directory_path):
+        if not is_audio_file(path):
+            continue
+        all_tags[str(file_path.absolute())] = get_all_tags(path)
 
     if output_file:
         with open(output_file, "w", encoding="utf-8") as f:
