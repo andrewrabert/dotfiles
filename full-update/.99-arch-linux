@@ -113,6 +113,8 @@ class Pacman:
             "pacman",
             "-S",
             "--noconfirm",
+            "--overwrite",
+            "*",
         ]
         if asdeps:
             args.append("--asdeps")
@@ -241,6 +243,17 @@ if HOSTNAME in ("sol", "mars", "phobos"):
     EXPECTED_PACKAGES.update(
         {
             "7zip",
+            "bind",  # dig
+            "base",
+            "base-devel",
+            "hdparm",
+            "iptables",
+            "efivar",
+            "efibootmgr",
+            "man-db",
+            "iw",
+            "crun",
+            "dolphin-emu-tool",
             "advancecomp",
             "aria2",
             "ast-grep",
@@ -276,6 +289,8 @@ if HOSTNAME in ("sol", "mars", "phobos"):
             "iperf3",
             "jpegoptim",
             "jq",
+            "nfs-utils",
+            "nmap",
             "ledger",
             "less",
             "libvips",
@@ -301,6 +316,7 @@ if HOSTNAME in ("sol", "mars", "phobos"):
             "perl-image-exiftool",
             "pigz",
             "pixz",
+            "pkgfile",
             "prettier",
             "pwgen",
             "pyalpm",
@@ -320,7 +336,10 @@ if HOSTNAME in ("sol", "mars", "phobos"):
             "stylua",
             "svgo",
             "syncthing",
+            "tcpdump",
+            "time",
             "tmux",
+            "traceroute",
             "transmission-cli",
             "tree-sitter-cli",
             "typescript-language-server",
@@ -330,8 +349,10 @@ if HOSTNAME in ("sol", "mars", "phobos"):
             "unzip",
             "usbutils",
             "uv",
+            "vi",
             "vim",
             "vorbis-tools",
+            "which",
             "wl-clipboard",
             "xsel",
             "yazi",
@@ -362,8 +383,19 @@ if HOSTNAME in ("mars", "phobos", "lounge-htpc"):
     )
 
 if HOSTNAME in ("mars", "phobos"):
+    # amdgpu
     EXPECTED_PACKAGES.update(
         {
+            "vulkan-radeon",
+            "lib32-vulkan-radeon",
+        }
+    )
+
+    EXPECTED_PACKAGES.update(
+        {
+            "86box",
+            "lsdvd",
+            "dvd+rw-tools",
             "android-tools",
             "android-udev",
             "audacity",
@@ -384,6 +416,7 @@ if HOSTNAME in ("mars", "phobos"):
             "kcolorchooser",
             "kdeconnect",
             "kid3",
+            "krdc",
             "krfb",
             "krita",
             "kubectl",
@@ -395,15 +428,22 @@ if HOSTNAME in ("mars", "phobos"):
             "plasma6-runners-emojirunner",
             "podman",
             "rawtherapee",
+            "sddm",
             "signal-desktop",
             "spectacle",
             "stern",
             "talosctl",
             "typst",
+<<<<<<< Updated upstream
+=======
+            "udiskie",
+>>>>>>> Stashed changes
             "virt-manager",
             "vlc",
+            "waydroid",
             "wine",
             "xboxdrv",
+            "yay",
         }
     )
 
@@ -419,6 +459,7 @@ if HOSTNAME in ("mars", "phobos"):
             "md.obsidian.Obsidian",
             "org.equeim.Tremotesf",
             "org.fooyin.fooyin",
+            "org.prismlauncher.PrismLauncher",
         }
     )
 
@@ -477,11 +518,20 @@ EXPECTED_PACKAGE_DEPENDENCIES = {
         "poppler-glib",
         "python",
     },
+    "networkmanager": {
+        "bluez",
+        "dhcpcd",
+        "dnsmasq",
+        "iptables",
+        "iwd",
+        "nftables",
+        "systemd-resolvconf",
+    },
     "libvirt": {
         "dmidecode",
         "dnsmasq",
         "gettext",
-        "iptables-nft",
+        "iptables",
         "lvm2",
         "qemu-desktop",
         "swtpm",

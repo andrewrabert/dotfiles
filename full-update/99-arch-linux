@@ -1,4 +1,4 @@
 #!/usr/bin/env sh
 if [ -f /etc/arch-release ]; then
-    full-update .99-arch-linux
+    full-update .99-arch-linux "$@"
 fi

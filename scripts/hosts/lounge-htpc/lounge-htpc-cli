@@ -8,23 +8,12 @@ http_request() {
     curl -X POST -v "http://127.0.0.1${1}"
 }
 
-is_any_sink_running() {
-    python << EOF
-import json
-import subprocess
-import sys
+is_power_off() {
+    [ "$(curl -s http://127.0.0.1/status | jq -r .power)" = "off" ]
+}
 
-proc = subprocess.run(
-    ['pw-dump'],
-    stdout=subprocess.PIPE,
-    check=True)
-data = json.loads(proc.stdout.decode())
-
-for item in data:
-    if item.get('info', {}).get('state') == 'running':
-        sys.exit(0)
-sys.exit(1)
-EOF
+is_playing() {
+    [ "$(playerctl status 2>/dev/null)" = "Playing" ]
 }
 
 case "$1" in
@@ -44,10 +33,16 @@ case "$1" in
         http_request /mute/toggle
         ;;
     power-toggle)
-        http_request /power/toggle
+        if is_power_off; then
+            http_request /power/toggle
+            playerctl play
+        else
+            playerctl pause
+            http_request /power/toggle
+        fi
         ;;
     picture-toggle)
-        if is_any_sink_running; then
+        if is_playing; then
             http_request /picture/toggle
         else
             http_request /power/toggle
