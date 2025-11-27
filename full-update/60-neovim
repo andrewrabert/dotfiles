@@ -11,7 +11,9 @@ if [ "$(realpath ~/.config/nvim)" != "$DOTFILES/nvim" ]; then
     ln -sT "${DOTFILES}/nvim" ~/.config/nvim
 fi
 
-nvim --headless "+Lazy! sync" +TSUpdateSync +qa
-
-# workaround lazy.nvim output not ending with a new line
-echo
+# skip plugin sync if lazy is disabled
+if ! [ -e ~/.config/nvim/lazy.disable ]; then
+    nvim --headless "+Lazy! sync" +TSUpdateSync +qa
+    # workaround lazy.nvim output not ending with a new line
+    echo
+fi

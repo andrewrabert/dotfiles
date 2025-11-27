@@ -1,5 +1,0 @@
-vim.api.nvim_set_keymap("n", "<leader>n", ":bn!<CR>", { noremap = true })
-vim.api.nvim_set_keymap("n", "<leader>p", ":bp!<CR>", { noremap = true })
-vim.api.nvim_set_keymap("n", "<leader>D", ":bd<CR>", { noremap = true })
-vim.api.nvim_set_keymap("n", "<leader>3", ":b#<CR>", { noremap = true })
-vim.api.nvim_set_keymap("n", "<leader>l", ":buffers<CR>:buffer<Space>", { noremap = true })

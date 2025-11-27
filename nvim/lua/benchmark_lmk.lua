@@ -3,11 +3,11 @@ local M = {}
 local lmk = require("lmk")
 
 local function benchmark(name, func, iterations)
-	local start = vim.loop.hrtime()
+	local start = vim.uv.hrtime()
 	for i = 1, iterations do
 		func()
 	end
-	local elapsed = (vim.loop.hrtime() - start) / 1e6 -- Convert to milliseconds
+	local elapsed = (vim.uv.hrtime() - start) / 1e6 -- Convert to milliseconds
 	print(
 		string.format(
 			"%s: %.2fms total, %.4fms per call (%d iterations)",
