@@ -434,10 +434,7 @@ if HOSTNAME in ("mars", "phobos"):
             "stern",
             "talosctl",
             "typst",
-<<<<<<< Updated upstream
-=======
             "udiskie",
->>>>>>> Stashed changes
             "virt-manager",
             "vlc",
             "waydroid",
