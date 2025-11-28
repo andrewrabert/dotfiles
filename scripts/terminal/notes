@@ -1,95 +1,151 @@
-#!/usr/bin/env sh
-set -e
+#!/usr/bin/env python3
 
-note_contents_rg() {
-    rg \
-        -0 \
-        --glob '!*.bkp' \
-        --glob '!*.dot' \
-        --glob '!*.drawio' \
-        --glob '!*.svg' \
-        --glob '!.git/' \
-        --glob '!.obsidian/' \
-        --sortr modified \
-        --hidden \
-        '.+'
-}
+import argparse
+import asyncio
+import datetime
+import pathlib
+import sys
 
-note_contents() {
-    note_contents_rg | sed 's/\x0/\x0 /' | uniq
-}
+VAULT = pathlib.Path.home() / "notes"
 
-show_fzf() {
-    fzf --literal --bind ctrl-l:clear-query | tr '\0' '\n' | head -n 1
-}
 
-set_note_file() {
-    NOTE_FILE="$(note_contents | show_fzf)"
-    #if [ -z "$NOTE_FILE" ]; then
-    #    NOTE_FILE="$(printf '' | fzf --print-query || true)"
-    #fi
-    if [ -z "$NOTE_FILE" ]; then
-        exit
-    fi
-}
+class UserError(Exception):
+    pass
 
-NOTES_DIR="${NOTES_DIR:-$HOME/notes}"
-if ! [ -d "$NOTES_DIR" ]; then
-    NOTES_DIR=~/syncthing/default/notes
-fi
-if ! [ -d "$NOTES_DIR" ]; then
-    echo error: notes directory does not exist: \""$NOTES_DIR"\" >&2
-    exit 1
-fi
-cd "${NOTES_DIR}"
 
-SHOW_PATH=
-NO_FZF=
-while true; do
-    case "$1" in
-        -p)
-            SHOW_PATH=1
-            shift
-            ;;
-        -d)
-            echo "$NOTES_DIR"
-            exit
-            ;;
-        -f)
-            set_note_file
-            exec notes "$NOTE_FILE"
-            ;;
-        --no-fzf)
-            NO_FZF=1
-            shift
-            ;;
-        *)
-            break
-    esac
-done
+async def run(*args):
+    proc = await asyncio.create_subprocess_exec(
+        *args,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await proc.communicate()
+    if stdout:
+        sys.stdout.write(stdout.decode())
+    if stderr:
+        sys.stderr.write(stderr.decode())
+    return proc.returncode
 
-if [ -n "$NO_FZF" ]; then
-    note_contents
-    exit
-fi
 
-NOTE_FILE=
-case $# in
-    0)
-        set_note_file
-        ;;
-    1)
-        NOTE_FILE="$1"
-        mkdir -p "$(dirname -- "$NOTE_FILE")"
-        ;;
-    *)
-        echo 'error: unknown arguments' >&2
-        exit 1
-        ;;
-esac
+async def cmd_search(args):
+    return await run("rg", args.pattern, str(VAULT))
 
-if [ -n "$SHOW_PATH" ]; then
-    realpath "$NOTE_FILE"
-else
-    exec "${EDITOR}" -- "$NOTE_FILE"
-fi
+
+async def cmd_find(args):
+    return await run("fd", "-e", "md", args.pattern, str(VAULT))
+
+
+async def cmd_tags(args):
+    tag = args.tag if args.tag.startswith("#") else f"#{args.tag}"
+    return await run("rg", "-l", tag, str(VAULT))
+
+
+async def cmd_daily(args):
+    if args.date:
+        try:
+            date = datetime.datetime.strptime(args.date, "%Y-%m-%d").date()
+        except ValueError:
+            raise UserError(f"invalid date format '{args.date}', expected YYYY-MM-DD")
+    else:
+        date = datetime.date.today()
+    year = str(date.year)
+    month = date.strftime("%Y-%m")
+    day = date.strftime("%Y-%m-%d")
+
+    daily_dir = VAULT / "Daily" / year / month / day
+    daily_dir.mkdir(parents=True, exist_ok=True)
+
+    note_path = daily_dir / f"{day}.md"
+    print(note_path)
+    return 0
+
+
+def all_files(*paths):
+    stack = []
+    found = set()
+    for path in paths:
+        if not path.exists():
+            raise UserError(f"path does not exist: {path}")
+        elif path.is_file():
+            found.add(path)
+        elif path.is_dir():
+            stack.append(path)
+    while stack:
+        for path in stack.pop().iterdir():
+            if path.is_file():
+                found.add(path)
+            elif path.is_dir():
+                stack.append(path)
+    return sorted(found)
+
+
+async def cmd_clean(_args):
+    notes_dir = VAULT
+
+    # collect templates
+    templates = set()
+    for path in all_files(notes_dir / "Templates"):
+        if path.suffix.lower() == ".md":
+            templates.add(path.read_text())
+
+    # find and remove empty notes
+    for path in all_files(notes_dir):
+        if path.suffix.lower() != ".md":
+            continue
+        rel = path.relative_to(notes_dir)
+        if rel.parts[0] in (".obsidian", ".trash", "Templates"):
+            continue
+        contents = path.read_text().strip()
+        delete = False
+        if contents in templates:
+            delete = True
+            print("empty (from template):", rel)
+        elif not contents:
+            delete = True
+            print("empty:", rel)
+        if delete:
+            # folder note - don't delete if folder has other files
+            if path.stem == path.parent.name:
+                if len(all_files(path.parent)) > 1:
+                    delete = False
+        if delete:
+            print("delete", rel)
+            path.unlink()
+
+    # remove empty directories
+    return await run("empty-tree", "-r", str(notes_dir))
+
+
+async def main():
+    parser = argparse.ArgumentParser(prog="notes")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    p_search = subparsers.add_parser("search", help="search note contents")
+    p_search.add_argument("pattern")
+    p_search.set_defaults(func=cmd_search)
+
+    p_find = subparsers.add_parser("find", help="find notes by filename")
+    p_find.add_argument("pattern")
+    p_find.set_defaults(func=cmd_find)
+
+    p_tags = subparsers.add_parser("tags", help="find notes with tag")
+    p_tags.add_argument("tag")
+    p_tags.set_defaults(func=cmd_tags)
+
+    p_daily = subparsers.add_parser("daily", help="get daily note path")
+    p_daily.add_argument("date", nargs="?", default=None, help="YYYY-MM-DD")
+    p_daily.set_defaults(func=cmd_daily)
+
+    p_clean = subparsers.add_parser("clean", help="remove empty notes")
+    p_clean.set_defaults(func=cmd_clean)
+
+    args = parser.parse_args()
+    return await args.func(args)
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(asyncio.run(main()))
+    except UserError as e:
+        print(f"error: {e}", file=sys.stderr)
+        sys.exit(1)
