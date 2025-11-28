@@ -1,0 +1,34 @@
+#!/usr/bin/env -S uv --quiet run --script
+# /// script
+# dependencies = []
+# ///
+
+import asyncio
+
+DARK_COLOR_SCHEME = "Dotfiles - BreezeDark-Darker"
+LIGHT_COLOR_SCHEME = "BreezeLight"
+DARK_ICONS = "breeze-dark"
+LIGHT_ICONS = "breeze"
+
+
+async def main():
+    proc = await asyncio.create_subprocess_exec(
+        "kreadconfig6", "--file", "kdeglobals", "--group", "General", "--key", "ColorScheme",
+        stdout=asyncio.subprocess.PIPE,
+    )
+    stdout, _ = await proc.communicate()
+    current = stdout.decode().strip()
+
+    if current == DARK_COLOR_SCHEME:
+        scheme, icons = LIGHT_COLOR_SCHEME, LIGHT_ICONS
+    else:
+        scheme, icons = DARK_COLOR_SCHEME, DARK_ICONS
+
+    await asyncio.gather(
+        asyncio.create_subprocess_exec("plasma-apply-colorscheme", scheme),
+        asyncio.create_subprocess_exec("/usr/lib/plasma-changeicons", icons),
+    )
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

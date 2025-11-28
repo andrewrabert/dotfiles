@@ -1,0 +1,34 @@
+#!/usr/bin/env -S uv --quiet run --script
+
+import argparse
+import pathlib
+
+def main():
+    parser = argparse.ArgumentParser(description="Create CLAUDE.local.md mirrored under notes dir")
+    parser.add_argument("path", type=pathlib.Path, nargs="?", default=pathlib.Path.cwd(), help="Path to create CLAUDE.local.md for (default: cwd)")
+    parser.add_argument("--content", "-c", default="", help="Content for the file")
+    args = parser.parse_args()
+
+    home = pathlib.Path.home()
+    base = home / "syncthing/default/notes/Claude/home"
+    target = args.path.resolve()
+
+    if not target.is_relative_to(home):
+        raise SystemExit(f"Error: {target} is not under {home}")
+
+    rel = target.relative_to(home)
+    storage = base / rel / "CLAUDE.local.md"
+    link = target / "CLAUDE.local.md"
+
+    if link.exists() or link.is_symlink():
+        if link.is_symlink() and link.resolve() == storage.resolve():
+            return
+        raise SystemExit(f"Error: {link} exists and is not symlink to {storage}")
+
+    storage.parent.mkdir(parents=True, exist_ok=True)
+    if not storage.exists():
+        storage.write_text(args.content)
+    link.symlink_to(storage)
+
+if __name__ == "__main__":
+    main()
