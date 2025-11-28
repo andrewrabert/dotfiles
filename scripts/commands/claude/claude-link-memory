@@ -3,10 +3,21 @@
 import argparse
 import pathlib
 
+
 def main():
-    parser = argparse.ArgumentParser(description="Create CLAUDE.local.md mirrored under notes dir")
-    parser.add_argument("path", type=pathlib.Path, nargs="?", default=pathlib.Path.cwd(), help="Path to create CLAUDE.local.md for (default: cwd)")
-    parser.add_argument("--content", "-c", default="", help="Content for the file")
+    parser = argparse.ArgumentParser(
+        description="Create CLAUDE.local.md mirrored under notes dir"
+    )
+    parser.add_argument(
+        "path",
+        type=pathlib.Path,
+        nargs="?",
+        default=pathlib.Path.cwd(),
+        help="Path to create CLAUDE.local.md for (default: cwd)",
+    )
+    parser.add_argument(
+        "--content", "-c", default="", help="Content for the file"
+    )
     args = parser.parse_args()
 
     home = pathlib.Path.home()
@@ -23,12 +34,15 @@ def main():
     if link.exists() or link.is_symlink():
         if link.is_symlink() and link.resolve() == storage.resolve():
             return
-        raise SystemExit(f"Error: {link} exists and is not symlink to {storage}")
+        raise SystemExit(
+            f"Error: {link} exists and is not symlink to {storage}"
+        )
 
     storage.parent.mkdir(parents=True, exist_ok=True)
     if not storage.exists():
         storage.write_text(args.content)
     link.symlink_to(storage)
+
 
 if __name__ == "__main__":
     main()
