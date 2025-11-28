@@ -211,10 +211,17 @@ def main():
     parser.add_argument("--build-cache", action="store_true")
     parser.add_argument("--clean-empty", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--list-hosts", action="store_true", help="List known git hosts")
     parser.add_argument("--parse-url", action="store_true")
     parser.add_argument("--rm", action="store_true")
     parser.add_argument("repo", nargs="?")
     args = parser.parse_args()
+
+    # Handle --list-hosts (no CODE_ROOT_DIR check needed)
+    if args.list_hosts:
+        for host in SrcName:
+            print(host.value)
+        return
 
     # Handle --parse-url (no CODE_ROOT_DIR check needed)
     if args.parse_url:
