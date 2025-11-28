@@ -55,8 +55,11 @@ async def cmd_daily(args):
     daily_dir = VAULT / "Daily" / year / month / day
     daily_dir.mkdir(parents=True, exist_ok=True)
 
-    note_path = daily_dir / f"{day}.md"
-    print(note_path)
+    if args.dir:
+        print(daily_dir)
+    else:
+        note_path = daily_dir / f"{day}.md"
+        print(note_path)
     return 0
 
 
@@ -134,6 +137,7 @@ async def main():
 
     p_daily = subparsers.add_parser("daily", help="get daily note path")
     p_daily.add_argument("date", nargs="?", default=None, help="YYYY-MM-DD")
+    p_daily.add_argument("--dir", action="store_true", help="return directory path only")
     p_daily.set_defaults(func=cmd_daily)
 
     p_clean = subparsers.add_parser("clean", help="remove empty notes")
