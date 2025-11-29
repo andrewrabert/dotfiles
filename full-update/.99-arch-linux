@@ -464,6 +464,9 @@ EXPECTED_PACKAGE_DEPENDENCIES = {
     "cdemu-daemon": {
         "vhba-module-dkms",
     },
+    "cmake": {
+        "ninja",
+    },
     "devtools": {
         "bat",
         "btrfs-progs",
