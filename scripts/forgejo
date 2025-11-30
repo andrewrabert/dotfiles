@@ -1,0 +1,442 @@
+#!/usr/bin/env -S uv --quiet run --script
+# /// script
+# dependencies = [
+#   "httpx",
+#   "yarl",
+# ]
+# ///
+
+import argparse
+import asyncio
+import dataclasses
+import json
+import os
+import sys
+
+import httpx
+import yarl
+
+
+class UserError(Exception):
+    pass
+
+
+@dataclasses.dataclass
+class Repo:
+    name: str
+    visibility: str
+    archived: bool
+    description: str
+    url: str
+
+    @classmethod
+    def from_api(cls, data):
+        return cls(
+            name=data["full_name"],
+            visibility="private" if data["private"] else "public",
+            archived=data["archived"],
+            description=data["description"] or "",
+            url=data["html_url"],
+        )
+
+    def to_dict(self):
+        return dataclasses.asdict(self)
+
+    def print(self):
+        items = list(self.to_dict().items())
+        width = max(len(k) for k, _ in items)
+        dim, reset = "\033[2m", "\033[0m"
+        for key, val in items:
+            print(f"{dim}{key:<{width}}:{reset} {val}")
+
+
+def json_dumps(data):
+    return json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True)
+
+
+def parse_repo(repo_str):
+    """Parse owner/repo string. Returns (owner, repo) or (owner, None) if no repo."""
+    if "/" not in repo_str:
+        return repo_str, None
+    owner, repo = repo_str.split("/", 1)
+    if not owner:
+        raise UserError(f"invalid repo format: {repo_str}")
+    return owner, repo or None
+
+
+def unique_repos(repos):
+    """Dedupe repos while preserving order."""
+    seen = set()
+    result = []
+    for r in repos:
+        if r not in seen:
+            seen.add(r)
+            result.append(r)
+    return result
+
+
+class Forgejo:
+    def __init__(self, base_url, token, verbose=False):
+        self.base_url = yarl.URL(base_url) / "api/v1"
+        self.verbose = verbose
+        self.client = httpx.AsyncClient(
+            headers={"Authorization": f"token {token}"},
+        )
+
+    def _log(self, data):
+        if self.verbose:
+            print(json_dumps(data), file=sys.stderr)
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        await self.client.aclose()
+
+    async def list_repos(self, owner=None, limit=50):
+        if owner:
+            resp = await self.client.get(
+                str(self.base_url / "users" / owner / "repos"),
+                params={"limit": limit},
+            )
+        else:
+            resp = await self.client.get(
+                str(self.base_url / "repos/search"),
+                params={"limit": limit},
+            )
+        resp.raise_for_status()
+        data = resp.json()
+        self._log(data)
+        return data if owner else data.get("data", [])
+
+    async def get_repo(self, owner, repo):
+        resp = await self.client.get(
+            str(self.base_url / "repos" / owner / repo),
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        self._log(data)
+        return data
+
+    async def get_user(self):
+        resp = await self.client.get(str(self.base_url / "user"))
+        resp.raise_for_status()
+        data = resp.json()
+        self._log(data)
+        return data
+
+    async def create_repo(self, owner, name, private=False, description=""):
+        user = await self.get_user()
+        if owner == user["login"]:
+            url = self.base_url / "user/repos"
+        else:
+            url = self.base_url / "orgs" / owner / "repos"
+        resp = await self.client.post(
+            str(url),
+            json={
+                "name": name,
+                "private": private,
+                "description": description,
+            },
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        self._log(data)
+        return data
+
+    async def delete_repo(self, owner, repo):
+        resp = await self.client.delete(
+            str(self.base_url / "repos" / owner / repo),
+        )
+        if resp.status_code == 404:
+            return False
+        resp.raise_for_status()
+        return True
+
+    async def rename_repo(self, owner, repo, new_name):
+        resp = await self.client.patch(
+            str(self.base_url / "repos" / owner / repo),
+            json={"name": new_name},
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        self._log(data)
+        return data
+
+    async def archive_repo(self, owner, repo, archived=True):
+        resp = await self.client.patch(
+            str(self.base_url / "repos" / owner / repo),
+            json={"archived": archived},
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        self._log(data)
+        return data
+
+    async def set_visibility(self, owner, repo, private):
+        resp = await self.client.patch(
+            str(self.base_url / "repos" / owner / repo),
+            json={"private": private},
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        self._log(data)
+        return data
+
+    async def set_description(self, owner, repo, description):
+        resp = await self.client.patch(
+            str(self.base_url / "repos" / owner / repo),
+            json={"description": description},
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        self._log(data)
+        return data
+
+
+def add_common_args(parser):
+    parser.add_argument("--json", action="store_true", help="output as JSON")
+    parser.add_argument(
+        "--verbose", action="store_true", help="output raw API responses"
+    )
+    parser.add_argument(
+        "--print-name", action="store_true", help="only output owner/repo"
+    )
+
+
+async def main():
+    parser = argparse.ArgumentParser(description="Forgejo CLI")
+    parser.add_argument("--url", default=os.environ.get("FORGEJO_URL"))
+    parser.add_argument("--token", default=os.environ.get("FORGEJO_TOKEN"))
+
+    subparsers = parser.add_subparsers(dest="command")
+
+    # list
+    p_list = subparsers.add_parser("list", help="list repos")
+    p_list.add_argument("owner", nargs="?", help="filter by owner")
+    add_common_args(p_list)
+
+    # info
+    p_info = subparsers.add_parser("info", help="show repo info")
+    p_info.add_argument("repos", nargs="+", metavar="owner/repo")
+    add_common_args(p_info)
+
+    # create
+    p_create = subparsers.add_parser("create", help="create repo")
+    p_create.add_argument("repo", metavar="owner/repo")
+    p_create.add_argument("--public", action="store_true", help="make public")
+    p_create.add_argument("--description", default="", help="repo description")
+    add_common_args(p_create)
+
+    # delete
+    p_delete = subparsers.add_parser("delete", help="delete repo")
+    p_delete.add_argument("repos", nargs="+", metavar="owner/repo")
+    add_common_args(p_delete)
+
+    # rename
+    p_rename = subparsers.add_parser("rename", help="rename repo")
+    p_rename.add_argument("repo", metavar="owner/repo")
+    p_rename.add_argument("new_name")
+    add_common_args(p_rename)
+
+    # archive
+    p_archive = subparsers.add_parser("archive", help="archive repo")
+    p_archive.add_argument("repos", nargs="+", metavar="owner/repo")
+    add_common_args(p_archive)
+
+    # unarchive
+    p_unarchive = subparsers.add_parser("unarchive", help="unarchive repo")
+    p_unarchive.add_argument("repos", nargs="+", metavar="owner/repo")
+    add_common_args(p_unarchive)
+
+    # public
+    p_public = subparsers.add_parser("public", help="make repo public")
+    p_public.add_argument("repos", nargs="+", metavar="owner/repo")
+    add_common_args(p_public)
+
+    # private
+    p_private = subparsers.add_parser("private", help="make repo private")
+    p_private.add_argument("repos", nargs="+", metavar="owner/repo")
+    add_common_args(p_private)
+
+    # describe
+    p_describe = subparsers.add_parser("describe", help="set repo description")
+    p_describe.add_argument("repo", metavar="owner/repo")
+    p_describe.add_argument("description")
+    add_common_args(p_describe)
+
+    args = parser.parse_args()
+
+    if not args.command:
+        args.command = "list"
+        args.owner = None
+        args.json = False
+        args.verbose = False
+        args.print_name = False
+
+    if not args.url:
+        raise UserError("FORGEJO_URL env var or --url required")
+    if not args.token:
+        raise UserError("FORGEJO_TOKEN env var or --token required")
+
+    async with Forgejo(args.url, args.token, verbose=args.verbose) as forgejo:
+        await run(args, forgejo)
+
+
+async def run(args, forgejo):
+    match args.command:
+        case "list":
+            if args.print_name:
+                raise UserError("--print-name requires owner/repo")
+            repos = [
+                Repo.from_api(r)
+                for r in await forgejo.list_repos(owner=args.owner)
+            ]
+            repos.sort(key=lambda r: (r.visibility != "private", r.name))
+            if args.json:
+                print(json_dumps([r.to_dict() for r in repos]))
+            else:
+                if repos:
+                    name_w = max(len(r.name) for r in repos)
+                    vis_w = max(len(r.visibility) for r in repos)
+                    for r in repos:
+                        if r.visibility == "public":
+                            vis = f"\033[32m{r.visibility:<{vis_w}}\033[0m"
+                        else:
+                            vis = f"\033[33m{r.visibility:<{vis_w}}\033[0m"
+                        print(f"{r.name:<{name_w}}  {vis}  {r.url}")
+
+        case "info":
+            repos = unique_repos(args.repos)
+            infos = []
+            for repo_str in repos:
+                owner, repo = parse_repo(repo_str)
+                if not repo:
+                    raise UserError("info requires owner/repo")
+                infos.append(
+                    Repo.from_api(await forgejo.get_repo(owner, repo))
+                )
+            if args.print_name:
+                for info in infos:
+                    print(info.name)
+            elif args.json:
+                print(json_dumps([i.to_dict() for i in infos]))
+            elif sys.stdout.isatty():
+                for i, info in enumerate(infos):
+                    if i > 0:
+                        print()
+                    info.print()
+            else:
+                for info in infos:
+                    print(info.url)
+
+        case "create":
+            owner, repo = parse_repo(args.repo)
+            if not repo:
+                raise UserError("create requires owner/repo")
+            result = await forgejo.create_repo(
+                owner,
+                repo,
+                private=not args.public,
+                description=args.description,
+            )
+            if args.print_name:
+                print(result["full_name"])
+            elif sys.stdout.isatty():
+                visibility = "private" if result["private"] else "public"
+                print(f"{result['full_name']} ({visibility})")
+                if result["description"]:
+                    print(result["description"])
+                print(result["html_url"])
+            else:
+                print(result["html_url"])
+
+        case "delete":
+            for repo_str in unique_repos(args.repos):
+                owner, repo = parse_repo(repo_str)
+                if not repo:
+                    raise UserError("delete requires owner/repo")
+                deleted = await forgejo.delete_repo(owner, repo)
+                if args.print_name:
+                    print(f"{owner}/{repo}")
+                elif deleted:
+                    print(f"deleted {owner}/{repo}")
+                else:
+                    print(f"not found {owner}/{repo}")
+
+        case "rename":
+            owner, repo = parse_repo(args.repo)
+            if not repo:
+                raise UserError("rename requires owner/repo")
+            result = await forgejo.rename_repo(owner, repo, args.new_name)
+            print(result["full_name"])
+
+        case "archive":
+            for repo_str in unique_repos(args.repos):
+                owner, repo = parse_repo(repo_str)
+                if not repo:
+                    raise UserError("archive requires owner/repo")
+                result = await forgejo.archive_repo(owner, repo, True)
+                if args.print_name:
+                    print(result["full_name"])
+                else:
+                    print(f"archived {result['full_name']}")
+
+        case "unarchive":
+            for repo_str in unique_repos(args.repos):
+                owner, repo = parse_repo(repo_str)
+                if not repo:
+                    raise UserError("unarchive requires owner/repo")
+                result = await forgejo.archive_repo(owner, repo, False)
+                if args.print_name:
+                    print(result["full_name"])
+                else:
+                    print(f"unarchived {result['full_name']}")
+
+        case "public":
+            for repo_str in unique_repos(args.repos):
+                owner, repo = parse_repo(repo_str)
+                if not repo:
+                    raise UserError("public requires owner/repo")
+                result = await forgejo.set_visibility(owner, repo, False)
+                if args.print_name:
+                    print(result["full_name"])
+                else:
+                    print(f"{result['full_name']} is now public")
+
+        case "private":
+            for repo_str in unique_repos(args.repos):
+                owner, repo = parse_repo(repo_str)
+                if not repo:
+                    raise UserError("private requires owner/repo")
+                result = await forgejo.set_visibility(owner, repo, True)
+                if args.print_name:
+                    print(result["full_name"])
+                else:
+                    print(f"{result['full_name']} is now private")
+
+        case "describe":
+            owner, repo = parse_repo(args.repo)
+            if not repo:
+                raise UserError("describe requires owner/repo")
+            result = await forgejo.set_description(
+                owner, repo, args.description
+            )
+            if args.print_name:
+                print(result["full_name"])
+            else:
+                print(f"{result['full_name']}: {result['description']}")
+
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except UserError as e:
+        print(f"error: {e}", file=sys.stderr)
+        sys.exit(1)
+    except httpx.HTTPStatusError as e:
+        print(
+            f"error: {e.response.status_code} {e.response.text}",
+            file=sys.stderr,
+        )
+        sys.exit(1)

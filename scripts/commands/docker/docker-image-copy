@@ -1,0 +1,250 @@
+#!/usr/bin/env -S uv --quiet run --script
+# /// script
+# dependencies = [
+#   "tqdm",
+# ]
+# ///
+"""Copy Docker images to remote machines via SSH."""
+
+import argparse
+import asyncio
+import sys
+
+import tqdm
+
+
+class UserError(Exception):
+    pass
+
+
+async def get_image_info(image, remote=None):
+    """Get image ID and size. Returns (id, size) or (None, None) if not found."""
+    if remote:
+        cmd = [
+            "ssh",
+            remote,
+            "docker",
+            "image",
+            "inspect",
+            "--format",
+            "{{.Id}} {{.Size}}",
+            image,
+        ]
+    else:
+        cmd = [
+            "docker",
+            "image",
+            "inspect",
+            "--format",
+            "{{.Id}} {{.Size}}",
+            image,
+        ]
+
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await proc.communicate()
+    if proc.returncode != 0:
+        if remote:
+            return None, None
+        raise UserError(f"docker inspect failed: {stderr.decode().strip()}")
+    parts = stdout.decode().strip().split()
+    return parts[0], int(parts[1])
+
+
+async def pipe_with_progress(reader, writer, pbar):
+    """Shuttle data between streams, updating progress bar."""
+    try:
+        while chunk := await reader.read(65536):
+            writer.write(chunk)
+            await writer.drain()
+            pbar.update(len(chunk))
+    finally:
+        writer.close()
+        await writer.wait_closed()
+
+
+async def pipe(reader, writer):
+    """Shuttle data between streams."""
+    try:
+        while chunk := await reader.read(65536):
+            writer.write(chunk)
+            await writer.drain()
+    finally:
+        writer.close()
+        await writer.wait_closed()
+
+
+async def image_exists_on_remote(image_id, remote):
+    """Check if image ID exists on remote (under any tag)."""
+    proc = await asyncio.create_subprocess_exec(
+        "ssh",
+        remote,
+        "docker",
+        "image",
+        "inspect",
+        image_id,
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.DEVNULL,
+    )
+    await proc.wait()
+    return proc.returncode == 0
+
+
+async def copy_image(image, remote, remote_tag):
+    """Stream docker image directly to remote via SSH with zstd compression."""
+    local_id, size = await get_image_info(image)
+    remote_id, _ = await get_image_info(remote_tag, remote)
+
+    if local_id == remote_id:
+        print(f"skipped {image} -> {remote}:{remote_tag} (already present)")
+        return
+
+    # Check if image exists under different tag - just retag
+    if await image_exists_on_remote(local_id, remote):
+        await retag_image(remote, local_id, remote_tag)
+        print(f"retagged {local_id[:12]} -> {remote}:{remote_tag}")
+        return
+
+    save_proc = await asyncio.create_subprocess_exec(
+        "docker",
+        "save",
+        image,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+
+    zstd_proc = await asyncio.create_subprocess_exec(
+        "zstd",
+        "-T0",
+        stdin=asyncio.subprocess.PIPE,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+
+    load_proc = await asyncio.create_subprocess_exec(
+        "ssh",
+        remote,
+        "docker load",
+        stdin=asyncio.subprocess.PIPE,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+
+    with tqdm.tqdm(
+        total=size,
+        unit="B",
+        unit_scale=True,
+        desc=f"{image} -> {remote}",
+    ) as pbar:
+        await asyncio.gather(
+            pipe_with_progress(save_proc.stdout, zstd_proc.stdin, pbar),
+            pipe(zstd_proc.stdout, load_proc.stdin),
+        )
+
+    await asyncio.gather(save_proc.wait(), zstd_proc.wait(), load_proc.wait())
+
+    if save_proc.returncode != 0:
+        stderr = await save_proc.stderr.read()
+        raise UserError(f"docker save failed: {stderr.decode().strip()}")
+
+    if zstd_proc.returncode != 0:
+        stderr = await zstd_proc.stderr.read()
+        raise UserError(f"zstd failed: {stderr.decode().strip()}")
+
+    if load_proc.returncode != 0:
+        stderr = await load_proc.stderr.read()
+        raise UserError(f"docker load failed: {stderr.decode().strip()}")
+
+    if remote_tag != image:
+        await retag_image(remote, image, remote_tag)
+
+    print(f"copied {image} -> {remote}:{remote_tag}")
+
+
+def compute_remote_tag(image, tag=None, prefix=None, suffix=None):
+    """Compute the remote tag name based on overrides."""
+    if tag:
+        return tag
+    result = image
+    if prefix:
+        result = prefix + result
+    if suffix:
+        result = result + suffix
+    return result
+
+
+async def retag_image(remote, old_tag, new_tag):
+    """Retag image on remote."""
+    proc = await asyncio.create_subprocess_exec(
+        "ssh",
+        remote,
+        "docker",
+        "tag",
+        old_tag,
+        new_tag,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    _, stderr = await proc.communicate()
+    if proc.returncode != 0:
+        raise UserError(f"docker tag failed: {stderr.decode().strip()}")
+
+
+async def main():
+    parser = argparse.ArgumentParser(description="Copy Docker images via SSH")
+    parser.add_argument("image", nargs="+", help="Docker image name:tag")
+    parser.add_argument(
+        "-r",
+        "--remote",
+        required=True,
+        action="append",
+        help="SSH destination(s)",
+    )
+
+    tag_mutex = parser.add_mutually_exclusive_group()
+    tag_mutex.add_argument(
+        "-t", "--tag", help="Override remote tag completely"
+    )
+    tag_mutex.add_argument("-p", "--tag-prefix", help="Prefix for remote tag")
+    parser.add_argument("-s", "--tag-suffix", help="Suffix for remote tag")
+
+    args = parser.parse_args()
+
+    if args.tag and args.tag_suffix:
+        parser.error("--tag cannot be used with --tag-suffix")
+
+    if args.tag and len(args.image) > 1:
+        parser.error("--tag cannot be used with multiple images")
+
+    tasks = []
+    for image in args.image:
+        remote_tag = compute_remote_tag(
+            image, args.tag, args.tag_prefix, args.tag_suffix
+        )
+        for remote in args.remote:
+            tasks.append((image, remote, remote_tag))
+
+    results = await asyncio.gather(
+        *[copy_image(img, rem, tag) for img, rem, tag in tasks],
+        return_exceptions=True,
+    )
+
+    failed = False
+    for (image, remote, _), result in zip(tasks, results):
+        if isinstance(result, Exception):
+            print(
+                f"error copying {image} to {remote}: {result}", file=sys.stderr
+            )
+            failed = True
+
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(asyncio.run(main()))
+    except UserError as e:
+        print(f"error: {e}", file=sys.stderr)
+        sys.exit(1)

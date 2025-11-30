@@ -1,0 +1,8 @@
+#!/usr/bin/env zsh
+
+path=("${(@)path:#$HOME/.local/bin*}")
+
+for bin in $(whence -ap makepkg); do
+  [[ ${bin:A} != ${0:A} ]] && exec $bin "$@"
+done
+exit 1

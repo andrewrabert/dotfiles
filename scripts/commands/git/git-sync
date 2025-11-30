@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import enum
+import json
 import os
 import pathlib
 import shutil
@@ -16,6 +17,7 @@ CACHE_ROOT_DIR = (
 )
 CACHE_PATH = CACHE_ROOT_DIR / "git-sync"
 BACKUP_CACHE_PATH = CACHE_ROOT_DIR / "git-sync-backup"
+REMOTE_CACHE_PATH = CACHE_ROOT_DIR / "git-sync-remote"
 
 
 class Git:
@@ -81,7 +83,7 @@ class SrcName(enum.StrEnum):
     GITHUB = "github"
     GITLAB = "gitlab"
     KDE_INVENT = "invent.kde.org"
-    NULLSUM_NET = "git.nullsum.net"
+    NULLSUM_NET = "nullsum"
 
 
 def clean_empty_dirs(root, dry_run=False):
@@ -208,12 +210,17 @@ def main():
     cache_group = parser.add_mutually_exclusive_group()
     cache_group.add_argument("--show-cache", action="store_true")
     cache_group.add_argument("--show-backup-cache", action="store_true")
-    parser.add_argument("--build-cache", action="store_true")
+    cache_group.add_argument("--show-remote-cache", action="store_true")
+    cache_group.add_argument("--build-cache", action="store_true")
+    parser.add_argument("--remote", action="store_true")
     parser.add_argument("--clean-empty", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
-    parser.add_argument("--list-hosts", action="store_true", help="List known git hosts")
+    parser.add_argument(
+        "--list-hosts", action="store_true", help="List known git hosts"
+    )
     parser.add_argument("--parse-url", action="store_true")
     parser.add_argument("--rm", action="store_true")
+    parser.add_argument("--create", action="store_true")
     parser.add_argument("repo", nargs="?")
     args = parser.parse_args()
 
@@ -273,9 +280,19 @@ def main():
             backup_cache_modified = True
 
     if args.show_cache:
+        if args.remote:
+            REMOTE_CACHE_PATH.touch()
+            for line in REMOTE_CACHE_PATH.read_text().splitlines():
+                if line:
+                    print(line)
         print("\n".join(cache))
     elif args.show_backup_cache:
         print("\n".join(backup_cache))
+    elif args.show_remote_cache:
+        REMOTE_CACHE_PATH.touch()
+        for line in REMOTE_CACHE_PATH.read_text().splitlines():
+            if line:
+                print(line)
     elif args.clean_empty:
         deleted = clean_empty_dirs(CODE_ROOT_DIR, dry_run=args.dry_run)
         print(f"Deleted {deleted} empty directories")
@@ -343,6 +360,32 @@ def main():
         print(
             f"Built backup cache with {len(final_backup_repos)} backup repositories"
         )
+        if args.remote:
+            if not shutil.which("forgejo-nullsum"):
+                print("error: forgejo-nullsum not found", file=sys.stderr)
+                parser.exit(1)
+            remote_only_repos = []
+            try:
+                proc = subprocess.run(
+                    ["forgejo-nullsum", "list", "--json"],
+                    capture_output=True,
+                    check=True,
+                )
+                repos_json = json.loads(proc.stdout)
+                for item in repos_json:
+                    repo_dir = (
+                        CODE_ROOT_DIR / SrcName.NULLSUM_NET / item["name"]
+                    )
+                    if not repo_dir.is_dir():
+                        repo_str = f"{SrcName.NULLSUM_NET}:{item['name']}"
+                        remote_only_repos.append(repo_str)
+            except subprocess.CalledProcessError as e:
+                print(f"error: forgejo-nullsum failed: {e}", file=sys.stderr)
+                parser.exit(1)
+            REMOTE_CACHE_PATH.write_text("\n".join(sorted(remote_only_repos)))
+            print(
+                f"Built remote cache with {len(remote_only_repos)} repositories"
+            )
     elif args.repo is None:
         for repo_dir in _find_git_repos(pathlib.Path().absolute()):
             print(repo_dir)
@@ -371,6 +414,15 @@ def main():
                     cache_modified = True
                     cache.remove(repo)
         else:
+            if args.create:
+                if host != SrcName.NULLSUM_NET:
+                    print(
+                        "error: --create only supported for nullsum",
+                        file=sys.stderr,
+                    )
+                    parser.exit(1)
+                subprocess.run(["forgejo-nullsum", "create", path], check=True)
+
             if not repo_dir.exists():
                 if host == SrcName.KDE_INVENT:
                     repo = f"https://{host}/{path}"
@@ -388,6 +440,14 @@ def main():
                 if repo in cache:
                     cache.remove(repo)
                 cache.append(repo)
+
+                # Remove from remote cache if present
+                REMOTE_CACHE_PATH.touch()
+                remote_cache = REMOTE_CACHE_PATH.read_text().splitlines()
+                repo_str = f"{host}:{path}"
+                if repo_str in remote_cache:
+                    remote_cache.remove(repo_str)
+                    REMOTE_CACHE_PATH.write_text("\n".join(remote_cache))
             print(repo_dir)
 
     if cache_modified:

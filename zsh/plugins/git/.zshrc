@@ -1,5 +1,7 @@
 if command -v git > /dev/null; then
     gs() {
+        local only_remote=0
+        local update_cache=0
         local use_backup=0
         local use_clone_from_backup=0
         local -a args
@@ -7,30 +9,22 @@ if command -v git > /dev/null; then
         # Parse flags
         for arg in "$@"; do
             case "$arg" in
-                --backup)
+                --create)
+                    args+=("--create")
+                    ;;
+                -u|--update)
+                    update_cache=1
+                    ;;
+                -b|--backup)
                     use_backup=1
                     ;;
-                --clone-from-backup)
+                -c|--clone-from-backup)
                     use_clone_from_backup=1
                     ;;
+                -r|--remote)
+                    only_remote=1
+                    ;;
                 -*)
-                    # Handle combined short flags
-                    local i
-                    local all_recognized=1
-                    for (( i=1; i<${#arg}; i++ )); do
-                        case "${arg:$i:1}" in
-                            b)
-                                use_backup=1
-                                ;;
-                            c)
-                                use_clone_from_backup=1
-                                ;;
-                            *)
-                                all_recognized=0
-                                break
-                                ;;
-                        esac
-                    done
                     if [[ $all_recognized -eq 0 ]]; then
                         echo "error: unrecognized flag: $arg" >&2
                         return 1
@@ -41,6 +35,10 @@ if command -v git > /dev/null; then
                     ;;
             esac
         done
+
+        if [[ $update_cache -eq 1 ]]; then
+            git-sync --build-cache --remote
+        fi
 
         # If --clone-from-backup is set, select from backup cache and clone to regular location
         if [[ $use_clone_from_backup -eq 1 ]]; then
@@ -94,8 +92,14 @@ if command -v git > /dev/null; then
                         return 130
                     fi
                     target="backup/$target"
+                elif [[ $only_remote -eq 1 ]]; then
+                    target="$(git-sync --show-remote-cache | fzf --tac --exact --no-sort)"
+                    if [ -z "$target" ]; then
+                        return 130
+                    fi
+                    target="backup/$target"
                 else
-                    target="$(git-sync --show-cache | fzf --tac --exact --no-sort)"
+                    target="$(git-sync --show-cache --remote | fzf --tac --exact --no-sort)"
                     if [ -z "$target" ]; then
                         return 130
                     fi
