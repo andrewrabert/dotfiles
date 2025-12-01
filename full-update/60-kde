@@ -270,11 +270,6 @@ async def configure_kde():
                         shortcut="Home Page",
                     ),
                     GlobalShortcut(
-                        name="Lounge HTPC Picture Toggle",
-                        exec="lounge-htpc-picture-toggle.sh",
-                        shortcut="Menu",
-                    ),
-                    GlobalShortcut(
                         name="Lounge HTPC Power Toggle",
                         exec="lounge-htpc-power-toggle.sh",
                         shortcut="Menu",
