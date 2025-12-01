@@ -28,10 +28,10 @@ power_on() {
 
 case "$1" in
     brightness-max)
-        http_request /brightness/max
+        http_request /picture/brightness/set/50
         ;;
     brightness-min)
-        http_request /brightness/min
+        http_request /picture/brightness/set/0
         ;;
     volume-up)
         http_request /volume/up
