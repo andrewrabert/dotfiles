@@ -1,2 +1,2 @@
 #!/usr/bin/env sh
-lounge-htpc-cli power-toggle
+lounge-htpc-cli power-off

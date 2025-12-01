@@ -1,2 +1,2 @@
 #!/usr/bin/env sh
-exec lounge-htpc-cli picture-toggle
+exec lounge-htpc-cli power-toggle

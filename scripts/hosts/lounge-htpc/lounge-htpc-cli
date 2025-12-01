@@ -16,6 +16,16 @@ is_playing() {
     [ "$(playerctl status 2>/dev/null)" = "Playing" ]
 }
 
+power_off() {
+    playerctl pause
+    http_request /power/off
+}
+
+power_on() {
+    http_request /power/on
+    playerctl play
+}
+
 case "$1" in
     brightness-max)
         http_request /brightness/max
@@ -32,23 +42,20 @@ case "$1" in
     volume-mute-toggle)
         http_request /mute/toggle
         ;;
+    power-off)
+        power_off
+        ;;
+    power-on)
+        power_on
+        ;;
     power-toggle)
         if is_power_off; then
-            http_request /power/toggle
-            playerctl play
+            power_on
         else
-            playerctl pause
-            http_request /power/toggle
-        fi
-        ;;
-    picture-toggle)
-        if is_playing; then
-            http_request /picture/toggle
-        else
-            http_request /power/toggle
+            power_off
         fi
         ;;
     *)
-        echo 'usage: (picture-toggle|power-toggle|volume-up|volume-down|volume-mute-toggle)' >&2
+        echo 'usage: (brightness-min|brightness-max|power-toggle|power-on|power-off|volume-up|volume-down|volume-mute-toggle)' >&2
         exit 1
 esac
