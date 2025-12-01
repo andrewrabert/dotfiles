@@ -17,13 +17,13 @@ is_playing() {
 }
 
 power_off() {
-    playerctl pause
+    playerctl pause || true
     http_request /power/off
 }
 
 power_on() {
     http_request /power/on
-    playerctl play
+    playerctl play || true
 }
 
 case "$1" in
