@@ -146,7 +146,7 @@ def parse_repo(repo):
     repo = repo.lower()
     if ":" not in repo:
         parts = repo.split("/")
-        if len(parts) < 3:
+        if len(parts) < 2:
             raise ValueError("invalid repo")
         host = parts[0]
         path = "/".join(parts[1:])
@@ -394,6 +394,8 @@ def main():
         repo_dir = CODE_ROOT_DIR / args.repo
         if repo_dir.exists():
             repo = args.repo
+            # Still need to parse to get host and path for later use
+            _, host, path = parse_repo(repo)
         else:
             repo = args.repo.lower()
             repo_dir, host, path = parse_repo(repo)
