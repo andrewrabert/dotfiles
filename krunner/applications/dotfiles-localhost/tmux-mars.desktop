@@ -1,6 +1,0 @@
-[Desktop Entry]
-Name=tmux (mars)
-Comment=tmux mars
-Type=Application
-Icon=foot
-Exec=foot --title tmux-mars --app-id tmux-mars -- zsh -ic 'ssh -t mars -- zsh -lic tmux-attach'
