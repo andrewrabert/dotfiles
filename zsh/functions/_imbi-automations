@@ -1,0 +1,38 @@
+#compdef imbi-automations
+
+# Zsh completion script for imbi-automations CLI
+# Generated for imbi-automations workflow automation tool
+
+_imbi-automations() {
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  local -a project_selectors=(
+    '(--project-type --all-projects --github-repository --github-organization --all-github-repositories --resume)--project-id[Process a single project by Project ID]:project id:_guard "[0-9]#" "numeric id"'
+    '(--project-id --all-projects --github-repository --github-organization --all-github-repositories --resume)--project-type[Process all projects of a specific type slug]:type slug:'
+    '(--project-id --project-type --github-repository --github-organization --all-github-repositories --resume)--all-projects[Process all projects]'
+    '(--project-id --project-type --all-projects --github-organization --all-github-repositories --resume)--github-repository[Process a single GitHub repository by URL]:repository url:'
+    '(--project-id --project-type --all-projects --github-repository --all-github-repositories --resume)--github-organization[Process all repositories in a GitHub organization]:organization:'
+    '(--project-id --project-type --all-projects --github-repository --github-organization --resume)--all-github-repositories[Process all GitHub repositories across all organizations]'
+    '(--project-id --project-type --all-projects --github-repository --github-organization --all-github-repositories)--resume[Resume from previous error state directory]:error directory:_files -/'
+  )
+
+  _arguments -C \
+    '1:config file:_files -g "*.toml"' \
+    '2:workflow directory:_directories' \
+    "${project_selectors[@]}" \
+    '--start-from-project[Skip all projects up to and including this project]:project id or slug:' \
+    '--max-concurrency[How many concurrent tasks to run at a time]:max concurrency:_guard "[0-9]#" "number"' \
+    '--exit-on-error[Exit immediately when any action fails]' \
+    '--preserve-on-error[Preserve working directory on error for debugging]' \
+    '--dry-run[Save repository state instead of pushing changes or creating pull requests]' \
+    '--cache-dir[Directory for caching Imbi metadata]:cache directory:_directories' \
+    '--dry-run-dir[Directory to save repository state when --dry-run is used]:dry-run directory:_directories' \
+    '--error-dir[Directory to save error states when --preserve-on-error is used]:error directory:_directories' \
+    '(-v --verbose)'{-v,--verbose}'[Show action start/end INFO messages]' \
+    '--debug[Enable debug logging (shows all debug messages)]' \
+    '(-V --version)'{-V,--version}'[Show program version number and exit]' \
+    '(-h --help)'{-h,--help}'[Show help message and exit]'
+}
+
+_imbi-automations "$@"

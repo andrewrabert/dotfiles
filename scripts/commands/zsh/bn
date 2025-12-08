@@ -1,0 +1,35 @@
+#!/usr/bin/env zsh
+# basename - get filename component of path
+
+[[ $1 == --help ]] && set -- -h
+while getopts "h" opt; do
+  case $opt in
+    h)
+      cat <<'EOF'
+Usage: bn [-h] path...
+
+Get filename component of path(s).
+
+Options:
+  -h    show this help
+EOF
+      exit 0
+      ;;
+  esac
+done
+shift $((OPTIND - 1))
+
+if [[ $# -eq 0 ]]; then
+  if [[ -t 0 ]]; then
+    print -u2 "bn: no path specified"
+    exit 1
+  fi
+  while IFS= read -r line; do
+    print -r -- ${line:A:t}
+  done
+  exit 0
+fi
+
+for p in "$@"; do
+  print -r -- ${p:A:t}
+done

@@ -1,0 +1,85 @@
+#!/usr/bin/env zsh
+# which replacement - shows resolved paths, warns on aliases/functions/builtins
+
+resolve=1
+[[ $1 == --help ]] && set -- -h
+while getopts "nh" opt; do
+  case $opt in
+    n) resolve=0 ;;
+    h)
+      cat <<'EOF'
+Usage: wh [-n] [-h] command...
+
+which replacement that shows resolved paths by default.
+
+Options:
+  -n    do not resolve symlinks
+  -h    show this help
+EOF
+      exit 0
+      ;;
+  esac
+done
+shift $((OPTIND - 1))
+
+if [[ $# -eq 0 ]]; then
+  if [[ -t 0 ]]; then
+    print -u2 "wh: no command specified"
+    exit 1
+  fi
+  while IFS= read -r line; do
+    if (( resolve )); then
+      print -r -- ${line:A}
+    else
+      print -r -- $line
+    fi
+  done
+  exit 0
+fi
+
+ret=0
+for cmd in "$@"; do
+  type_info=$(whence -w "$cmd" 2>/dev/null)
+  cmd_type=${type_info##*: }
+
+  cmd_path=$(whence -p "$cmd" 2>/dev/null)
+  not_executable=0
+
+  # search PATH for non-executable files if whence didn't find it
+  if [[ -z $cmd_path ]]; then
+    for dir in "${path[@]}"; do
+      [[ -f $dir/$cmd ]] || continue
+      cmd_path=$dir/$cmd
+      not_executable=1
+      break
+    done
+  fi
+
+  if [[ -n $cmd_path && ($cmd_type == "alias" || $cmd_type == "function" || $cmd_type == "builtin") ]]; then
+    if [[ -t 2 ]]; then
+      print -u2 -P "%F{yellow}wh: $cmd is a $cmd_type but also exists at $cmd_path%f"
+    else
+      print -u2 "wh: $cmd is a $cmd_type but also exists at $cmd_path"
+    fi
+  fi
+
+  if (( not_executable )); then
+    if [[ -t 2 ]]; then
+      print -u2 -P "%F{yellow}wh: $cmd_path is not executable%f"
+    else
+      print -u2 "wh: $cmd_path is not executable"
+    fi
+  fi
+
+  if [[ -n $cmd_path ]]; then
+    if (( resolve )); then
+      print -r -- ${cmd_path:A}
+    else
+      print -r -- $cmd_path
+    fi
+  else
+    print -u2 "wh: $cmd not found"
+    ret=1
+  fi
+done
+exit $ret

@@ -21,7 +21,7 @@ def main():
     args = parser.parse_args()
 
     home = pathlib.Path.home()
-    base = home / "syncthing/default/notes/Claude/home"
+    base = home / "src/notes/Claude/home"
     target = args.path.resolve()
 
     if not target.is_relative_to(home):

@@ -1,0 +1,4 @@
+#compdef bn
+_arguments \
+  '(-h --help)'{-h,--help}'[show help]' \
+  '*:path:_files'

@@ -1,0 +1,33 @@
+#!/usr/bin/env zsh
+# Create symlink, error if target exists and differs
+
+if [[ $1 == -h || $1 == --help ]]; then
+  cat <<'EOF'
+Usage: symlink-file target linkname
+
+Create symlink. Does nothing if correct symlink exists.
+Errors if linkname exists but differs.
+EOF
+  exit 0
+fi
+
+if [[ $# -ne 2 ]]; then
+  print -u2 "symlink-file: requires exactly 2 arguments"
+  exit 1
+fi
+
+target=$1
+link=$2
+
+if [[ -L $link ]]; then
+  [[ $(readlink "$link") == $target ]] && exit 0
+  print -u2 "symlink-file: $link exists but points to $(readlink "$link")"
+  exit 1
+fi
+
+if [[ -e $link ]]; then
+  print -u2 "symlink-file: $link exists and is not a symlink"
+  exit 1
+fi
+
+ln -s "$target" "$link"

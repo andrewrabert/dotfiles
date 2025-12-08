@@ -1,0 +1,36 @@
+#!/usr/bin/env zsh
+# dirname - get directory component of path
+
+[[ $1 == --help ]] && set -- -h
+while getopts "h" opt; do
+  case $opt in
+    h)
+      cat <<'EOF'
+Usage: dn [-h] path...
+
+Get directory component of path(s).
+
+Options:
+  -h    show this help
+EOF
+      exit 0
+      ;;
+  esac
+done
+shift $((OPTIND - 1))
+
+if [[ $# -eq 0 ]]; then
+  if [[ -t 0 ]]; then
+    print -u2 "dn: no path specified"
+    exit 1
+  fi
+  local line
+  while IFS= read -r line; do
+    print -r -- ${line:A:h}
+  done
+  exit 0
+fi
+
+for p in "$@"; do
+  print -r -- ${p:A:h}
+done
