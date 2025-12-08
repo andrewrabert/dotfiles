@@ -24,6 +24,12 @@ import sys
 import pyalpm
 import tqdm
 
+# Use system PATH for subcommands (exclude uv/venv directories)
+os.environ["PATH"] = ":".join(
+    p for p in os.environ.get("PATH", "").split(":")
+    if ".cache/uv" not in p and "/.venv/" not in p
+)
+
 LOCK_FILE = (
     pathlib.Path(os.environ.get("XDG_RUNTIME_DIR", "/tmp"))
     / "sol-repotool.lock"
