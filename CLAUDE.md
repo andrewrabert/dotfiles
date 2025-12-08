@@ -1,0 +1,1 @@
+/home/ar/syncthing/default/notes/Claude/home/.dotfiles/public/CLAUDE.local.md
