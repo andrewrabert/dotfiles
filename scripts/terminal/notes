@@ -6,7 +6,7 @@ import datetime
 import pathlib
 import sys
 
-VAULT = pathlib.Path.home() / "notes"
+VAULT = pathlib.Path.home() / "src/notes"
 
 
 class UserError(Exception):
@@ -45,7 +45,9 @@ async def cmd_daily(args):
         try:
             date = datetime.datetime.strptime(args.date, "%Y-%m-%d").date()
         except ValueError:
-            raise UserError(f"invalid date format '{args.date}', expected YYYY-MM-DD")
+            raise UserError(
+                f"invalid date format '{args.date}', expected YYYY-MM-DD"
+            )
     else:
         date = datetime.date.today()
     year = str(date.year)
@@ -137,7 +139,9 @@ async def main():
 
     p_daily = subparsers.add_parser("daily", help="get daily note path")
     p_daily.add_argument("date", nargs="?", default=None, help="YYYY-MM-DD")
-    p_daily.add_argument("--dir", action="store_true", help="return directory path only")
+    p_daily.add_argument(
+        "--dir", action="store_true", help="return directory path only"
+    )
     p_daily.set_defaults(func=cmd_daily)
 
     p_clean = subparsers.add_parser("clean", help="remove empty notes")

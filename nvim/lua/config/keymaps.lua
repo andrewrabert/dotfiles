@@ -1,8 +1,12 @@
 -- buffer navigation
 vim.keymap.set("n", "<leader>n", ":bn!<CR>")
 vim.keymap.set("n", "<leader>p", ":bp!<CR>")
+vim.keymap.set("n", "<leader>bd", ":bd<CR>")
 vim.keymap.set("n", "<leader>3", ":b#<CR>")
 vim.keymap.set("n", "<leader>l", ":buffers<CR>:buffer<Space>")
+for i = 1, 9 do
+	vim.keymap.set("n", "<leader>b" .. i, ":" .. i .. "b<CR>")
+end
 
 -- toggles
 local silent = { silent = true }

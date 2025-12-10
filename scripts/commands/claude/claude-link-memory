@@ -1,12 +1,13 @@
 #!/usr/bin/env -S uv --quiet run --script
 
 import argparse
+import os
 import pathlib
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Create CLAUDE.local.md mirrored under notes dir"
+        description="Symlink CLAUDE.local.md outside repo for persistence"
     )
     parser.add_argument(
         "path",
@@ -18,17 +19,27 @@ def main():
     parser.add_argument(
         "--content", "-c", default="", help="Content for the file"
     )
+    default_base = pathlib.Path.home() / ".claude/local-memory"
+    parser.add_argument(
+        "--base",
+        "-b",
+        type=pathlib.Path,
+        default=os.environ.get("CLAUDE_MEMORY_BASE", default_base),
+        help=f"Base directory for storage (default: {default_base})",
+    )
     args = parser.parse_args()
 
+    base = pathlib.Path(args.base).expanduser()
+    base.mkdir(parents=True, exist_ok=True)
     home = pathlib.Path.home()
-    base = home / "src/notes/Claude/home"
     target = args.path.resolve()
 
-    if not target.is_relative_to(home):
-        raise SystemExit(f"Error: {target} is not under {home}")
-
-    rel = target.relative_to(home)
-    storage = base / rel / "CLAUDE.local.md"
+    if target.is_relative_to(home):
+        rel = target.relative_to(home)
+        storage = base / "from_home" / rel / "CLAUDE.local.md"
+    else:
+        rel = pathlib.Path(*target.parts[1:])
+        storage = base / "from_root" / rel / "CLAUDE.local.md"
     link = target / "CLAUDE.local.md"
 
     if link.exists() or link.is_symlink():
