@@ -1,40 +1,19 @@
 if command -v git > /dev/null; then
     gs() {
-        local only_remote=0
-        local update_cache=0
-        local use_backup=0
-        local use_clone_from_backup=0
-        local -a args
+        local -a opt_u opt_b opt_c opt_r opt_create
+        zparseopts -D -E -K -- \
+            u=opt_u -update=opt_u \
+            b=opt_b -backup=opt_b \
+            c=opt_c -clone-from-backup=opt_c \
+            r=opt_r -remote=opt_r \
+            -create=opt_create || return 1
 
-        # Parse flags
-        for arg in "$@"; do
-            case "$arg" in
-                --create)
-                    args+=("--create")
-                    ;;
-                -u|--update)
-                    update_cache=1
-                    ;;
-                -b|--backup)
-                    use_backup=1
-                    ;;
-                -c|--clone-from-backup)
-                    use_clone_from_backup=1
-                    ;;
-                -r|--remote)
-                    only_remote=1
-                    ;;
-                -*)
-                    if [[ $all_recognized -eq 0 ]]; then
-                        echo "error: unrecognized flag: $arg" >&2
-                        return 1
-                    fi
-                    ;;
-                *)
-                    args+=("$arg")
-                    ;;
-            esac
-        done
+        local update_cache=$#opt_u
+        local use_backup=$#opt_b
+        local use_clone_from_backup=$#opt_c
+        local only_remote=$#opt_r
+        local -a args=("$@")
+        [[ -n $opt_create ]] && args+=(--create)
 
         if [[ $update_cache -eq 1 ]]; then
             git-sync --build-cache --remote
