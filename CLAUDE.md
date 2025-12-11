@@ -1,6 +1,6 @@
 # Dotfiles Repository
 
-Personal configuration files for Arch Linux with KDE Plasma desktop.
+Personal configuration files. Cross-platform (Arch Linux, macOS, other Linux). Desktop uses Arch + KDE Plasma.
 
 ## Structure
 
