@@ -16,6 +16,7 @@ EXPECTED_PACKAGES = {
     "curl",
     "curlie",
     "dash-shell",
+    "diffutils",  # added mainly so zsh diff completion completes second path
     "exiftool",
     "exiv2",
     "fd",

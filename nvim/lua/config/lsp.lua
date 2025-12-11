@@ -1,5 +1,75 @@
 -- Modern LSP setup using vim.lsp.start instead of deprecated lspconfig
 
+-- Cache for uv script python paths (filepath -> python_path)
+local uv_python_cache = {}
+
+-- Check if a buffer is a uv inline script (has --script in shebang)
+local function is_uv_script(bufnr)
+	local first_line = vim.api.nvim_buf_get_lines(bufnr, 0, 1, false)[1] or ""
+	return first_line:match("^#!/usr/bin/env.*uv.*%-%-script") ~= nil
+end
+
+-- Async resolve uv script python path and restart LSP
+local function resolve_uv_python_async(bufnr, filepath)
+	if uv_python_cache[filepath] then
+		return
+	end
+
+	-- Use uv sync --script to resolve env without executing the script
+	vim.system(
+		{ "uv", "sync", "--script", filepath },
+		{ text = true },
+		function(result)
+			local output = (result.stdout or "") .. (result.stderr or "")
+			-- Parse: "Using script environment at: /path/to/env"
+			local env_path = output:match("Using script environment at: ([^\n]+)")
+			if env_path then
+				local python_path = env_path .. "/bin/python"
+				uv_python_cache[filepath] = python_path
+				-- Restart pyright with correct python path
+				vim.schedule(function()
+					if vim.api.nvim_buf_is_valid(bufnr) then
+						for _, client in ipairs(vim.lsp.get_clients({ bufnr = bufnr, name = "pyright" })) do
+							client:stop()
+						end
+						vim.api.nvim_exec_autocmds("FileType", { buffer = bufnr })
+					end
+				end)
+			end
+		end
+	)
+end
+
+-- Get python path for a buffer (sync, uses cache)
+local function get_python_path(bufnr)
+	local filepath = vim.api.nvim_buf_get_name(bufnr)
+
+	-- Check uv cache first
+	if uv_python_cache[filepath] then
+		return uv_python_cache[filepath]
+	end
+
+	-- Search for .venv/env directories
+	local current_dir = vim.fn.expand("#" .. bufnr .. ":p:h")
+	local venv_names = { ".venv", "env" }
+
+	local function find_venv(dir)
+		for _, venv_name in ipairs(venv_names) do
+			local venv_python = dir .. "/" .. venv_name .. "/bin/python"
+			if vim.fn.filereadable(venv_python) == 1 then
+				return venv_python
+			end
+		end
+		local parent = vim.fn.fnamemodify(dir, ":h")
+		if parent ~= dir and parent ~= "/" then
+			return find_venv(parent)
+		end
+		return nil
+	end
+
+	return find_venv(current_dir)
+end
+
 -- Use an on_attach function to only map the following keys
 -- after the language server attaches to the current buffer
 local on_attach = function(client, bufnr)
@@ -65,34 +135,19 @@ local servers = {
 			"pyrightconfig.json",
 		},
 		settings = function(root_dir, bufnr)
-			local python_path = nil
-			-- Start from the current file's directory and search up
-			local current_dir = vim.fn.expand("#" .. bufnr .. ":p:h")
-			local venv_names = { ".venv", "env" }
+			local filepath = vim.api.nvim_buf_get_name(bufnr)
 
-			local function find_venv(dir)
-				for _, venv_name in ipairs(venv_names) do
-					local venv_python = dir .. "/" .. venv_name .. "/bin/python"
-					if vim.fn.filereadable(venv_python) == 1 then
-						return venv_python
-					end
-				end
-				-- Check parent directory
-				local parent = vim.fn.fnamemodify(dir, ":h")
-				if parent ~= dir and parent ~= "/" then
-					return find_venv(parent)
-				end
-				return nil
+			-- For uv scripts, trigger async resolution if not cached
+			if is_uv_script(bufnr) and not uv_python_cache[filepath] then
+				resolve_uv_python_async(bufnr, filepath)
 			end
-
-			python_path = find_venv(current_dir)
 
 			return {
 				pyright = {
 					disableOrganizeImports = true,
 				},
 				python = {
-					pythonPath = python_path,
+					pythonPath = get_python_path(bufnr),
 					analysis = {
 						ignore = { "*" },
 						typeCheckingMode = "off",

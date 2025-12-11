@@ -26,38 +26,59 @@ def all_files(*paths):
     return sorted(files)
 
 
-async def find_uv_scripts(directory: pathlib.Path) -> list[pathlib.Path]:
-    """Find all executable files with uv run shebang."""
+HEADER_READ_SIZE = 1024
+
+
+async def find_uv_scripts(
+    directory: pathlib.Path, verbose: bool = False, seen: set | None = None
+) -> list[pathlib.Path]:
+    """Find all executable files with uv run shebang and PEP 723 metadata."""
+    if seen is None:
+        seen = set()
     uv_scripts = []
 
     for file_path in all_files(directory):
-        with open(file_path, "r") as handle:
-            try:
-                parts = handle.readline().strip().split()
-            except UnicodeDecodeError:
-                continue
-            if (
-                parts[0] == "#!/usr/bin/env"
-                and "uv" in parts
-                and "run" in parts
-            ):
-                uv_scripts.append(file_path.resolve().absolute())
+        resolved = file_path.resolve().absolute()
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+
+        try:
+            with file_path.open("r") as f:
+                header = f.read(HEADER_READ_SIZE)
+        except (UnicodeDecodeError, OSError):
+            continue
+
+        # Must have a shebang with uv run
+        shebang = header.split("\n", 1)[0]
+        if not shebang.startswith("#!"):
+            continue
+        if "uv" not in shebang or "run" not in shebang:
+            continue
+
+        # Only include scripts with PEP 723 metadata block
+        if "# /// script" not in header:
+            if verbose:
+                print(f"skipping: no PEP 723 metadata: {resolved}")
+            continue
+
+        if verbose:
+            print(f"found: {resolved}")
+        uv_scripts.append(resolved)
+
     return sorted(set(uv_scripts))
 
 
-async def update_script(script_path: pathlib.Path) -> bool:
+async def update_script(script_path: pathlib.Path, verbose: bool = False) -> bool:
     """Update dependencies for a single PEP 723 script."""
+    cmd = ["uv", "sync", "--script", str(script_path), "--upgrade"]
+    if not verbose:
+        cmd.append("--quiet")
     try:
         proc = await asyncio.create_subprocess_exec(
-            "uv",
-            "run",
-            "--script",
-            "--upgrade",
-            "--quiet",
-            str(script_path),
-            "--help",
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL,
+            *cmd,
+            stdout=None if verbose else asyncio.subprocess.DEVNULL,
+            stderr=None if verbose else asyncio.subprocess.DEVNULL,
         )
         await proc.wait()
         return proc.returncode == 0
@@ -65,11 +86,11 @@ async def update_script(script_path: pathlib.Path) -> bool:
         return False
 
 
-async def update_all_scripts(scripts: list[pathlib.Path]) -> bool:
+async def update_all_scripts(scripts: list[pathlib.Path], verbose: bool = False) -> bool:
     """Update all scripts concurrently."""
     tasks = []
     for script in scripts:
-        task = asyncio.create_task(update_script(script))
+        task = asyncio.create_task(update_script(script, verbose))
         tasks.append((script, task))
 
     had_error = False
@@ -94,21 +115,65 @@ async def main():
     """Main function."""
     parser = argparse.ArgumentParser(description="update all PEP 723 scripts")
     parser.add_argument(
-        "directory",
-        nargs="?",
-        default=".",
+        "paths",
+        nargs="*",
+        default=["."],
         type=pathlib.Path,
-        help="directory to scan",
+        help="files or directories to process",
+    )
+    parser.add_argument(
+        "-v", "--verbose",
+        action="store_true",
+        help="show detailed output",
     )
     args = parser.parse_args()
 
-    scripts = await find_uv_scripts(args.directory)
+    scripts = set()
+    warnings = []
+    seen = set()
+
+    for path in args.paths:
+        resolved = path.resolve().absolute()
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+
+        if not path.exists():
+            warnings.append(f"path not found: {path}")
+            continue
+
+        if path.is_dir():
+            for script in await find_uv_scripts(path, args.verbose, seen):
+                scripts.add(script)
+        elif path.is_file():
+            # For explicit files, check if valid uv script
+            try:
+                with path.open("r") as f:
+                    header = f.read(HEADER_READ_SIZE)
+            except (UnicodeDecodeError, OSError):
+                warnings.append(f"cannot read: {path}")
+                continue
+
+            shebang = header.split("\n", 1)[0]
+            if not shebang.startswith("#!") or "uv" not in shebang or "run" not in shebang:
+                warnings.append(f"not a uv script: {resolved}")
+                continue
+            if "# /// script" not in header:
+                warnings.append(f"no PEP 723 metadata: {resolved}")
+                continue
+
+            scripts.add(resolved)
+
+    scripts = sorted(scripts)
 
     had_error = False
     if scripts:
-        had_error = await update_all_scripts(scripts)
+        had_error = await update_all_scripts(scripts, args.verbose)
 
-    if had_error:
+    for warning in warnings:
+        print(f"warning: {warning}", file=sys.stderr)
+
+    if had_error or warnings:
         sys.exit(1)
 
 
