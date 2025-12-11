@@ -281,6 +281,7 @@ if HOSTNAME in ("sol", "mars", "phobos"):
             "hugo",
             "hyperfine",
             "iftop",
+            "imagemagick",
             "inetutils",  # hostname command
             "innoextract",
             "iperf3",
@@ -394,8 +395,6 @@ if HOSTNAME in ("mars", "phobos"):
     EXPECTED_PACKAGES.update(
         {
             "86box",
-            "lsdvd",
-            "dvd+rw-tools",
             "android-tools",
             "android-udev",
             "audacity",
@@ -405,6 +404,7 @@ if HOSTNAME in ("mars", "phobos"):
             "docker",
             "docker-compose",
             "dolphin",
+            "dvd+rw-tools",
             "element-desktop",
             "flatpak-builder",
             "foliate",
@@ -421,11 +421,15 @@ if HOSTNAME in ("mars", "phobos"):
             "krfb",
             "krita",
             "kubectl",
+            "lsdvd",
+            "makemkv",
+            "mkvalidator",
             "mkvtoolnix-gui",
             "mtpfs",
             "ntfydesktop",
             "obs-studio",
             "okular",
+            "opentoonz",
             "plasma6-runners-emojirunner",
             "podman",
             "rawtherapee",
@@ -462,7 +466,14 @@ if HOSTNAME in ("mars", "phobos"):
     )
 
 EXPECTED_PACKAGE_DEPENDENCIES = {
+    "86box": {
+        "86box-roms",
+    },
+    "asusctl": {
+        "supergfxctl",
+    },
     "cdemu-daemon": {
+        "pulse-native-provider",
         "vhba-module-dkms",
     },
     "cmake": {
@@ -474,7 +485,6 @@ EXPECTED_PACKAGE_DEPENDENCIES = {
         "nvchecker",
     },
     "digikam": {
-        "darktable",
         "hugin",
         "qt6-imageformats",
     },
@@ -571,6 +581,10 @@ EXPECTED_PACKAGE_DEPENDENCIES = {
         "perl-archive-zip",
         "perl-io-compress-brotli",
     },
+    "pipewire": {
+        "pipewire-alsa",
+        "pipewire-jack",
+    },
     "print-manager": {
         "system-config-printer",
     },
@@ -608,20 +622,6 @@ EXPECTED_PACKAGE_DEPENDENCIES = {
         "gst-plugins-base-libs",
         "gst-plugins-good",
         "gst-plugins-ugly",
-        "lib32-alsa-lib",
-        "lib32-alsa-plugins",
-        "lib32-gnutls",
-        "lib32-gst-plugins-base",
-        "lib32-gst-plugins-base-libs",
-        "lib32-gst-plugins-good",
-        "lib32-libcups",
-        "lib32-libpulse",
-        "lib32-libxcomposite",
-        "lib32-libxinerama",
-        "lib32-opencl-icd-loader",
-        "lib32-pcsclite",
-        "lib32-sdl2-compat",
-        "lib32-v4l-utils",
         "libgphoto2",
         "libpulse",
         "libxcomposite",
@@ -700,7 +700,6 @@ if HOSTNAME in ("mars", "phobos"):
         {
             "apparmor",
             "btrfs-progs",
-            "cni-plugins",
             "fuse-overlayfs",
             "podman-compose",
             "slirp4netns",
@@ -746,6 +745,14 @@ if HOSTNAME in ("lounge-htpc", "mars", "phobos"):
     EXPECTED_PACKAGES.update(
         {
             "plymouth",
+            "plymouth-kcm",
+        }
+    )
+
+if HOSTNAME == "mars":
+    EXPECTED_PACKAGES.update(
+        {
+            "digikam",
         }
     )
 
@@ -755,6 +762,7 @@ if HOSTNAME == "phobos":
             "linux-flowx13",
             "linux-flowx13-headers",
             "plasma-keyboard",
+            "rog-control-center",
         }
     )
 
@@ -911,7 +919,9 @@ async def ensure_packages():
 
     if missing:
         print("Installing missing packages ...")
-        await Pacman.install(missing, asexplicit=True)
+        # asexplicit=True will make deps explicit
+        # await Pacman.install(missing, asexplicit=True)
+        await Pacman.install(missing, asexplicit=False)
 
 
 async def ensure_package_dependencies():

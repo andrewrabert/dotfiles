@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+set -eu
+
+show_help() {
+    cat << EOF
+Usage: $(basename "${0}") <host1> <host2>
+
+Compare explicitly installed packages between two hosts.
+EOF
+}
+
+if [ ${#} -ne 2 ]; then
+    show_help
+    exit 1
+fi
+
+HOST1="${1}"
+HOST2="${2}"
+CURRENT_HOST="$(hostname)"
+
+section() {
+    local title="${1}"
+    local content="${2}"
+
+    if [ -n "${content}" ]; then
+        printf '\n=== %s ===\n' "${title}"
+        echo "${content}"
+    fi
+}
+
+get_packages() {
+    local host="${1}"
+    local cmd="${2}"
+
+    if [ "${host}" = "${CURRENT_HOST}" ]; then
+        ${cmd}
+    else
+        ssh "${host}" "${cmd}"
+    fi
+}
+
+# Fetch package lists
+HOST1_EXPLICIT="$(get_packages "${HOST1}" "pacman -Qqe" | sort)"
+HOST1_ALL="$(get_packages "${HOST1}" "pacman -Qq" | sort)"
+HOST2_EXPLICIT="$(get_packages "${HOST2}" "pacman -Qqe" | sort)"
+HOST2_ALL="$(get_packages "${HOST2}" "pacman -Qq" | sort)"
+
+# Explicit on host2, not on host1 at all
+section "Explicit on ${HOST2}, not on ${HOST1}" \
+    "$(comm -23 <(echo "${HOST2_EXPLICIT}") <(echo "${HOST1_ALL}"))"
+
+# Explicit on host1, not on host2 at all
+section "Explicit on ${HOST1}, not on ${HOST2}" \
+    "$(comm -23 <(echo "${HOST1_EXPLICIT}") <(echo "${HOST2_ALL}"))"
+
+# Explicit on host2, implicit on host1
+section "Explicit on ${HOST2}, implicit on ${HOST1}" \
+    "$(comm -12 <(comm -23 <(echo "${HOST2_EXPLICIT}") <(echo "${HOST1_EXPLICIT}")) <(echo "${HOST1_ALL}"))"
+
+# Explicit on host1, implicit on host2
+section "Explicit on ${HOST1}, implicit on ${HOST2}" \
+    "$(comm -12 <(comm -23 <(echo "${HOST1_EXPLICIT}") <(echo "${HOST2_EXPLICIT}")) <(echo "${HOST2_ALL}"))"
+
+# Implicit on host1, missing from host2
+section "Implicit on ${HOST1}, missing from ${HOST2}" \
+    "$(comm -23 <(comm -23 <(echo "${HOST1_ALL}") <(echo "${HOST1_EXPLICIT}")) <(echo "${HOST2_ALL}"))"
+
+# Implicit on host2, missing from host1
+section "Implicit on ${HOST2}, missing from ${HOST1}" \
+    "$(comm -23 <(comm -23 <(echo "${HOST2_ALL}") <(echo "${HOST2_EXPLICIT}")) <(echo "${HOST1_ALL}"))"

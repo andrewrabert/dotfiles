@@ -1,0 +1,30 @@
+#!/usr/bin/env -S uv --quiet run --script
+# /// script
+# dependencies = ["pyalpm"]
+# ///
+
+import pyalpm
+
+
+def main():
+    h = pyalpm.Handle(".", "/var/lib/pacman")
+    local = h.get_localdb()
+    syncs = {
+        name: h.register_syncdb(name, 0)
+        for name in ["core", "extra", "multilib"]
+    }
+
+    results = []
+    for pkg in local.pkgcache:
+        if pkg.reason == pyalpm.PKG_REASON_EXPLICIT:
+            for name, db in syncs.items():
+                if db.get_pkg(pkg.name):
+                    results.append(f"{name}/{pkg.name}")
+                    break
+
+    for line in sorted(results):
+        print(line)
+
+
+if __name__ == "__main__":
+    main()
