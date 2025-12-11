@@ -396,7 +396,6 @@ if HOSTNAME in ("mars", "phobos"):
         {
             "86box",
             "android-tools",
-            "android-udev",
             "audacity",
             "base16-shell-preview",
             "chromium",
@@ -468,6 +467,9 @@ if HOSTNAME in ("mars", "phobos"):
 EXPECTED_PACKAGE_DEPENDENCIES = {
     "86box": {
         "86box-roms",
+    },
+    "android-tools": {
+        "android-udev",
     },
     "asusctl": {
         "supergfxctl",
