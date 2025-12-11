@@ -366,7 +366,6 @@ if HOSTNAME in ("mars", "phobos", "lounge-htpc"):
             "haruna",
             "jellyfin-media-player-git",
             "kwalletmanager",
-            "mangohud",
             "noto-fonts",
             "proton-ge-custom-bin",
             "steam",
