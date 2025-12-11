@@ -321,7 +321,6 @@ if HOSTNAME in ("sol", "mars", "phobos"):
             "pyalpm",
             "pyright",
             "python",
-            "rdfind",
             "reflector",
             "ripgrep",
             "rsync",
