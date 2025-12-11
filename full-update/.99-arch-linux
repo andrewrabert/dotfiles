@@ -268,7 +268,6 @@ if HOSTNAME in ("sol", "mars", "phobos"):
             "exfatprogs",
             "fd",
             "ffmpeg",
-            "foot-terminfo",
             "fzf",
             "gifsicle",
             "git",
@@ -341,7 +340,6 @@ if HOSTNAME in ("sol", "mars", "phobos"):
             "tmux",
             "traceroute",
             "transmission-cli",
-            "tree-sitter-cli",
             "typescript-language-server",
             "unace",
             "unrar",
@@ -405,7 +403,7 @@ if HOSTNAME in ("mars", "phobos"):
             "dvd+rw-tools",
             "element-desktop",
             "flatpak-builder",
-            "foliate",
+            "flatpak-kcm",
             "foot",
             "gifski",
             "gimp",
@@ -473,6 +471,9 @@ EXPECTED_PACKAGE_DEPENDENCIES = {
     "asusctl": {
         "supergfxctl",
     },
+    "breeze": {
+        "breeze-gtk",
+    },
     "cdemu-daemon": {
         "pulse-native-provider",
         "vhba-module-dkms",
@@ -496,6 +497,9 @@ EXPECTED_PACKAGE_DEPENDENCIES = {
         "kio-admin",
         "konsole",
         "purpose",
+    },
+    "foot": {
+        "foot-terminfo",
     },
     "gimp": {
         "alsa-lib",
@@ -530,6 +534,9 @@ EXPECTED_PACKAGE_DEPENDENCIES = {
         "poppler-glib",
         "python",
     },
+    "neovim": {
+        "wl-clipboard",
+    },
     "networkmanager": {
         "bluez",
         "dhcpcd",
@@ -547,6 +554,9 @@ EXPECTED_PACKAGE_DEPENDENCIES = {
         "lvm2",
         "qemu-desktop",
         "swtpm",
+    },
+    "kcrash": {
+        "drkonqi",
     },
     "krita": {
         "kimageformats5",
@@ -658,6 +668,7 @@ EXPECTED_PACKAGE_DEPENDENCIES = {
         "jq",
         "poppler",
         "ripgrep",
+        "wl-clipboard",
         "zoxide",
     },
     "yt-dlp": {
