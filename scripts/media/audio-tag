@@ -1,4 +1,4 @@
-#!/usr/bin/env -S uv run --script
+#!/usr/bin/env -S uv --quiet run --script
 # /// script
 # dependencies = [
 #   "pytaglib",
@@ -7,9 +7,10 @@
 """Dump and restore music tags to/from JSON file."""
 
 import argparse
+import importlib.metadata
 import json
+import pathlib
 import sys
-from pathlib import Path
 
 import taglib
 
@@ -45,13 +46,13 @@ def all_files(*roots):
     files = set()
     stack = []
     for path in roots:
-        if path.is_file:
+        if path.is_file():
             files.add(path)
         else:
             stack.append(path)
     while stack:
         for path in stack.pop().iterdir():
-            if path.is_file:
+            if path.is_file():
                 files.add(path)
             else:
                 stack.append(path)
@@ -63,7 +64,7 @@ def is_audio_file(path):
 
 
 def dump_directory_tags(directory, output_file):
-    directory_path = Path(directory).absolute()
+    directory_path = pathlib.Path(directory).absolute()
 
     if not directory_path.exists():
         print(f"Directory does not exist: {directory}", file=sys.stderr)
@@ -74,7 +75,7 @@ def dump_directory_tags(directory, output_file):
     for path in all_files(directory_path):
         if not is_audio_file(path):
             continue
-        all_tags[str(file_path.absolute())] = get_all_tags(path)
+        all_tags[str(path.absolute())] = get_all_tags(path)
 
     if output_file:
         with open(output_file, "w", encoding="utf-8") as f:
@@ -88,7 +89,7 @@ def dump_directory_tags(directory, output_file):
 
 
 def dump_single_file_tags(file_path, output_file):
-    file_path = Path(file_path).absolute()
+    file_path = pathlib.Path(file_path).absolute()
     tags = get_all_tags(file_path)
 
     if output_file:
@@ -105,7 +106,7 @@ def dump_single_file_tags(file_path, output_file):
 
 
 def cmd_dump(args):
-    path_obj = Path(args.path)
+    path_obj = pathlib.Path(args.path)
 
     if path_obj.is_dir():
         dump_directory_tags(args.path, args.output)
@@ -133,7 +134,7 @@ def cmd_restore(args):
     skipped_count = 0
 
     for file_path, new_tags in all_tags.items():
-        if not Path(file_path).exists():
+        if not pathlib.Path(file_path).exists():
             print(f"File not found: {file_path}", file=sys.stderr)
             continue
 
@@ -175,7 +176,7 @@ def cmd_merge(args):
     skipped_count = 0
 
     for file_path, new_tags in all_tags.items():
-        if not Path(file_path).exists():
+        if not pathlib.Path(file_path).exists():
             print(f"File not found: {file_path}", file=sys.stderr)
             continue
 
@@ -282,6 +283,11 @@ def main():
     )
 
     parser.add_argument(
+        "--version",
+        action="version",
+        version=f"pytaglib {importlib.metadata.version('pytaglib')}",
+    )
+    parser.add_argument(
         "-i",
         "--input",
         metavar="FILE",
@@ -322,7 +328,7 @@ def main():
     if args.set or args.delete:
         if not args.path:
             parser.error("Set mode requires file paths")
-        args.files = [Path(p) for p in args.path]
+        args.files = [pathlib.Path(p) for p in args.path]
         cmd_set(args)
     elif args.input:
         if args.input == "-":

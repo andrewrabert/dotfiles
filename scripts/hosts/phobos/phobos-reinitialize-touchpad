@@ -1,0 +1,30 @@
+#!/usr/bin/env sh
+set -eu
+
+if [ "$(id -u)" -ne 0 ]; then
+    exec sudo "${0}" "${@}"
+fi
+
+attempt=1
+max_attempts=5
+
+while [ "${attempt}" -le "${max_attempts}" ]; do
+    echo "Attempt ${attempt}/${max_attempts}: reloading i2c_hid_acpi..."
+    start_time="$(date '+%Y-%m-%d %H:%M:%S')"
+
+    modprobe -r i2c_hid_acpi 2>/dev/null || true
+    sleep 1
+    modprobe i2c_hid_acpi
+    sleep 2
+
+    if ! journalctl --since="${start_time}" -k | grep -q 'controller timed out'; then
+        echo 'Success - no timeout errors'
+        exit 0
+    fi
+
+    echo 'Still timing out...'
+    attempt=$((attempt + 1))
+done
+
+echo 'Failed after all attempts, try: systemctl suspend'
+exit 1
