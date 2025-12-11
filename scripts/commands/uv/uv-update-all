@@ -7,6 +7,30 @@ import pathlib
 import sys
 
 
+def shebang_to_sync_cmd(shebang: str, script_path: str) -> list[str] | None:
+    """Convert uv run shebang to uv sync command args."""
+    # Extract args after "env -S " or "env "
+    if shebang.startswith("#!/usr/bin/env -S "):
+        args_str = shebang[len("#!/usr/bin/env -S "):]
+    elif shebang.startswith("#!/usr/bin/env "):
+        args_str = shebang[len("#!/usr/bin/env "):]
+    else:
+        return None
+    # Split into args, replace 'run' with 'sync', append filepath
+    cmd = []
+    replaced_run = False
+    for arg in args_str.split():
+        if not replaced_run and arg == "run":
+            cmd.append("sync")
+            replaced_run = True
+        else:
+            cmd.append(arg)
+    if not replaced_run:
+        return None
+    cmd.append(script_path)
+    return cmd
+
+
 def all_files(*paths):
     stack = []
     files = set()
@@ -64,14 +88,19 @@ async def find_uv_scripts(
 
         if verbose:
             print(f"found: {resolved}")
-        uv_scripts.append(resolved)
+        uv_scripts.append((file_path.absolute(), shebang))
 
     return sorted(set(uv_scripts))
 
 
-async def update_script(script_path: pathlib.Path, verbose: bool = False) -> bool:
+async def update_script(
+    script_path: pathlib.Path, shebang: str, verbose: bool = False
+) -> bool:
     """Update dependencies for a single PEP 723 script."""
-    cmd = ["uv", "sync", "--script", str(script_path), "--upgrade"]
+    cmd = shebang_to_sync_cmd(shebang, str(script_path))
+    if not cmd:
+        return False
+    cmd.append("--upgrade")
     if not verbose:
         cmd.append("--quiet")
     try:
@@ -86,11 +115,13 @@ async def update_script(script_path: pathlib.Path, verbose: bool = False) -> boo
         return False
 
 
-async def update_all_scripts(scripts: list[pathlib.Path], verbose: bool = False) -> bool:
+async def update_all_scripts(
+    scripts: list[tuple[pathlib.Path, str]], verbose: bool = False
+) -> bool:
     """Update all scripts concurrently."""
     tasks = []
-    for script in scripts:
-        task = asyncio.create_task(update_script(script, verbose))
+    for script, shebang in scripts:
+        task = asyncio.create_task(update_script(script, shebang, verbose))
         tasks.append((script, task))
 
     had_error = False
@@ -125,6 +156,11 @@ async def main():
         "-v", "--verbose",
         action="store_true",
         help="show detailed output",
+    )
+    parser.add_argument(
+        "--show-cache",
+        action="store_true",
+        help="show cache paths for detected scripts and exit",
     )
     args = parser.parse_args()
 
@@ -162,9 +198,23 @@ async def main():
                 warnings.append(f"no PEP 723 metadata: {resolved}")
                 continue
 
-            scripts.add(resolved)
+            scripts.add((path.absolute(), shebang))
 
     scripts = sorted(scripts)
+
+    if args.show_cache:
+        for script, _ in scripts:
+            proc = await asyncio.create_subprocess_exec(
+                "uv", "sync", "--dry-run", "--offline", "--script", str(script),
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            _, stderr = await proc.communicate()
+            import re
+            match = re.search(r"Would \w+ script environment at: (.+)", stderr.decode())
+            if match:
+                print(match.group(1))
+        return
 
     had_error = False
     if scripts:

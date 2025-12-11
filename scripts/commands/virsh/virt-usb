@@ -1,0 +1,699 @@
+#!/usr/bin/env -S uv --quiet run --python=python3.13 --script
+"""
+Interactive USB device attach/detach for libvirt VMs using fzf.
+
+# /// script
+# dependencies = [
+#     "libvirt-python",
+# ]
+# ///
+"""
+
+import argparse
+import os
+import pathlib
+import re
+import subprocess
+import sys
+import tempfile
+import time
+import xml.etree.ElementTree as ET
+
+import libvirt
+
+SCRIPT_PATH = os.path.realpath(__file__)
+
+# USB device class 0x09 = Hub
+USB_CLASS_HUB = 9
+
+
+class UserError(Exception):
+    pass
+
+
+def get_connection():
+    try:
+        return libvirt.open("qemu:///system")
+    except libvirt.libvirtError as e:
+        raise UserError(f"cannot connect to libvirt: {e}")
+
+
+def list_vms(conn):
+    domains = conn.listAllDomains()
+    if not domains:
+        raise UserError("no VMs found")
+    return [
+        (d.name(), "running" if d.isActive() else "shutoff") for d in domains
+    ]
+
+
+def select_vm(conn):
+    vms = list_vms(conn)
+    lines = [f"{name}\t{state}" for name, state in vms]
+    result = fzf_select(lines, prompt="Select VM: ", header="NAME\tSTATE")
+    if not result:
+        return None
+    return result.split("\t")[0]
+
+
+def get_device_class(sysfs_path):
+    """Read USB device class from sysfs."""
+    try:
+        class_file = pathlib.Path(sysfs_path) / "bDeviceClass"
+        if class_file.exists():
+            return int(class_file.read_text().strip(), 16)
+    except (ValueError, OSError):
+        pass
+    return None
+
+
+def get_usb_nodedevs(conn, include_hubs=False):
+    """Get USB devices with parent info for tree building."""
+    devices = {}
+    all_devs = {}
+
+    # First pass: collect all USB devices
+    for dev in conn.listAllDevices():
+        try:
+            xml = dev.XMLDesc()
+        except libvirt.libvirtError:
+            continue
+        root = ET.fromstring(xml)
+        name = root.findtext("name")
+        parent = root.findtext("parent")
+        sysfs_path = root.findtext("path")
+        cap = root.find("capability")
+
+        if cap is None:
+            continue
+
+        cap_type = cap.get("type")
+        if cap_type not in ("usb_device", "usb"):
+            continue
+
+        all_devs[name] = {"name": name, "parent": parent, "cap_type": cap_type}
+
+        if cap_type != "usb_device":
+            continue
+
+        vendor_elem = cap.find("vendor")
+        product_elem = cap.find("product")
+        bus_elem = cap.find("bus")
+        device_elem = cap.find("device")
+
+        if vendor_elem is None or product_elem is None:
+            continue
+
+        vendor_id = vendor_elem.get("id").lower()
+        product_id = product_elem.get("id").lower()
+        vendor_name = vendor_elem.text or ""
+        product_name = product_elem.text or ""
+
+        # Skip Linux root hubs
+        if vendor_id == "0x1d6b" or vendor_id == "1d6b":
+            continue
+
+        # Get device class from sysfs (class 9 = hub)
+        device_class = get_device_class(sysfs_path) if sysfs_path else None
+        is_hub = device_class == USB_CLASS_HUB
+
+        devices[name] = {
+            "name": name,
+            "parent": parent,
+            "vendor_id": vendor_id,
+            "product_id": product_id,
+            "vendor_name": vendor_name,
+            "product_name": product_name,
+            "bus": bus_elem.text if bus_elem is not None else "",
+            "device": device_elem.text if device_elem is not None else "",
+            "children": [],
+            "depth": 0,
+            "is_hub": is_hub,
+        }
+
+    # Build tree relationships
+    for name, dev in devices.items():
+        # Find actual parent device (skip usb interface nodes)
+        parent_name = dev["parent"]
+        while parent_name:
+            if parent_name in devices:
+                devices[parent_name]["children"].append(name)
+                break
+            elif parent_name in all_devs:
+                parent_name = all_devs[parent_name].get("parent")
+            else:
+                break
+
+    # Calculate depths
+    def calc_depth(name, depth=0):
+        if name in devices:
+            devices[name]["depth"] = depth
+            for child in devices[name]["children"]:
+                calc_depth(child, depth + 1)
+
+    # Find roots (devices with no parent in our device list)
+    roots = []
+    for name, dev in devices.items():
+        parent = dev["parent"]
+        while parent:
+            if parent in devices:
+                break
+            elif parent in all_devs:
+                parent = all_devs[parent].get("parent")
+            else:
+                roots.append(name)
+                break
+        else:
+            roots.append(name)
+
+    for root in roots:
+        calc_depth(root, 0)
+
+    # Flatten tree in display order
+    def flatten(name):
+        result = [devices[name]]
+        for child in sorted(devices[name]["children"]):
+            result.extend(flatten(child))
+        return result
+
+    ordered = []
+    for root in sorted(roots):
+        ordered.extend(flatten(root))
+
+    # Filter out hubs unless requested
+    if not include_hubs:
+        ordered = [d for d in ordered if not d.get("is_hub")]
+
+    return ordered
+
+
+def get_attached_usb(dom):
+    xml = dom.XMLDesc()
+    root = ET.fromstring(xml)
+    attached = []
+    for hostdev in root.findall(".//hostdev[@type='usb']"):
+        source = hostdev.find("source")
+        if source is None:
+            continue
+        vendor = source.find("vendor")
+        product = source.find("product")
+        if vendor is None or product is None:
+            continue
+        attached.append(
+            {
+                "vendor_id": vendor.get("id").lower(),
+                "product_id": product.get("id").lower(),
+            }
+        )
+    return attached
+
+
+def fzf_select(
+    items, prompt="", header=None, multi=False, reload_cmd=None, no_sort=False
+):
+    if not items:
+        return None
+    cmd = ["fzf", "--prompt", prompt, "--layout=reverse", "--ansi"]
+    if header:
+        cmd.extend(["--header", header])
+    if multi:
+        cmd.append("--multi")
+    if no_sort:
+        # Keep original order, disable filtering (show all items, use as menu)
+        cmd.extend(["--no-sort", "--disabled"])
+    if reload_cmd:
+        cmd.extend(["--bind", f"ctrl-t:reload({reload_cmd})"])
+    try:
+        result = subprocess.run(
+            cmd,
+            input="\n".join(items),
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            return None
+        output = result.stdout.strip()
+        if multi:
+            return output.split("\n") if output else []
+        return output if output else None
+    except FileNotFoundError:
+        raise UserError("fzf not found, please install it")
+
+
+def attach_device(dom, dev):
+    xml = f"""<hostdev mode='subsystem' type='usb' managed='yes'>
+  <source>
+    <vendor id='{dev["vendor_id"]}'/>
+    <product id='{dev["product_id"]}'/>
+  </source>
+</hostdev>"""
+    try:
+        dom.attachDevice(xml)
+        return True
+    except libvirt.libvirtError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return False
+
+
+def detach_device(dom, dev):
+    xml = f"""<hostdev mode='subsystem' type='usb' managed='yes'>
+  <source>
+    <vendor id='{dev["vendor_id"]}'/>
+    <product id='{dev["product_id"]}'/>
+  </source>
+</hostdev>"""
+    try:
+        dom.detachDevice(xml)
+        return True
+    except libvirt.libvirtError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return False
+
+
+def format_id(hex_id):
+    """Convert 0x1234 to 1234."""
+    if hex_id.startswith("0x"):
+        return hex_id[2:]
+    return hex_id
+
+
+# ANSI colors for tree depth levels (warm to cool gradient)
+DEPTH_COLORS = [
+    "\033[97m",  # 0: white
+    "\033[93m",  # 1: yellow
+    "\033[92m",  # 2: green
+    "\033[96m",  # 3: cyan
+    "\033[94m",  # 4: blue
+    "\033[95m",  # 5: magenta
+    "\033[90m",  # 6: gray
+]
+RESET = "\033[0m"
+
+
+def get_device_desc(dev):
+    """Get device description string."""
+    return f"{dev['vendor_name']} {dev['product_name']}".strip()
+
+
+def format_devices(devices, attached_set, show_tree=True, show_hubs=True):
+    """Format all devices, hiding redundant parent descriptions."""
+    # Build name -> device lookup for parent reference
+    by_name = {d["name"]: d for d in devices}
+
+    lines = []
+    for dev in devices:
+        parent_desc = None
+        if dev.get("parent") and dev["parent"] in by_name:
+            parent_desc = get_device_desc(by_name[dev["parent"]])
+        lines.append(
+            format_device(dev, attached_set, show_tree, show_hubs, parent_desc)
+        )
+    return lines
+
+
+def format_device(
+    dev, attached_set, show_tree=True, show_hubs=True, parent_desc=None
+):
+    status = (
+        "[attached]"
+        if (dev["vendor_id"], dev["product_id"]) in attached_set
+        else ""
+    )
+    desc = f"{dev['vendor_name']} {dev['product_name']}".strip()
+    vid = format_id(dev["vendor_id"])
+    pid = format_id(dev["product_id"])
+
+    # Hide description if same as parent
+    display_desc = "" if parent_desc and desc == parent_desc else desc
+
+    # Only show tree structure when hubs are visible
+    if show_tree and show_hubs:
+        depth = dev.get("depth", 0)
+        color = DEPTH_COLORS[depth % len(DEPTH_COLORS)]
+        indent = "  " * depth
+        tree_char = "├─" if depth > 0 else ""
+        return f"{color}{indent}{tree_char}{vid}:{pid}  {display_desc}  {status}{RESET}".rstrip()
+    return f"{vid}:{pid}  {display_desc}  {status}".rstrip()
+
+
+def parse_selection(line):
+    # Extract vendor:product from line (may have leading indent/tree chars)
+    # Matches both 1234:5678 and 0x1234:0x5678 formats
+    match = re.search(r"([0-9a-fA-F]{4}):([0-9a-fA-F]{4})", line)
+    if not match:
+        return None
+    return {
+        "vendor_id": f"0x{match.group(1)}",
+        "product_id": f"0x{match.group(2)}",
+    }
+
+
+def watch_loop(
+    conn,
+    vm_name,
+    include_hubs=False,
+    poll_interval=1,
+    detach_attached=False,
+    detach_existing=False,
+    timeout=None,
+):
+    """Watch for new USB devices and auto-attach them to the VM."""
+    dom = conn.lookupByName(vm_name)
+    if not dom.isActive():
+        raise UserError(f"VM '{vm_name}' is not running")
+
+    # Track known physical devices by (vendor_id, product_id, bus, device)
+    known_devices = set()
+    # Track devices we attached (for cleanup) - by (vendor_id, product_id)
+    attached_devices = []
+    attached_ids = set()
+    # Track existing attached devices (for cleanup)
+    existing_devices = []
+    existing_ids = set()
+
+    def get_device_key(dev):
+        return (dev["vendor_id"], dev["product_id"], dev["bus"], dev["device"])
+
+    def get_id_key(dev):
+        return (dev["vendor_id"], dev["product_id"])
+
+    # Initialize with current devices and show already attached
+    attached = get_attached_usb(dom)
+    attached_set = {(d["vendor_id"], d["product_id"]) for d in attached}
+
+    for dev in get_usb_nodedevs(conn, include_hubs=include_hubs):
+        known_devices.add(get_device_key(dev))
+        id_key = get_id_key(dev)
+        if id_key in attached_set and id_key not in existing_ids:
+            desc = f"{dev['vendor_name']} {dev['product_name']}".strip()
+            vid = format_id(dev["vendor_id"])
+            pid = format_id(dev["product_id"])
+            print(f"existing {vid}:{pid}  {desc}")
+            existing_devices.append(dev)
+            existing_ids.add(id_key)
+
+    start_time = time.time()
+
+    try:
+        while True:
+            time.sleep(poll_interval)
+
+            # Check timeout
+            if timeout and (time.time() - start_time) >= timeout:
+                break
+
+            # Check if VM is still running
+            if not dom.isActive():
+                break
+
+            current_devices = get_usb_nodedevs(conn, include_hubs=include_hubs)
+            current_keys = {get_device_key(d) for d in current_devices}
+
+            # Find new devices
+            for dev in current_devices:
+                key = get_device_key(dev)
+                id_key = get_id_key(dev)
+                if key not in known_devices:
+                    known_devices.add(key)
+                    # Skip if this vendor:product already attached or existing
+                    if id_key in attached_ids or id_key in existing_ids:
+                        continue
+                    desc = (
+                        f"{dev['vendor_name']} {dev['product_name']}".strip()
+                    )
+                    vid = format_id(dev["vendor_id"])
+                    pid = format_id(dev["product_id"])
+                    if attach_device(dom, dev):
+                        print(f"attached {vid}:{pid}  {desc}")
+                        attached_devices.append(dev)
+                        attached_ids.add(id_key)
+                    else:
+                        print(f"failed {vid}:{pid}  {desc}")
+
+            # Remove devices that are gone
+            known_devices &= current_keys
+
+            # Check for external attach/detach changes
+            current_attached = get_attached_usb(dom)
+            current_attached_set = {
+                (d["vendor_id"], d["product_id"]) for d in current_attached
+            }
+
+            # Detect external detaches
+            for dev in list(attached_devices):
+                id_key = get_id_key(dev)
+                if id_key not in current_attached_set:
+                    desc = (
+                        f"{dev['vendor_name']} {dev['product_name']}".strip()
+                    )
+                    vid = format_id(dev["vendor_id"])
+                    pid = format_id(dev["product_id"])
+                    print(f"detached {vid}:{pid}  {desc}")
+                    attached_devices.remove(dev)
+                    attached_ids.discard(id_key)
+
+            for dev in list(existing_devices):
+                id_key = get_id_key(dev)
+                if id_key not in current_attached_set:
+                    desc = (
+                        f"{dev['vendor_name']} {dev['product_name']}".strip()
+                    )
+                    vid = format_id(dev["vendor_id"])
+                    pid = format_id(dev["product_id"])
+                    print(f"detached {vid}:{pid}  {desc}")
+                    existing_devices.remove(dev)
+                    existing_ids.discard(id_key)
+
+            # Detect external attaches
+            for dev in current_devices:
+                id_key = get_id_key(dev)
+                if id_key in current_attached_set and id_key not in attached_ids and id_key not in existing_ids:
+                    desc = (
+                        f"{dev['vendor_name']} {dev['product_name']}".strip()
+                    )
+                    vid = format_id(dev["vendor_id"])
+                    pid = format_id(dev["product_id"])
+                    print(f"attached {vid}:{pid}  {desc}")
+                    attached_devices.append(dev)
+                    attached_ids.add(id_key)
+
+    except KeyboardInterrupt:
+        pass
+
+    # Cleanup on exit
+    if dom.isActive():
+        if detach_attached:
+            for dev in attached_devices:
+                desc = f"{dev['vendor_name']} {dev['product_name']}".strip()
+                vid = format_id(dev["vendor_id"])
+                pid = format_id(dev["product_id"])
+                if detach_device(dom, dev):
+                    print(f"detached {vid}:{pid}  {desc}")
+
+        if detach_existing:
+            for dev in existing_devices:
+                desc = f"{dev['vendor_name']} {dev['product_name']}".strip()
+                vid = format_id(dev["vendor_id"])
+                pid = format_id(dev["product_id"])
+                if detach_device(dom, dev):
+                    print(f"detached {vid}:{pid}  {desc}")
+
+
+def interactive_loop(conn, vm_name, show_tree=True, include_hubs=False):
+    dom = conn.lookupByName(vm_name)
+    if not dom.isActive():
+        raise UserError(f"VM '{vm_name}' is not running")
+
+    # Create state file for toggle persistence across fzf reloads
+    state_file = tempfile.NamedTemporaryFile(
+        mode="w", delete=False, suffix=".state"
+    )
+    state_path = state_file.name
+    state_file.write(
+        f"{'tree' if show_tree else 'flat'},{'hubs' if include_hubs else 'nohubs'}"
+    )
+    state_file.close()
+
+    try:
+        while True:
+            # Read current state
+            with open(state_path) as f:
+                state_parts = f.read().strip().split(",")
+            show_tree_now = (
+                state_parts[0] == "tree" if state_parts else show_tree
+            )
+            include_hubs_now = (
+                state_parts[1] == "hubs"
+                if len(state_parts) > 1
+                else include_hubs
+            )
+
+            usb_devices = get_usb_nodedevs(conn, include_hubs=include_hubs_now)
+            attached = get_attached_usb(dom)
+            attached_set = {
+                (d["vendor_id"], d["product_id"]) for d in attached
+            }
+
+            lines = format_devices(
+                usb_devices, attached_set, show_tree_now, include_hubs_now
+            )
+
+            # Build reload command that toggles hub visibility
+            reload_cmd = (
+                f"sh -c 'state=$(cat {state_path}); tree=${{state%%,*}}; hubs=${{state##*,}}; "
+                f'if [ "$hubs" = hubs ]; then newhubs=nohubs; else newhubs=hubs; fi; '
+                f"echo $tree,$newhubs > {state_path}; "
+                f"{SCRIPT_PATH} --fzf-reload {vm_name} --state-file {state_path}'"
+            )
+
+            hubs_indicator = "+hubs" if include_hubs_now else ""
+            selection = fzf_select(
+                lines,
+                prompt=f"{vm_name}{hubs_indicator} > ",
+                header="ctrl-t: toggle hubs",
+                reload_cmd=reload_cmd,
+                no_sort=True,
+            )
+
+            if not selection:
+                break
+
+            dev = parse_selection(selection)
+            if not dev:
+                continue
+
+            is_attached = (dev["vendor_id"], dev["product_id"]) in attached_set
+
+            if is_attached:
+                if detach_device(dom, dev):
+                    print(f"detached {dev['vendor_id']}:{dev['product_id']}")
+            else:
+                if attach_device(dom, dev):
+                    print(f"attached {dev['vendor_id']}:{dev['product_id']}")
+    finally:
+        os.unlink(state_path)
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Interactive USB device attach/detach for libvirt VMs"
+    )
+    parser.add_argument(
+        "vm", nargs="?", help="VM name (prompts if not specified)"
+    )
+    parser.add_argument(
+        "-l", "--list", action="store_true", help="List USB devices and exit"
+    )
+    parser.add_argument(
+        "--flat", action="store_true", help="Flat list (no tree structure)"
+    )
+    parser.add_argument(
+        "-a",
+        "--all",
+        action="store_true",
+        help="Show all devices including hubs",
+    )
+    parser.add_argument(
+        "-w",
+        "--watch",
+        action="store_true",
+        help="Watch for new devices and auto-attach them",
+    )
+    parser.add_argument(
+        "--detach-attached",
+        action="store_true",
+        help="Detach devices attached during watch on exit",
+    )
+    parser.add_argument(
+        "--detach-existing",
+        action="store_true",
+        help="Detach pre-existing attached devices on exit",
+    )
+    parser.add_argument(
+        "--timeout",
+        type=int,
+        metavar="SECS",
+        help="Exit watch mode after N seconds",
+    )
+    parser.add_argument(
+        "--fzf-reload",
+        metavar="VM",
+        help=argparse.SUPPRESS,  # Internal: output device list for fzf reload
+    )
+    parser.add_argument(
+        "--state-file",
+        metavar="PATH",
+        help=argparse.SUPPRESS,  # Internal: state file path for toggle
+    )
+    args = parser.parse_args()
+
+    conn = get_connection()
+
+    include_hubs = args.all
+
+    # Internal command for fzf reload toggle
+    if args.fzf_reload:
+        show_tree = True
+        reload_include_hubs = False
+        if args.state_file:
+            with open(args.state_file) as f:
+                state_parts = f.read().strip().split(",")
+            show_tree = state_parts[0] == "tree" if state_parts else True
+            reload_include_hubs = (
+                state_parts[1] == "hubs" if len(state_parts) > 1 else False
+            )
+        usb_devices = get_usb_nodedevs(conn, include_hubs=reload_include_hubs)
+        dom = conn.lookupByName(args.fzf_reload)
+        attached = get_attached_usb(dom)
+        attached_set = {(d["vendor_id"], d["product_id"]) for d in attached}
+        for line in format_devices(
+            usb_devices, attached_set, show_tree, reload_include_hubs
+        ):
+            print(line)
+        return 0
+
+    if args.list:
+        usb_devices = get_usb_nodedevs(conn, include_hubs=include_hubs)
+        for line in format_devices(
+            usb_devices, set(), not args.flat, include_hubs
+        ):
+            print(line)
+        return 0
+
+    vm_name = args.vm
+    if not vm_name:
+        vm_name = select_vm(conn)
+        if not vm_name:
+            return 0
+
+    try:
+        if args.watch:
+            watch_loop(
+                conn,
+                vm_name,
+                include_hubs=include_hubs,
+                detach_attached=args.detach_attached,
+                detach_existing=args.detach_existing,
+                timeout=args.timeout,
+            )
+        else:
+            interactive_loop(
+                conn,
+                vm_name,
+                show_tree=not args.flat,
+                include_hubs=include_hubs,
+            )
+    except libvirt.libvirtError as e:
+        raise UserError(f"libvirt error: {e}")
+
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except UserError as e:
+        print(f"error: {e}", file=sys.stderr)
+        sys.exit(1)
+    except KeyboardInterrupt:
+        sys.exit(130)

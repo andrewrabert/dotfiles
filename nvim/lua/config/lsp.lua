@@ -6,47 +6,35 @@ local uv_python_cache = {}
 -- Check if a buffer is a uv inline script (has --script in shebang)
 local function is_uv_script(bufnr)
 	local first_line = vim.api.nvim_buf_get_lines(bufnr, 0, 1, false)[1] or ""
-	return first_line:match("^#!/usr/bin/env.*uv.*%-%-script") ~= nil
+	return first_line:match("^#!.-uv.-run.-%-%-script") ~= nil
 end
 
--- Async resolve uv script python path and restart LSP
-local function resolve_uv_python_async(bufnr, filepath)
+-- Blocking resolve uv script python path
+local function resolve_uv_python_sync(filepath)
 	if uv_python_cache[filepath] then
-		return
+		return uv_python_cache[filepath]
 	end
 
-	-- Use uv sync --script to resolve env without executing the script
-	vim.system(
-		{ "uv", "sync", "--script", filepath },
-		{ text = true },
-		function(result)
-			local output = (result.stdout or "") .. (result.stderr or "")
-			-- Parse: "Using script environment at: /path/to/env"
-			local env_path = output:match("Using script environment at: ([^\n]+)")
-			if env_path then
-				local python_path = env_path .. "/bin/python"
-				uv_python_cache[filepath] = python_path
-				-- Restart pyright with correct python path
-				vim.schedule(function()
-					if vim.api.nvim_buf_is_valid(bufnr) then
-						for _, client in ipairs(vim.lsp.get_clients({ bufnr = bufnr, name = "pyright" })) do
-							client:stop()
-						end
-						vim.api.nvim_exec_autocmds("FileType", { buffer = bufnr })
-					end
-				end)
-			end
-		end
-	)
+	-- Run uv sync --dry-run --offline to get env path without network/changes
+	local cmd = { "uv", "sync", "--dry-run", "--offline", "--script", filepath }
+	local result = vim.system(cmd, { text = true }):wait()
+	local output = (result.stderr or "") .. (result.stdout or "")
+	local env_path = output:match("Would %w+ script environment at: ([^\n]+)")
+	if env_path then
+		local python_path = env_path .. "/bin/python"
+		uv_python_cache[filepath] = python_path
+		return python_path
+	end
+	return nil
 end
 
 -- Get python path for a buffer (sync, uses cache)
 local function get_python_path(bufnr)
 	local filepath = vim.api.nvim_buf_get_name(bufnr)
 
-	-- Check uv cache first
-	if uv_python_cache[filepath] then
-		return uv_python_cache[filepath]
+	-- For uv scripts, resolve blocking
+	if is_uv_script(bufnr) then
+		return resolve_uv_python_sync(filepath)
 	end
 
 	-- Search for .venv/env directories
@@ -135,13 +123,6 @@ local servers = {
 			"pyrightconfig.json",
 		},
 		settings = function(root_dir, bufnr)
-			local filepath = vim.api.nvim_buf_get_name(bufnr)
-
-			-- For uv scripts, trigger async resolution if not cached
-			if is_uv_script(bufnr) and not uv_python_cache[filepath] then
-				resolve_uv_python_async(bufnr, filepath)
-			end
-
 			return {
 				pyright = {
 					disableOrganizeImports = true,
