@@ -245,7 +245,6 @@ if HOSTNAME in ("sol", "mars", "phobos"):
             "7zip",
             "advancecomp",
             "aria2",
-            "ast-grep",
             "base",
             "base-devel",
             "bat",
@@ -586,6 +585,13 @@ EXPECTED_PACKAGE_DEPENDENCIES = {
     "pipewire": {
         "pipewire-alsa",
         "pipewire-jack",
+    },
+    "plasma-desktop": {
+        "bluedevil",
+        "kscreen",
+        "packagekit-qt6",
+        "plasma-nm",
+        "plasma-pa",
     },
     "print-manager": {
         "system-config-printer",
