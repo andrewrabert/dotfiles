@@ -414,6 +414,7 @@ if HOSTNAME in ("mars", "phobos"):
             "makemkv",
             "mkvalidator",
             "mkvtoolnix-gui",
+            "mpv-mpris",
             "ntfydesktop",
             "obs-studio",
             "okular",
