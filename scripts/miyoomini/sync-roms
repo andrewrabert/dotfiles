@@ -1,0 +1,320 @@
+#!/usr/bin/env -S uv --quiet run --script
+# /// script
+# dependencies = [
+#   "async_executor",
+# ]
+# ///
+
+import argparse
+import asyncio
+import json
+import os
+import pathlib
+import shutil
+import signal
+import sys
+import tempfile
+
+import async_executor
+
+# Handle broken pipe gracefully (e.g., when piping to head)
+signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+
+SDCARD_BASE = pathlib.Path("/media/ONION/Roms")
+MTIME_THRESHOLD = 2  # seconds (FAT32 has 2-second resolution)
+
+# (sdcard_subdir, nas_path, rom_extension)
+NAS = pathlib.Path("/storage/Games")
+
+ROM_TYPES = [
+    ("FC", NAS / "Nintendo Nintendo Entertainment System", ".fc"),
+    ("GB", NAS / "Nintendo Game Boy", ".gb"),
+    ("GBA", NAS / "Nintendo Game Boy Advance", ".gba"),
+    ("GBC", NAS / "Nintendo Game Boy Color", ".gbc"),
+    ("GG", NAS / "Sega Game Gear", ".gg"),
+    ("MD", NAS / "Sega Mega Drive (Genesis)", ".md"),
+    ("MS", NAS / "Sega Master System", ".sms"),
+    ("NDS", NAS / "Nintendo DS", ".nds"),
+    ("PCE", NAS / "TurboGrafx-16 (PC Engine)", ".pce"),
+    ("POKE", NAS / "Nintendo Pokemon Mini", ".min"),
+    ("SFC", NAS / "Nintendo Super Nintendo Entertainment System", ".sfc"),
+]
+
+
+class UserError(Exception):
+    pass
+
+
+async def get_nas_index(nas_path):
+    """Get cached file index from NAS via file-hash-recorder."""
+    proc = await asyncio.create_subprocess_exec(
+        "file-hash-recorder",
+        "--list",
+        str(nas_path),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await proc.communicate()
+    if proc.returncode != 0:
+        raise UserError(f"file-hash-recorder failed: {stderr.decode()}")
+    return json.loads(stdout)
+
+
+def get_rom_from_archive(archive_info, extension):
+    """Extract ROM filename and size from archive_contents."""
+    contents = archive_info.get("archive_contents", {})
+    for name, info in contents.items():
+        if name.endswith(extension):
+            return name, info.get("size", 0)
+    return None, 0
+
+
+async def extract_7z(archive_path, dest_dir):
+    """Extract archive using 7z command."""
+    proc = await asyncio.create_subprocess_exec(
+        "7z",
+        "x",
+        "-y",
+        f"-o{dest_dir}",
+        "--",
+        str(archive_path),
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    _, stderr = await proc.communicate()
+    if proc.returncode != 0:
+        raise UserError(f"7z extraction failed: {stderr.decode()}")
+
+
+async def sync_single_rom(item):
+    """Sync a single ROM from NAS to SD card."""
+    archive_path = item["nas_path"] / item["archive_name"]
+    target_path = item["target_path"]
+
+    # Ensure target directory exists
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Extract to temp dir, copy to temp file, then rename
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = pathlib.Path(tmp)
+        await extract_7z(archive_path, tmp_path)
+
+        extracted_file = tmp_path / item["rom_name"]
+        if not extracted_file.exists():
+            return False, f"extracted file not found: {item['rom_name']}"
+
+        # Copy to temp file in target dir, set mtime, then atomic rename
+        temp_target = target_path.with_name(f"._romsync_{target_path.name}")
+        shutil.copy2(extracted_file, temp_target)
+        os.utime(temp_target, (item["nas_mtime"], item["nas_mtime"]))
+        temp_target.rename(target_path)
+
+    return True, None
+
+
+async def sync_roms(
+    dry_run=False, verbose=False, jobs=1, delete=False, path=None
+):
+    """Sync ROMs from NAS to SD card."""
+    if not SDCARD_BASE.exists():
+        raise UserError(f"SD card not mounted: {SDCARD_BASE}")
+
+    all_to_sync = []
+    unexpected = []
+
+    # Filter ROM_TYPES based on path argument
+    if path:
+        filter_archive = None
+        rom_types_to_process = []
+        for sdcard_subdir, nas_path, extension in ROM_TYPES:
+            if path == nas_path or nas_path in path.parents:
+                rom_types_to_process.append(
+                    (sdcard_subdir, nas_path, extension)
+                )
+                if path.is_file():
+                    filter_archive = path.name
+                break
+        if not rom_types_to_process:
+            raise UserError(f"path does not match any known ROM type: {path}")
+    else:
+        rom_types_to_process = ROM_TYPES
+        filter_archive = None
+
+    for sdcard_subdir, nas_path, extension in rom_types_to_process:
+        sdcard_path = SDCARD_BASE / sdcard_subdir
+        archive_ext = f"{extension}.7z"
+
+        if not sdcard_path.exists():
+            if verbose:
+                print(f"skip rom type (dir missing): {sdcard_subdir}")
+            continue
+
+        index = await get_nas_index(nas_path)
+
+        # Build set of expected ROM names from NAS
+        nas_roms = set()
+        for archive_name, archive_info in index.items():
+            if "/" in archive_name:
+                continue
+            if not archive_name.endswith(archive_ext):
+                continue
+            rom_name, _ = get_rom_from_archive(archive_info, extension)
+            if rom_name:
+                nas_roms.add(rom_name)
+
+        # Check for unexpected ROMs on SD card (skip when filtering by path)
+        if not path:
+            for f in sdcard_path.iterdir():
+                # Skip directories (Imgs, etc.)
+                if f.is_dir():
+                    continue
+                if f.suffix == extension and f.name not in nas_roms:
+                    unexpected.append(f)
+                    print(f"unexpected: {sdcard_subdir}/{f.name}")
+
+        for archive_name, archive_info in index.items():
+            # Skip subdirectories (only want top-level files)
+            if "/" in archive_name:
+                continue
+
+            # Skip non-matching archives
+            if not archive_name.endswith(archive_ext):
+                continue
+
+            # Skip NDS Wi-Fi Kiosk roms
+            if extension == ".nds" and " (Wi-Fi Kiosk)" in archive_name:
+                continue
+
+            # Skip if filtering by specific file
+            if filter_archive and archive_name != filter_archive:
+                continue
+
+            rom_name, nas_size = get_rom_from_archive(archive_info, extension)
+            if not rom_name:
+                if verbose:
+                    print(f"skip (no {extension}): {archive_name}")
+                continue
+
+            target_path = sdcard_path / rom_name
+
+            nas_mtime = archive_info.get("mtime", 0)
+
+            if target_path.exists():
+                sd_stat = target_path.stat()
+                sd_mtime = sd_stat.st_mtime
+                sd_size = sd_stat.st_size
+                if (
+                    abs(sd_mtime - nas_mtime) <= MTIME_THRESHOLD
+                    and sd_size == nas_size
+                ):
+                    if verbose:
+                        print(f"skip (up to date): {rom_name}")
+                    continue
+                if verbose:
+                    reason = f"outdated: mtime sd={sd_mtime:.0f} nas={nas_mtime:.0f}, size sd={sd_size} nas={nas_size}"
+                else:
+                    reason = "outdated"
+            else:
+                reason = "missing"
+
+            all_to_sync.append(
+                {
+                    "nas_path": nas_path,
+                    "archive_name": archive_name,
+                    "rom_name": rom_name,
+                    "target_path": target_path,
+                    "nas_mtime": nas_mtime,
+                    "reason": reason,
+                }
+            )
+
+    if not all_to_sync:
+        print("nothing to sync")
+    elif dry_run:
+        print(f"{len(all_to_sync)} rom(s) to sync:")
+        for item in all_to_sync:
+            print(f"  [{item['reason']}] {item['rom_name']}")
+    else:
+        executor = async_executor.AsyncExecutor(jobs)
+        future_to_item = {}
+
+        for item in all_to_sync:
+            future = executor.submit(sync_single_rom, item)
+            future_to_item[future] = item
+
+        total = len(all_to_sync)
+        completed = 0
+
+        async for future in executor:
+            item = future_to_item[future]
+            completed += 1
+            try:
+                success, error = future.result()
+                if success:
+                    print(f"({completed}/{total}) {item['rom_name']}")
+                else:
+                    print(f"({completed}/{total}) error: {error}")
+            except Exception as e:
+                print(
+                    f"({completed}/{total}) error syncing {item['rom_name']}: {e}"
+                )
+
+    if delete and unexpected:
+        for f in unexpected:
+            f.unlink()
+            print(f"deleted: {f.name}")
+
+
+async def main():
+    parser = argparse.ArgumentParser(
+        description="Sync ROMs from NAS to Miyoo Mini SD card"
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="show what would be synced without syncing",
+    )
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="show skipped files",
+    )
+    parser.add_argument(
+        "-n",
+        "--num-jobs",
+        type=int,
+        default=4,
+        help="number of parallel sync jobs (default: 4)",
+    )
+    parser.add_argument(
+        "--delete",
+        action="store_true",
+        help="delete unexpected ROMs from SD card",
+    )
+    parser.add_argument(
+        "path",
+        nargs="?",
+        type=pathlib.Path,
+        help="specific file or directory to sync",
+    )
+    args = parser.parse_args()
+
+    if args.delete and args.path:
+        parser.error("--delete cannot be used with a specific path")
+
+    await sync_roms(
+        dry_run=args.dry_run,
+        verbose=args.verbose,
+        jobs=args.num_jobs,
+        delete=args.delete,
+        path=args.path,
+    )
+
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except UserError as e:
+        print(f"error: {e}", file=sys.stderr)
+        sys.exit(1)

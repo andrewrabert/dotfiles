@@ -1,0 +1,38 @@
+#!/usr/bin/env sh
+set -eu
+
+case $# in
+    0)
+        SOURCE="$(dirname "$0")"
+        ;;
+    1)
+        SOURCE="$1"
+        ;;
+    *)
+        echo 'usage: [SDCARD_DIR]' >&2
+        echo 'error: unexpected paramater(s)' >&2
+        exit 1
+        ;;
+esac
+
+if ! [ -d "${SOURCE}/Nintendo 3DS/2723a39ef3c87e55e9901f90eef310c1/" ]; then
+    echo 'error: cannot determine source directory' >&2
+    exit 1
+fi
+
+TARGET='/storage/Backup/Nintendo New 2DS XL/main_microsd'
+if ! [ -d "${TARGET}" ]; then
+    TARGET="sol:${TARGET}"
+fi
+
+rm -rf "${TARGET}"/roms
+
+rsync \
+    -aHAXSvz \
+    --delete \
+    --progress \
+    --exclude 'roms/ds/*/*.nds' \
+    --exclude 'roms/gb/*/*.gb' \
+    --exclude 'roms/gba/*/*.gba' \
+    --exclude 'roms/gbc/*/*.gbc' \
+    "${SOURCE}/" "${TARGET}"

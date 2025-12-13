@@ -26,6 +26,30 @@ AUDIO_EXT = {
     ".wma",
 }
 
+TAG_PRIORITY = [
+    "title",
+    "tracknumber",
+    "artist",
+    "album",
+    "genre",
+    "albumartist",
+]
+
+
+def sort_tags(tags):
+    """Sort tags: priority tags first in order, then remaining alphabetically."""
+    priority_set = set(TAG_PRIORITY)
+    priority_items = []
+    other_items = []
+    for key, value in tags.items():
+        if key in priority_set:
+            priority_items.append((key, value))
+        else:
+            other_items.append((key, value))
+    priority_items.sort(key=lambda x: TAG_PRIORITY.index(x[0]))
+    other_items.sort(key=lambda x: x[0])
+    return dict(priority_items + other_items)
+
 
 def get_all_tags(file_path):
     with taglib.File(str(file_path)) as song:
@@ -63,6 +87,126 @@ def is_audio_file(path):
     return path.is_file() and path.suffix.lower() in AUDIO_EXT
 
 
+def dump_structured_tags(directory, output_file):
+    directory_path = pathlib.Path(directory).absolute()
+
+    if not directory_path.exists():
+        print(f"Directory does not exist: {directory}", file=sys.stderr)
+        sys.exit(1)
+
+    # Group files by parent directory
+    dirs = {}
+    for path in all_files(directory_path):
+        if not is_audio_file(path):
+            continue
+        parent = str(path.parent.absolute())
+        if parent not in dirs:
+            dirs[parent] = []
+        dirs[parent].append((path, get_all_tags(path)))
+
+    result = {}
+    for dir_path, files in sorted(dirs.items()):
+        albums = set()
+        albumartists = set()
+        dates = set()
+        genres = set()
+        tracknumbers = {}
+        tracks = {}
+
+        for path, tags in files:
+            if "album" in tags:
+                albums.add(tags["album"])
+            if "albumartist" in tags:
+                albumartists.add(tags["albumartist"])
+            if "date" in tags:
+                dates.add(tags["date"])
+            if "genre" in tags:
+                genres.add(tags["genre"])
+            if "tracknumber" in tags:
+                tracknum = tags["tracknumber"]
+                if tracknum in tracknumbers:
+                    print(
+                        f"Duplicate tracknumber '{tracknum}' in {dir_path}: "
+                        f"{tracknumbers[tracknum]} and {path.name}",
+                        file=sys.stderr,
+                    )
+                    sys.exit(1)
+                tracknumbers[tracknum] = path.name
+
+            filename = path.name
+            if filename in tracks:
+                print(
+                    f"Duplicate filename '{filename}' in {dir_path}",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+            tracks[filename] = tags
+
+        if len(albums) > 1:
+            print(f"Differing albums in {dir_path}: {albums}", file=sys.stderr)
+            sys.exit(1)
+        if len(albumartists) > 1:
+            print(
+                f"Differing albumartists in {dir_path}: {albumartists}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        if len(dates) > 1:
+            print(f"Differing dates in {dir_path}: {dates}", file=sys.stderr)
+            sys.exit(1)
+
+        album = albums.pop() if albums else None
+        albumartist = albumartists.pop() if albumartists else None
+        date = dates.pop() if dates else None
+        genre = genres.pop() if len(genres) == 1 else None
+
+        dir_entry = {}
+        if album:
+            dir_entry["album"] = album
+        if albumartist:
+            dir_entry["albumartist"] = albumartist
+        if date:
+            dir_entry["date"] = date
+        if genre:
+            dir_entry["genre"] = genre
+
+        sorted_tracks = {}
+        for filename in sorted(
+            tracks.keys(),
+            key=lambda f: (
+                int(tracks[f].get("tracknumber", "0"))
+                if tracks[f].get("tracknumber", "").isdigit()
+                else float("inf"),
+                f,
+            ),
+        ):
+            tags = tracks[filename]
+            track_tags = dict(tags)
+            # Remove album-level tags from track
+            track_tags.pop("album", None)
+            track_tags.pop("albumartist", None)
+            track_tags.pop("date", None)
+            if genre:
+                track_tags.pop("genre", None)
+            # Remove artist if same as albumartist
+            if track_tags.get("artist") == albumartist:
+                track_tags.pop("artist", None)
+            sorted_tracks[filename] = sort_tags(track_tags)
+
+        dir_entry["tracks"] = sorted_tracks
+        result[dir_path + "/"] = dir_entry
+
+    result = dict(sorted(result.items()))
+
+    if output_file:
+        with open(output_file, "w", encoding="utf-8") as f:
+            json.dump(result, f, indent=2, ensure_ascii=False)
+        print(f"\nDumped {len(result)} directories to {output_file}", file=sys.stderr)
+    else:
+        json.dump(result, sys.stdout, indent=2, ensure_ascii=False)
+        print(file=sys.stdout)
+
+
 def dump_directory_tags(directory, output_file):
     directory_path = pathlib.Path(directory).absolute()
 
@@ -75,7 +219,9 @@ def dump_directory_tags(directory, output_file):
     for path in all_files(directory_path):
         if not is_audio_file(path):
             continue
-        all_tags[str(path.absolute())] = get_all_tags(path)
+        all_tags[str(path.absolute())] = sort_tags(get_all_tags(path))
+
+    all_tags = dict(sorted(all_tags.items()))
 
     if output_file:
         with open(output_file, "w", encoding="utf-8") as f:
@@ -90,7 +236,7 @@ def dump_directory_tags(directory, output_file):
 
 def dump_single_file_tags(file_path, output_file):
     file_path = pathlib.Path(file_path).absolute()
-    tags = get_all_tags(file_path)
+    tags = sort_tags(get_all_tags(file_path))
 
     if output_file:
         with open(output_file, "w", encoding="utf-8") as f:
@@ -109,8 +255,14 @@ def cmd_dump(args):
     path_obj = pathlib.Path(args.path)
 
     if path_obj.is_dir():
-        dump_directory_tags(args.path, args.output)
+        if args.structured:
+            dump_structured_tags(args.path, args.output)
+        else:
+            dump_directory_tags(args.path, args.output)
     elif path_obj.is_file():
+        if args.structured:
+            print("Structured mode requires a directory", file=sys.stderr)
+            sys.exit(1)
         dump_single_file_tags(args.path, args.output)
     else:
         print(f"Invalid path: {args.path}", file=sys.stderr)
@@ -123,12 +275,44 @@ def normalize_tags(tags):
     }
 
 
-def cmd_restore(args):
+def expand_structured_tags(structured):
+    """Convert structured format back to flat {filepath: tags} format."""
+    flat = {}
+    for dir_path, dir_data in structured.items():
+        album = dir_data.get("album")
+        albumartist = dir_data.get("albumartist")
+        date = dir_data.get("date")
+        genre = dir_data.get("genre")
+
+        for filename, track_tags in dir_data.get("tracks", {}).items():
+            file_path = str(pathlib.Path(dir_path) / filename)
+            tags = dict(track_tags)
+            if album:
+                tags["album"] = album
+            if albumartist:
+                tags["albumartist"] = albumartist
+                # Restore artist if not present (was same as albumartist)
+                if "artist" not in tags:
+                    tags["artist"] = albumartist
+            if date:
+                tags["date"] = date
+            if genre and "genre" not in tags:
+                tags["genre"] = genre
+            flat[file_path] = tags
+    return flat
+
+
+def load_input_tags(args):
+    if hasattr(args, "all_tags"):
+        return args.all_tags
     if args.input:
         with open(args.input, "r", encoding="utf-8") as f:
-            all_tags = json.load(f)
-    else:
-        all_tags = json.load(sys.stdin)
+            return json.load(f)
+    return json.load(sys.stdin)
+
+
+def cmd_restore(args):
+    all_tags = load_input_tags(args)
 
     success_count = 0
     skipped_count = 0
@@ -166,11 +350,7 @@ def cmd_restore(args):
 
 
 def cmd_merge(args):
-    if args.input:
-        with open(args.input, "r", encoding="utf-8") as f:
-            all_tags = json.load(f)
-    else:
-        all_tags = json.load(sys.stdin)
+    all_tags = load_input_tags(args)
 
     success_count = 0
     skipped_count = 0
@@ -305,6 +485,12 @@ def main():
         help="Merge mode: only update/delete specified tags (requires -i)",
     )
     parser.add_argument(
+        "-S",
+        "--structured",
+        action="store_true",
+        help="Structured output: group by directory with album/albumartist at top level",
+    )
+    parser.add_argument(
         "-s",
         "--set",
         action="append",
@@ -333,6 +519,14 @@ def main():
     elif args.input:
         if args.input == "-":
             args.input = None
+        if args.structured:
+            # Load and expand structured format to flat format
+            if args.input:
+                with open(args.input, "r", encoding="utf-8") as f:
+                    structured = json.load(f)
+            else:
+                structured = json.load(sys.stdin)
+            args.all_tags = expand_structured_tags(structured)
         if args.merge:
             cmd_merge(args)
         else:
