@@ -36,7 +36,7 @@ if [ ! -f "$dst_file" ] || [ "$src_hash" != "$(sha256sum "$dst_file" | cut -d' '
 fi
 
 log 'Syncing roms'
-./sync-roms
+./sync-roms --delete
 
 log 'Generating .m3u files'
 ./generate_pico_thumbs.sh "${SDCARD_DIR}"

@@ -151,13 +151,18 @@ async def sync_roms(
 
         index = await get_nas_index(nas_path)
 
+        # Filter index to relevant archives
+        archives = {
+            name: info
+            for name, info in index.items()
+            if "/" not in name
+            and name.endswith(archive_ext)
+            and not (extension == ".nds" and "(Wi-Fi Kiosk)" in name)
+        }
+
         # Build set of expected ROM names from NAS
         nas_roms = set()
-        for archive_name, archive_info in index.items():
-            if "/" in archive_name:
-                continue
-            if not archive_name.endswith(archive_ext):
-                continue
+        for archive_name, archive_info in archives.items():
             rom_name, _ = get_rom_from_archive(archive_info, extension)
             if rom_name:
                 nas_roms.add(rom_name)
@@ -172,19 +177,7 @@ async def sync_roms(
                     unexpected.append(f)
                     print(f"unexpected: {sdcard_subdir}/{f.name}")
 
-        for archive_name, archive_info in index.items():
-            # Skip subdirectories (only want top-level files)
-            if "/" in archive_name:
-                continue
-
-            # Skip non-matching archives
-            if not archive_name.endswith(archive_ext):
-                continue
-
-            # Skip NDS Wi-Fi Kiosk roms
-            if extension == ".nds" and " (Wi-Fi Kiosk)" in archive_name:
-                continue
-
+        for archive_name, archive_info in archives.items():
             # Skip if filtering by specific file
             if filter_archive and archive_name != filter_archive:
                 continue
