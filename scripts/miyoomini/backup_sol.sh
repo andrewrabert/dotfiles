@@ -39,7 +39,23 @@ fi
 
 rsync -avz \
     --delete \
+    --delete-excluded \
     --progress \
-    --exclude 'Roms/NDS/*.nds' \
-    --exclude 'Roms/PS/*/*.bin' \
+    --exclude '/Roms/FC/*.fc' \
+    --exclude '/Roms/GB/*.gb' \
+    --exclude '/Roms/GBA/*.gba' \
+    --exclude '/Roms/GBC/*.gbc' \
+    --exclude '/Roms/GG/*.gg' \
+    --exclude '/Roms/MD/*.md' \
+    --exclude '/Roms/MS/*.sms' \
+    --exclude '/Roms/NDS/*.nds' \
+    --exclude '/Roms/NGP/*.ngc' \
+    --exclude '/Roms/NGP/*.ngp' \
+    --exclude '/Roms/PCE/*.pce' \
+    --exclude '/Roms/PICO/*.png' \
+    --exclude '/Roms/POKE/*.min' \
+    --exclude '/Roms/PS/*/*.bin' \
+    --exclude '/Roms/SFC/*.sfc' \
+    --exclude '/Roms/WS/*.ws' \
+    --exclude '/Roms/WS/*.wsc' \
     "${SOURCE}/" "${TARGET}"

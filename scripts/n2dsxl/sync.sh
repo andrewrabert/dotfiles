@@ -28,15 +28,15 @@ fi
 
 cd "${DOTFILES}/scripts/n2dsxl" || exit 1
 
-src_hash="$(sha256sum ./sync-sol.sh | cut -d' ' -f1)"
-dst_file="${SDCARD_DIR}/sync-sol.sh"
+src_hash="$(sha256sum ./sync_sol.sh | cut -d' ' -f1)"
+dst_file="${SDCARD_DIR}/sync_sol.sh"
 if [ ! -f "$dst_file" ] || [ "$src_hash" != "$(sha256sum "$dst_file" | cut -d' ' -f1)" ]; then
-    log 'Copying sync-sol.sh'
-    cp ./sync-sol.sh "$dst_file"
+    log 'Copying sync_sol.sh'
+    cp ./sync_sol.sh "$dst_file"
 fi
 
 log 'Syncing roms'
-./sync-roms
+./sync_roms.py --delete "${SDCARD_DIR}"
 
 log 'Backing up'
-./backup-sol "${SDCARD_DIR}"
+./backup_sol.sh "${SDCARD_DIR}"

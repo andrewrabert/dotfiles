@@ -20,7 +20,6 @@ import async_executor
 # Handle broken pipe gracefully (e.g., when piping to head)
 signal.signal(signal.SIGPIPE, signal.SIG_DFL)
 
-SDCARD_BASE = pathlib.Path("/media/ONION/Roms")
 MTIME_THRESHOLD = 2  # seconds (FAT32 has 2-second resolution)
 
 # (sdcard_subdir, nas_path, rom_extension)
@@ -35,9 +34,14 @@ ROM_TYPES = [
     ("MD", NAS / "Sega Mega Drive (Genesis)", ".md"),
     ("MS", NAS / "Sega Master System", ".sms"),
     ("NDS", NAS / "Nintendo DS", ".nds"),
+    ("NGP", NAS / "SNK NeoGeo Pocket Color", ".ngc"),
+    ("NGP", NAS / "SNK NeoGeo Pocket", ".ngp"),
     ("PCE", NAS / "TurboGrafx-16 (PC Engine)", ".pce"),
+    ("PICO", NAS / "PICO-8", ".png"),
     ("POKE", NAS / "Nintendo Pokemon Mini", ".min"),
     ("SFC", NAS / "Nintendo Super Nintendo Entertainment System", ".sfc"),
+    ("WS", NAS / "Bandai WonderSwan Color", ".wsc"),
+    ("WS", NAS / "Bandai WonderSwan", ".ws"),
 ]
 
 
@@ -88,36 +92,46 @@ async def extract_7z(archive_path, dest_dir):
 
 async def sync_single_rom(item):
     """Sync a single ROM from NAS to SD card."""
-    archive_path = item["nas_path"] / item["archive_name"]
+    source_path = item["nas_path"] / item["source_name"]
     target_path = item["target_path"]
 
     # Ensure target directory exists
     target_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Extract to temp dir, copy to temp file, then rename
-    with tempfile.TemporaryDirectory() as tmp:
-        tmp_path = pathlib.Path(tmp)
-        await extract_7z(archive_path, tmp_path)
+    temp_target = target_path.with_name(f"._romsync_{target_path.name}")
 
-        extracted_file = tmp_path / item["rom_name"]
-        if not extracted_file.exists():
-            return False, f"extracted file not found: {item['rom_name']}"
+    if item.get("compressed", True):
+        # Extract to temp dir, copy to temp file, then rename
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = pathlib.Path(tmp)
+            await extract_7z(source_path, tmp_path)
 
-        # Copy to temp file in target dir, set mtime, then atomic rename
-        temp_target = target_path.with_name(f"._romsync_{target_path.name}")
-        shutil.copy2(extracted_file, temp_target)
-        os.utime(temp_target, (item["nas_mtime"], item["nas_mtime"]))
-        temp_target.rename(target_path)
+            extracted_file = tmp_path / item["rom_name"]
+            if not extracted_file.exists():
+                return False, f"extracted file not found: {item['rom_name']}"
+
+            shutil.copy2(extracted_file, temp_target)
+    else:
+        # Direct copy for uncompressed files
+        shutil.copy2(source_path, temp_target)
+
+    os.utime(temp_target, (item["nas_mtime"], item["nas_mtime"]))
+    temp_target.rename(target_path)
 
     return True, None
 
 
 async def sync_roms(
-    dry_run=False, verbose=False, jobs=1, delete=False, path=None
+    sdcard_roms_dir,
+    dry_run=False,
+    verbose=False,
+    jobs=1,
+    delete=False,
+    path=None,
 ):
     """Sync ROMs from NAS to SD card."""
-    if not SDCARD_BASE.exists():
-        raise UserError(f"SD card not mounted: {SDCARD_BASE}")
+    if not sdcard_roms_dir.exists():
+        raise UserError(f"SD card not mounted: {sdcard_roms_dir}")
 
     all_to_sync = []
     unexpected = []
@@ -141,8 +155,8 @@ async def sync_roms(
         filter_archive = None
 
     for sdcard_subdir, nas_path, extension in rom_types_to_process:
-        sdcard_path = SDCARD_BASE / sdcard_subdir
-        archive_ext = f"{extension}.7z"
+        sdcard_path = sdcard_roms_dir / sdcard_subdir
+        is_pico = sdcard_subdir == "PICO"
 
         if not sdcard_path.exists():
             if verbose:
@@ -151,21 +165,35 @@ async def sync_roms(
 
         index = await get_nas_index(nas_path)
 
-        # Filter index to relevant archives
-        archives = {
-            name: info
-            for name, info in index.items()
-            if "/" not in name
-            and name.endswith(archive_ext)
-            and not (extension == ".nds" and "(Wi-Fi Kiosk)" in name)
-        }
+        # Filter index to relevant files
+        if is_pico:
+            # PICO: uncompressed .p8.png files
+            files = {
+                name: info
+                for name, info in index.items()
+                if "/" not in name and name.endswith(".p8.png")
+            }
+        else:
+            # Standard: compressed .ext.7z archives
+            archive_ext = f"{extension}.7z"
+            files = {
+                name: info
+                for name, info in index.items()
+                if "/" not in name
+                and name.endswith(archive_ext)
+                and not (extension == ".nds" and "(Wi-Fi Kiosk)" in name)
+            }
 
         # Build set of expected ROM names from NAS
         nas_roms = set()
-        for archive_name, archive_info in archives.items():
-            rom_name, _ = get_rom_from_archive(archive_info, extension)
-            if rom_name:
-                nas_roms.add(rom_name)
+        for source_name, file_info in files.items():
+            if is_pico:
+                # .p8.png -> .png
+                nas_roms.add(source_name[:-7] + ".png")
+            else:
+                rom_name, _ = get_rom_from_archive(file_info, extension)
+                if rom_name:
+                    nas_roms.add(rom_name)
 
         # Check for unexpected ROMs on SD card (skip when filtering by path)
         if not path:
@@ -177,20 +205,26 @@ async def sync_roms(
                     unexpected.append(f)
                     print(f"unexpected: {sdcard_subdir}/{f.name}")
 
-        for archive_name, archive_info in archives.items():
+        for source_name, file_info in files.items():
             # Skip if filtering by specific file
-            if filter_archive and archive_name != filter_archive:
+            if filter_archive and source_name != filter_archive:
                 continue
 
-            rom_name, nas_size = get_rom_from_archive(archive_info, extension)
-            if not rom_name:
-                if verbose:
-                    print(f"skip (no {extension}): {archive_name}")
-                continue
+            if is_pico:
+                # PICO: direct file, rename .p8.png -> .png
+                rom_name = source_name
+                target_name = source_name[:-7] + ".png"
+                nas_size = file_info.get("size", 0)
+            else:
+                rom_name, nas_size = get_rom_from_archive(file_info, extension)
+                if not rom_name:
+                    if verbose:
+                        print(f"skip (no {extension}): {source_name}")
+                    continue
+                target_name = rom_name
 
-            target_path = sdcard_path / rom_name
-
-            nas_mtime = archive_info.get("mtime", 0)
+            target_path = sdcard_path / target_name
+            nas_mtime = file_info.get("mtime", 0)
 
             if target_path.exists():
                 sd_stat = target_path.stat()
@@ -201,7 +235,7 @@ async def sync_roms(
                     and sd_size == nas_size
                 ):
                     if verbose:
-                        print(f"skip (up to date): {rom_name}")
+                        print(f"skip (up to date): {target_name}")
                     continue
                 if verbose:
                     reason = f"outdated: mtime sd={sd_mtime:.0f} nas={nas_mtime:.0f}, size sd={sd_size} nas={nas_size}"
@@ -213,11 +247,12 @@ async def sync_roms(
             all_to_sync.append(
                 {
                     "nas_path": nas_path,
-                    "archive_name": archive_name,
+                    "source_name": source_name,
                     "rom_name": rom_name,
                     "target_path": target_path,
                     "nas_mtime": nas_mtime,
                     "reason": reason,
+                    "compressed": not is_pico,
                 }
             )
 
@@ -291,12 +326,14 @@ async def main():
         type=pathlib.Path,
         help="specific file or directory to sync",
     )
+    parser.add_argument("sdcard_base", type=pathlib.Path)
     args = parser.parse_args()
 
     if args.delete and args.path:
         parser.error("--delete cannot be used with a specific path")
 
     await sync_roms(
+        sdcard_roms_dir=args.sdcard_base / "Roms",
         dry_run=args.dry_run,
         verbose=args.verbose,
         jobs=args.num_jobs,

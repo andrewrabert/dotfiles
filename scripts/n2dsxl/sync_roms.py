@@ -20,7 +20,6 @@ import async_executor
 # Handle broken pipe gracefully (e.g., when piping to head)
 signal.signal(signal.SIGPIPE, signal.SIG_DFL)
 
-SDCARD_BASE = pathlib.Path("/media/N2DSXL/roms")
 MTIME_THRESHOLD = 2  # seconds (FAT32 has 2-second resolution)
 
 # (sdcard_subdir, nas_path, rom_extension)
@@ -114,11 +113,16 @@ async def sync_single_rom(item):
 
 
 async def sync_roms(
-    dry_run=False, verbose=False, jobs=1, delete=False, path=None
+    sdcard_roms_dir,
+    dry_run=False,
+    verbose=False,
+    jobs=1,
+    delete=False,
+    path=None,
 ):
     """Sync ROMs from NAS to microSD."""
-    if not SDCARD_BASE.exists():
-        raise UserError(f"SD card not mounted: {SDCARD_BASE}")
+    if not sdcard_roms_dir.exists():
+        raise UserError(f"SD card not mounted: {sdcard_roms_dir}")
 
     all_to_sync = []
     unexpected = []
@@ -142,7 +146,7 @@ async def sync_roms(
         filter_archive = None
 
     for sdcard_subdir, nas_path, extension in rom_types_to_process:
-        sdcard_path = SDCARD_BASE / sdcard_subdir
+        sdcard_path = sdcard_roms_dir / sdcard_subdir
         archive_ext = f"{extension}.7z"
 
         if not sdcard_path.exists():
@@ -298,12 +302,14 @@ async def main():
         type=pathlib.Path,
         help="specific file or directory to sync",
     )
+    parser.add_argument("sdcard_base", type=pathlib.Path)
     args = parser.parse_args()
 
     if args.delete and args.path:
         parser.error("--delete cannot be used with a specific path")
 
     await sync_roms(
+        sdcard_roms_dir=args.sdcard_base / "roms",
         dry_run=args.dry_run,
         verbose=args.verbose,
         jobs=args.num_jobs,

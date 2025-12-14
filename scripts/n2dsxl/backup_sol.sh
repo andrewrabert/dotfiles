@@ -25,11 +25,11 @@ if ! [ -d "${TARGET}" ]; then
     TARGET="sol:${TARGET}"
 fi
 
-rm -rf "${TARGET}"/roms
-
 rsync \
     -aHAXSvz \
     --delete \
+    --delete-excluded \
+    --modify-window=2 \
     --progress \
     --exclude 'roms/ds/*/*.nds' \
     --exclude 'roms/gb/*/*.gb' \
