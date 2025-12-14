@@ -124,15 +124,15 @@ TITLEBAR_CONFIGS = {
             inactive_bg="#ffffff",
         ),
     ),
-    "Jellyfin Media Player": TitlebarConfig(
+    "Jellyfin": TitlebarConfig(
         classes=[
             WindowClass(
-                description="Jellyfin Media Player",
-                wmclass="jellyfinmediaplayer",
+                description="Jellyfin",
+                wmclass="jellyfin-desktop",
             ),
             WindowClass(
-                description="Jellyfin Media Player",
-                wmclass="com.github.iwalton3.jellyfin-media-player",
+                description="Jellyfin",
+                wmclass="org.jellyfin.desktop",
             ),
         ],
         dark=ColorScheme(

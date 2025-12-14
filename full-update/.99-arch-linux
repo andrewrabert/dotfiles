@@ -364,7 +364,7 @@ if HOSTNAME in ("mars", "phobos", "lounge-htpc"):
             "gamescope",
             "gwenview",
             "haruna",
-            "jellyfin-media-player-git",
+            "jellyfin-desktop-git",
             "kwalletmanager",
             "noto-fonts",
             "proton-ge-custom-bin",
