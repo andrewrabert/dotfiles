@@ -106,20 +106,37 @@ class Systemctl:
 
 class Pacman:
     @staticmethod
-    async def install(packages, asdeps=False, asexplicit=False):
+    async def install(packages, asdeps=False):
         """Install packages via pacman."""
         args = [
             "sudo",
             "pacman",
             "-S",
             "--noconfirm",
+            "--needed",
             "--overwrite",
             "*",
         ]
         if asdeps:
             args.append("--asdeps")
-        if asexplicit:
+        args.extend(["--", *packages])
+        proc = await asyncio.create_subprocess_exec(*args)
+        await proc.communicate()
+        if proc.returncode:
+            raise subprocess.CalledProcessError(proc.returncode, args)
+
+    @staticmethod
+    async def set_reason(packages, explicit=False, asdeps=False):
+        """Change install reason for packages."""
+        if explicit and asdeps:
+            raise ValueError("Cannot set both explicit and asdeps")
+        if not explicit and not asdeps:
+            raise ValueError("Must set either explicit or asdeps")
+        args = ["sudo", "pacman", "-D"]
+        if explicit:
             args.append("--asexplicit")
+        if asdeps:
+            args.append("--asdeps")
         args.extend(["--", *packages])
         proc = await asyncio.create_subprocess_exec(*args)
         await proc.communicate()
@@ -378,7 +395,6 @@ if HOSTNAME in ("mars", "phobos"):
     EXPECTED_PACKAGES.update(
         {
             "vulkan-radeon",
-            "lib32-vulkan-radeon",
         }
     )
 
@@ -632,6 +648,9 @@ EXPECTED_PACKAGE_DEPENDENCIES = {
     },
     "udiskie": {
         "libappindicator",
+    },
+    "vulkan-radeon": {
+        "lib32-vulkan-radeon",
     },
     "wine": {
         "alsa-plugins",
@@ -933,17 +952,20 @@ async def ensure_packages():
     installed_packages = {package.name: package for package in all_packages()}
 
     missing = set()
+    wrong_reason = set()
     for name in expected_packages:
         if name not in installed_packages:
             missing.add(name)
         elif installed_packages[name].reason != pyalpm.PKG_REASON_EXPLICIT:
-            missing.add(name)
+            wrong_reason.add(name)
 
     if missing:
         print("Installing missing packages ...")
-        # asexplicit=True will make deps explicit
-        # await Pacman.install(missing, asexplicit=True)
-        await Pacman.install(missing, asexplicit=False)
+        await Pacman.install(missing)
+
+    if wrong_reason:
+        print("Marking packages as explicitly installed ...")
+        await Pacman.set_reason(wrong_reason, explicit=True)
 
 
 async def ensure_package_dependencies():
