@@ -19,6 +19,12 @@ def main():
     parser.add_argument(
         "--content", "-c", default="", help="Content for the file"
     )
+    parser.add_argument(
+        "--show-path",
+        "-s",
+        action="store_true",
+        help="Print path of existing memory file (error if not found)",
+    )
     default_base = pathlib.Path.home() / ".claude/local-memory"
     parser.add_argument(
         "--base",
@@ -40,6 +46,13 @@ def main():
     else:
         rel = pathlib.Path(*target.parts[1:])
         storage = base / "from_root" / rel / "CLAUDE.local.md"
+
+    if args.show_path:
+        if not storage.exists():
+            raise SystemExit(f"Error: memory file not found: {storage}")
+        print(storage)
+        return
+
     link = target / "CLAUDE.local.md"
 
     if link.exists() or link.is_symlink():

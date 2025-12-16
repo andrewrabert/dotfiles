@@ -391,13 +391,6 @@ if HOSTNAME in ("mars", "phobos", "lounge-htpc"):
     )
 
 if HOSTNAME in ("mars", "phobos"):
-    # amdgpu
-    EXPECTED_PACKAGES.update(
-        {
-            "vulkan-radeon",
-        }
-    )
-
     EXPECTED_PACKAGES.update(
         {
             "86box",
@@ -438,6 +431,7 @@ if HOSTNAME in ("mars", "phobos"):
             "plasma6-runners-emojirunner",
             "podman",
             "print-manager",
+            "qt6-doc",
             "rawtherapee",
             "sddm",
             "signal-desktop",
@@ -448,6 +442,7 @@ if HOSTNAME in ("mars", "phobos"):
             "udiskie",
             "virt-manager",
             "vlc",
+            "vulkan-radeon",  # amdgpu
             "waydroid",
             "wine",
             "xboxdrv",
