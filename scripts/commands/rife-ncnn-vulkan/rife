@@ -137,7 +137,7 @@ async def main():
         if path in input_paths:
             shutil.copy(path, target)
         else:
-            path.rename(target)
+            path.replace(target)
 
 
 if __name__ == "__main__":

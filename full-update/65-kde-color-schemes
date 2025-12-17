@@ -26,7 +26,7 @@ def safe_write_text(path, data):
             handle.write(data)
             handle.flush()
             os.fsync(handle.fileno())
-            temp_path.rename(path)
+            temp_path.replace(path)
         finally:
             try:
                 temp_path.unlink()

@@ -7,7 +7,9 @@ import tempfile
 
 def split_flac(flac_path, cue_path):
     parent = cue_path.absolute().parent
-    with tempfile.TemporaryDirectory(dir=parent, prefix=".shntool_split") as tmpdir:
+    with tempfile.TemporaryDirectory(
+        dir=parent, prefix=".shntool_split"
+    ) as tmpdir:
         subprocess.run(
             [
                 "shntool",
@@ -27,7 +29,7 @@ def split_flac(flac_path, cue_path):
             check=True,
         )
         for path in pathlib.Path(tmpdir).iterdir():
-            path.rename(parent / path.name)
+            path.replace(parent / path.name)
     flac_path.unlink()
 
 

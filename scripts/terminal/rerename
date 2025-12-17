@@ -169,8 +169,8 @@ def main():
                     temp_path = pathlib.Path(temp_name)
                     temp_path.unlink()
                     try:
-                        path.rename(temp_path)
-                        temp_path.rename(new_path)
+                        path.replace(temp_path)
+                        temp_path.replace(new_path)
                         print(old_name)
                         print(new_path.name)
                         print()
@@ -181,7 +181,7 @@ def main():
                         )
                         # Try to restore original if temp rename succeeded
                         if temp_path.exists():
-                            temp_path.rename(path)
+                            temp_path.replace(path)
             else:
                 # Different file exists at target
                 if args.force:
@@ -191,7 +191,7 @@ def main():
                         old_name = path.name
                         try:
                             new_path.unlink()
-                            path.rename(new_path)
+                            path.replace(new_path)
                             print(old_name)
                             print(new_path.name)
                             print()
@@ -212,7 +212,7 @@ def main():
             else:
                 old_name = path.name
                 try:
-                    path.rename(new_path)
+                    path.replace(new_path)
                     print(old_name)
                     print(new_path.name)
                     print()

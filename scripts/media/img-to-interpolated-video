@@ -31,7 +31,9 @@ def TempPath(**kwargs):
 
 def gifski(path, target, framerate="30", loops=1):
     with TempPath(
-        dir=target.parent, prefix=".img-to-interpolated-video", suffix=target.suffix
+        dir=target.parent,
+        prefix=".img-to-interpolated-video",
+        suffix=target.suffix,
     ) as tmptarget:
         subprocess.run(
             [
@@ -48,12 +50,14 @@ def gifski(path, target, framerate="30", loops=1):
             stdout=subprocess.DEVNULL,
             check=True,
         )
-        tmptarget.rename(target)
+        tmptarget.replace(target)
 
 
 def ffmpeg_merge(path, target, framerate="30", loops=1):
     with TempPath(
-        dir=target.parent, prefix=".img-to-interpolated-video", suffix=target.suffix
+        dir=target.parent,
+        prefix=".img-to-interpolated-video",
+        suffix=target.suffix,
     ) as tmptarget:
         subprocess.run(
             [
@@ -78,7 +82,7 @@ def ffmpeg_merge(path, target, framerate="30", loops=1):
             stdout=subprocess.DEVNULL,
             check=True,
         )
-        tmptarget.rename(target)
+        tmptarget.replace(target)
 
 
 def ffmpeg_frames_to_png(path, target, remove_duplicates=True):
@@ -167,10 +171,15 @@ def main():
         "--fps", default="30", metavar="FPS", help="(default %(default)s)"
     )
     parser.add_argument(
-        "-m", "--mode", choices=["bounce", "cycle", "oneshot"], default="oneshot"
+        "-m",
+        "--mode",
+        choices=["bounce", "cycle", "oneshot"],
+        default="oneshot",
     )
     parser.add_argument("source", type=pathlib.Path)
-    parser.add_argument("-f", "--format", default="mp4", choices=["gif", "mp4", "png"])
+    parser.add_argument(
+        "-f", "--format", default="mp4", choices=["gif", "mp4", "png"]
+    )
     args = parser.parse_args()
 
     output = args.output
@@ -193,7 +202,9 @@ def main():
         else:
             raise FileNotFoundError
 
-        tmpdir = exitstack.enter_context(tempfile.TemporaryDirectory(dir=source.parent))
+        tmpdir = exitstack.enter_context(
+            tempfile.TemporaryDirectory(dir=source.parent)
+        )
         tmpdir = pathlib.Path(tmpdir)
         sources = sorted(list(source.iterdir()))
 
@@ -212,7 +223,10 @@ def main():
             )
             tmpdir2 = pathlib.Path(tmpdir2)
             rife(
-                tmpdir, tmpdir2, model=args.rife_model, num_passes=args.rife_iterations
+                tmpdir,
+                tmpdir2,
+                model=args.rife_model,
+                num_passes=args.rife_iterations,
             )
             shutil.rmtree(tmpdir)
             shutil.move(tmpdir2, tmpdir)

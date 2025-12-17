@@ -31,7 +31,9 @@ def main():
             h.write("\n".join(path.name for path in sources))
         subprocess.run(["nvim", tmp.name])
         with open(tmp.name, "r") as h:
-            targets = [pathlib.Path(line.strip()).absolute() for line in h.readlines()]
+            targets = [
+                pathlib.Path(line.strip()).absolute() for line in h.readlines()
+            ]
 
     if not args.allow_duplicates:
         if len(targets) != len(set(targets)):
@@ -49,7 +51,7 @@ def main():
                     target = target.with_name(target.name + "_")
             else:
                 raise RuntimeError(f'target exists: "{source}" -> "{target}"')
-        source.rename(target)
+        source.replace(target)
 
 
 if __name__ == "__main__":

@@ -102,7 +102,7 @@ async def mkvmerge(dest, *sources, delete_parts=True, title):
         await proc.communicate()
         if proc.returncode:
             raise ProcessError(proc)
-        tmp.rename(dest)
+        tmp.replace(dest)
     if delete_parts:
         for part in sources:
             if part.absolute() != dest.absolute():
@@ -115,7 +115,9 @@ async def main():
         "--force", action="store_true", help="include files ending in .mkv"
     )
     parser.add_argument(
-        "--keep", action="store_true", help="keep original files after conversion"
+        "--keep",
+        action="store_true",
+        help="keep original files after conversion",
     )
     parser.add_argument("path", nargs="+", type=pathlib.Path)
     args = parser.parse_args()

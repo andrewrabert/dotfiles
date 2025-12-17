@@ -2,11 +2,11 @@
 import argparse
 import asyncio
 import importlib.machinery
-import tempfile
 import json
 import os
 import pathlib
 import shutil
+import tempfile
 import time
 
 DBUS_SESSION_BUS_ADDRESS = os.environ["DBUS_SESSION_BUS_ADDRESS"]
@@ -81,7 +81,7 @@ def safe_write(path, data):
         temp_path = pathlib.Path(handle.name)
         try:
             temp_path.write_bytes(data)
-            temp_path.rename(path)
+            temp_path.replace(path)
         finally:
             try:
                 temp_path.unlink()
@@ -178,7 +178,9 @@ class _Parser:
 
 async def main():
     parser = argparse.ArgumentParser()
-    subparsers = parser.add_subparsers(dest="command", metavar="COMMAND", required=True)
+    subparsers = parser.add_subparsers(
+        dest="command", metavar="COMMAND", required=True
+    )
 
     load_parser = subparsers.add_parser("load", help="")
     load_parser.set_defaults(func=_Parser.load)

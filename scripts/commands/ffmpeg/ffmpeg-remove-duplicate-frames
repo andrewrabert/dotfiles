@@ -8,11 +8,12 @@ FFmpeg duplicate frame removal tool with async processing.
 # ]
 # ///
 """
-import asyncio
+
 import argparse
+import asyncio
+import json
 import pathlib
 import tempfile
-import json
 
 import async_executor
 
@@ -77,11 +78,13 @@ async def _process_path(path):
     if not avg_frame_rate:
         raise RuntimeError
 
-    with tempfile.NamedTemporaryFile(dir=path.parent, suffix=path.suffix) as tmpfile:
+    with tempfile.NamedTemporaryFile(
+        dir=path.parent, suffix=path.suffix
+    ) as tmpfile:
         tmpfile = pathlib.Path(tmpfile.name)
         tmpfile.unlink()
         await ffmpeg.remove_duplicates(path, tmpfile, avg_frame_rate)
-        tmpfile.rename(path)
+        tmpfile.replace(path)
         tmpfile.touch()
 
 

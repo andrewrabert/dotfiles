@@ -291,7 +291,7 @@ async def reencode(source, encode_format="flac"):
             pass
         source.unlink()
         dest = source.with_suffix(suffix)
-        tmp.rename(dest)
+        tmp.replace(dest)
 
     after = dest.stat().st_size
     return source, before, after

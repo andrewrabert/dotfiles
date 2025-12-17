@@ -33,7 +33,7 @@ def main():
             print(path)
             print(newpath)
             raise RuntimeError
-        path.rename(newpath)
+        path.replace(newpath)
 
 
 if __name__ == "__main__":

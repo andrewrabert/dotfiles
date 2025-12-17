@@ -56,7 +56,6 @@ import sys
 import tempfile
 import zipfile
 
-
 LOGGER = logging.getLogger("archive-extract")
 
 
@@ -269,7 +268,16 @@ async def create_zstd(path, dest, fast=False, password=None):
     level = "-1" if fast else "-22"
 
     zstd_proc = await asyncio.create_subprocess_exec(
-        "zstd", "--quiet", "-f", "-T0", "--ultra", level, "-o", dest, "--", path
+        "zstd",
+        "--quiet",
+        "-f",
+        "-T0",
+        "--ultra",
+        level,
+        "-o",
+        dest,
+        "--",
+        path,
     )
     await zstd_proc.wait()
     assert zstd_proc.returncode == 0
@@ -350,7 +358,7 @@ async def create_nsz(path, dest, fast=False, password=None):
         assert len(tmp_files) == 1
         tmp_file = tmp_files[0]
         assert tmp_file.is_file()
-        tmp_file.rename(dest)
+        tmp_file.replace(dest)
 
 
 async def create_tar(path, dest, fast=False, password=None):
@@ -509,7 +517,15 @@ async def create_tar_zstd(path, dest, fast=False, sparse=False, password=None):
     os.close(write)
 
     zstd_proc = await asyncio.create_subprocess_exec(
-        "zstd", "--quiet", "-f", "-T0", "--ultra", level, "-o", dest, stdin=read
+        "zstd",
+        "--quiet",
+        "-f",
+        "-T0",
+        "--ultra",
+        level,
+        "-o",
+        dest,
+        stdin=read,
     )
     os.close(read)
 
@@ -535,7 +551,9 @@ def _build_archive_dest(source, suffix, parent=None):
     increment = 0
     while True:
         dest = parent / pathlib.Path(
-            "".join([source.name, f"_{increment}" if increment else "", suffix])
+            "".join(
+                [source.name, f"_{increment}" if increment else "", suffix]
+            )
         )
 
         if not dest.exists():
@@ -596,7 +614,13 @@ _FORMATS = {
 
 
 async def process(
-    source, archive_format, remove, fast=False, parent=None, password=None, dest=None
+    source,
+    archive_format,
+    remove,
+    fast=False,
+    parent=None,
+    password=None,
+    dest=None,
 ):
     formats = _FORMATS[archive_format]
 
@@ -612,7 +636,7 @@ async def process(
         dir=dest.parent, prefix=".archive_", suffix=source.name + ".tmp"
     ) as tmp:
         await formats["func"](source, tmp, fast, password=password)
-        tmp.rename(dest)
+        tmp.replace(dest)
     after = dest.lstat().st_size
 
     if remove:
@@ -679,7 +703,9 @@ class SizeDiffPrinter:
 
 
 def main_archive():
-    parser = argparse.ArgumentParser(usage="%(prog)s [OPTIONS] source [source ...]")
+    parser = argparse.ArgumentParser(
+        usage="%(prog)s [OPTIONS] source [source ...]"
+    )
 
     group_format = parser.add_argument_group("format")
     group_format.add_argument(
@@ -698,7 +724,10 @@ def main_archive():
     )
 
     parser.add_argument(
-        "--rm", default=False, action="store_true", help="remove source after success"
+        "--rm",
+        default=False,
+        action="store_true",
+        help="remove source after success",
     )
     parser.add_argument(
         "-n",
@@ -717,9 +746,15 @@ def main_archive():
     )
     parser.add_argument("--password", help="archive password")
     parser.add_argument(
-        "-o", "--output", metavar="FILE", type=pathlib.Path, help="output filename"
+        "-o",
+        "--output",
+        metavar="FILE",
+        type=pathlib.Path,
+        help="output filename",
     )
-    parser.add_argument("source", type=lambda p: pathlib.Path(p).absolute(), nargs="+")
+    parser.add_argument(
+        "source", type=lambda p: pathlib.Path(p).absolute(), nargs="+"
+    )
 
     args = parser.parse_args()
 
@@ -784,7 +819,9 @@ class nsz:
         return [path.with_suffix(".nsp").name.encode()]
 
     @classmethod
-    async def extract(cls, path, dest, paths=None, password=None, overwrite=False):
+    async def extract(
+        cls, path, dest, paths=None, password=None, overwrite=False
+    ):
         cls._check_is_nsz(path)
         if paths:
             raise NotImplementedError
@@ -818,7 +855,7 @@ class nsz:
             assert tmp_file.is_file()
             if target.exists():
                 raise RuntimeError
-            tmp_file.rename(target)
+            tmp_file.replace(target)
 
     @classmethod
     async def volumes(cls, path, password=""):
@@ -852,7 +889,9 @@ class cli_7zip:
         cls.bin()
 
     @classmethod
-    async def extract(cls, path, dest, paths=None, password="", overwrite=False):
+    async def extract(
+        cls, path, dest, paths=None, password="", overwrite=False
+    ):
         args = [
             cls.bin(),
             "-bd",  # disable progress indicator
@@ -871,7 +910,15 @@ class cli_7zip:
             args.extend(["e", f"-p{password}", "-spd", "-so", "--", str(path)])
         else:
             args.extend(
-                ["x", f"-p{password}", "-spe", "-spd", f"-o{dest}", "--", str(path)]
+                [
+                    "x",
+                    f"-p{password}",
+                    "-spe",
+                    "-spd",
+                    f"-o{dest}",
+                    "--",
+                    str(path),
+                ]
             )
             # supress output that shows even at the quiest log level
             kwargs["stdout"] = asyncio.subprocess.DEVNULL
@@ -983,7 +1030,9 @@ class cli_7zip:
 
             volumes = [
                 pathlib.Path(
-                    "{}{}{}".format(prefix, str(i).rjust(len(vol_num), "0"), suffix)
+                    "{}{}{}".format(
+                        prefix, str(i).rjust(len(vol_num), "0"), suffix
+                    )
                 )
                 for i in range(1, num_volumes + 1)
             ]
@@ -1064,7 +1113,9 @@ class dolphin_tool_rvz:
         return [path.with_suffix(".gcm").name.encode()]
 
     @classmethod
-    async def extract(cls, path, dest, paths=None, password=None, overwrite=False):
+    async def extract(
+        cls, path, dest, paths=None, password=None, overwrite=False
+    ):
         cls._check_is_rvz(path)
         if paths:
             raise NotImplementedError
@@ -1114,7 +1165,9 @@ class udisksctl:
                 )
 
     @classmethod
-    async def extract(cls, path, dest, paths=None, password=None, overwrite=False):
+    async def extract(
+        cls, path, dest, paths=None, password=None, overwrite=False
+    ):
         if paths:
             raise NotImplementedError
         if overwrite:
@@ -1222,11 +1275,15 @@ class udisksctl:
             raise NotImplementedError
         else:
             filesystems = []
-            partitions = info["org.freedesktop.UDisks2.PartitionTable"]["Partitions"]
+            partitions = info["org.freedesktop.UDisks2.PartitionTable"][
+                "Partitions"
+            ]
             for part in partitions:
                 if part.startswith("/org/freedesktop/UDisks2/block_devices/"):
                     bd = "/dev/{}".format(
-                        part.removeprefix("/org/freedesktop/UDisks2/block_devices/")
+                        part.removeprefix(
+                            "/org/freedesktop/UDisks2/block_devices/"
+                        )
                     )
                     part_info = udisksctl._info(block_device=bd)
                 else:
@@ -1290,7 +1347,9 @@ class udisksctl:
             raise RuntimeError("must extracted as root")
         with tempfile.TemporaryDirectory() as tmp:
             try:
-                subprocess.run(["mount", "-o", "loop,ro", device, tmp], check=True)
+                subprocess.run(
+                    ["mount", "-o", "loop,ro", device, tmp], check=True
+                )
                 yield tmp
             finally:
                 subprocess.run(["umount", tmp], check=True)
@@ -1351,7 +1410,9 @@ class unzip:
             args.append("-o")  # overwrite without prompting
         args.append(path)
         proc = await asyncio.create_subprocess_exec(
-            *args, stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE
+            *args,
+            stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE,
         )
         await proc.communicate()
         if proc.returncode:
@@ -1404,7 +1465,9 @@ class unarchiver:
             args.append("-force-overwrite")  # overwrite without prompting
         args.extend(["--", path])
         proc = await asyncio.create_subprocess_exec(
-            *args, stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE
+            *args,
+            stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE,
         )
         await proc.communicate()
         if proc.returncode:
@@ -1486,7 +1549,9 @@ class unshield:
         for line in stdout.splitlines()[1:-2]:
             # convert windows-separated (\) path to local
             p = pathlib.Path(
-                pathlib.PureWindowsPath(line.strip().split(maxsplit=1)[-1].decode())
+                pathlib.PureWindowsPath(
+                    line.strip().split(maxsplit=1)[-1].decode()
+                )
             )
             contents.append(bytes(p))
         return contents
@@ -1498,7 +1563,13 @@ class unshield:
         if overwrite:
             raise NotImplementedError
         proc = await asyncio.create_subprocess_exec(
-            "unshield", "x", "-d", dest, "--", path, stdout=asyncio.subprocess.DEVNULL
+            "unshield",
+            "x",
+            "-d",
+            dest,
+            "--",
+            path,
+            stdout=asyncio.subprocess.DEVNULL,
         )
         await proc.wait()
         if proc.returncode != 0:
@@ -1539,7 +1610,12 @@ class xorriso:
 
         parents = {}
         for line in stdout.splitlines():
-            name = line.split(b"'", maxsplit=1)[-1][:-1].decode().strip().lstrip("/")
+            name = (
+                line.split(b"'", maxsplit=1)[-1][:-1]
+                .decode()
+                .strip()
+                .lstrip("/")
+            )
             if not name:
                 continue
             if line.startswith(b"d"):
@@ -1690,7 +1766,9 @@ class cuefile:
         return name
 
     @classmethod
-    async def extract(cls, path, dest, paths=None, password=None, overwrite=False):
+    async def extract(
+        cls, path, dest, paths=None, password=None, overwrite=False
+    ):
         if paths:
             raise NotImplementedError
         if overwrite:
@@ -1748,12 +1826,14 @@ class cuefile:
             else:
                 for source in pathlib.Path(tmp).iterdir():
                     if source.name.startswith("chunk"):
-                        target = dest / (name + source.name.removeprefix("chunk"))
+                        target = dest / (
+                            name + source.name.removeprefix("chunk")
+                        )
                         if target.exists():
                             raise RuntimeError
                         results[source] = target
             for source, target in results.items():
-                source.rename(target)
+                source.replace(target)
 
     @staticmethod
     def _parse_cue(path):
@@ -1819,10 +1899,14 @@ class unace:
         else:
             raise RuntimeError("unable to parse unace output")
 
-        return sorted(set(line.split(maxsplit=5)[-1] for line in lines if line))
+        return sorted(
+            set(line.split(maxsplit=5)[-1] for line in lines if line)
+        )
 
     @classmethod
-    async def extract(cls, path, dest, paths=None, password=None, overwrite=False):
+    async def extract(
+        cls, path, dest, paths=None, password=None, overwrite=False
+    ):
         if paths:
             raise NotImplementedError
         args = ["unace", "x"]
@@ -1918,7 +2002,9 @@ class innoextract:
         return name, {}
 
     @classmethod
-    async def extract(cls, path, dest, paths=None, password=None, overwrite=False):
+    async def extract(
+        cls, path, dest, paths=None, password=None, overwrite=False
+    ):
         args = [
             "innoextract",
             "--silent",
@@ -2012,7 +2098,9 @@ class gog_linux:
             return sorted(c.encode() for c in contents)
 
     @classmethod
-    async def extract(cls, path, dest, paths=None, password=None, overwrite=False):
+    async def extract(
+        cls, path, dest, paths=None, password=None, overwrite=False
+    ):
         if paths:
             raise NotImplementedError
         if overwrite:
@@ -2824,10 +2912,14 @@ async def process_archive(cls, volumes, path, paths, password, args):
             tmp = pathlib.Path(tmp)
 
             await cls.extract(
-                volumes[0], tmp, paths=paths, password=password, overwrite=args.force
+                volumes[0],
+                tmp,
+                paths=paths,
+                password=password,
+                overwrite=args.force,
             )
 
-            tmp.rename(dest)
+            tmp.replace(dest)
             if args.rm:
                 for path in volumes:
                     path.unlink()
@@ -2839,7 +2931,11 @@ async def process_archive(cls, volumes, path, paths, password, args):
         )
 
         await cls.extract(
-            volumes[0], dest, paths=paths, password=password, overwrite=args.force
+            volumes[0],
+            dest,
+            paths=paths,
+            password=password,
+            overwrite=args.force,
         )
 
         if args.rm:
@@ -2874,9 +2970,13 @@ async def main_extract():
         help="extract each archive to a unique child directory",
     )
     parser.add_argument(
-        "--stdout", action="store_true", help="extract a specifc file to stdout"
+        "--stdout",
+        action="store_true",
+        help="extract a specifc file to stdout",
     )
-    parser.add_argument("-l", "--list", action="store_true", help="list contents")
+    parser.add_argument(
+        "-l", "--list", action="store_true", help="list contents"
+    )
     parser.add_argument("--json", action="store_true", help="output as json")
     parser.add_argument(
         "--base64", action="store_true", help="output base64-encoded filenames"
@@ -2889,9 +2989,13 @@ async def main_extract():
         help="overwrite existing files/directories",
     )
     parser.add_argument(
-        "--rm", action="store_true", help="remove archive after successful extraction"
+        "--rm",
+        action="store_true",
+        help="remove archive after successful extraction",
     )
-    parser.add_argument("--password", action="store_true", help="prompt for password")
+    parser.add_argument(
+        "--password", action="store_true", help="prompt for password"
+    )
     parser.add_argument(
         "-n",
         metavar="NUM",
@@ -2940,11 +3044,15 @@ async def main_extract():
         if args.list:
             contents = await cls.contents(path)
             if args.base64:
-                contents = {base64.b64encode(k): v for k, v in contents.items()}
+                contents = {
+                    base64.b64encode(k): v for k, v in contents.items()
+                }
             if args.json:
                 if isinstance(contents, (list, set)):
                     contents = {k: {} for k in contents}
-                print(pretty_json({k.decode(): v for k, v in contents.items()}))
+                print(
+                    pretty_json({k.decode(): v for k, v in contents.items()})
+                )
             else:
                 contents = format_contents(contents)
 
@@ -2960,7 +3068,8 @@ async def main_extract():
                 continue
             if args.volumes and volumes:
                 sys.stdout.buffer.write(
-                    b"\n".join(sorted(str(v).encode() for v in volumes)) + b"\n"
+                    b"\n".join(sorted(str(v).encode() for v in volumes))
+                    + b"\n"
                 )
                 sys.stdout.buffer.flush()
                 continue

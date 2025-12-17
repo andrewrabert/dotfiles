@@ -160,7 +160,7 @@ def safe_write_bytes(path, data):
         try:
             temp_path = pathlib.Path(handle.name)
             temp_path.write_bytes(data)
-            temp_path.rename(path)
+            temp_path.replace(path)
         finally:
             try:
                 temp_path.unlink()

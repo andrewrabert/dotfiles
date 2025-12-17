@@ -32,15 +32,14 @@ import contextlib
 import json
 import os
 import pathlib
-import signal
 import shutil
+import signal
 import sys
 import tempfile
 import types
 
 import async_executor
 import mozjpeg_lossless_optimization
-
 
 CONFIG = types.SimpleNamespace(
     jpeg=types.SimpleNamespace(
@@ -108,12 +107,16 @@ async def optimize_jpeg(source, dest, fast=False, strip=False):
         args.append("--strip-none")
 
     args.extend(["--", source])
-    proc = await asyncio.create_subprocess_exec(*args, stdout=asyncio.subprocess.PIPE)
+    proc = await asyncio.create_subprocess_exec(
+        *args, stdout=asyncio.subprocess.PIPE
+    )
     stdout, _ = await proc.communicate()
     if proc.returncode != 0:
         raise ProcessError(proc)
 
-    data = await asyncio.to_thread(mozjpeg_lossless_optimization.optimize, stdout)
+    data = await asyncio.to_thread(
+        mozjpeg_lossless_optimization.optimize, stdout
+    )
 
     dest.write_bytes(data)
 
@@ -332,11 +335,21 @@ class exiv2:
     async def copy_metadata(source, target):
         read, write = os.pipe()
         proc1 = await asyncio.create_subprocess_exec(
-            "exiv2", "-ea-", "--", source, stderr=asyncio.subprocess.PIPE, stdout=write
+            "exiv2",
+            "-ea-",
+            "--",
+            source,
+            stderr=asyncio.subprocess.PIPE,
+            stdout=write,
         )
         os.close(write)
         proc2 = await asyncio.create_subprocess_exec(
-            "exiv2", "-ia-", "--", target, stderr=asyncio.subprocess.PIPE, stdin=read
+            "exiv2",
+            "-ia-",
+            "--",
+            target,
+            stderr=asyncio.subprocess.PIPE,
+            stdin=read,
         )
         os.close(read)
         for proc in (proc1, proc2):
@@ -469,7 +482,9 @@ def determine_mime(path):
             return "image/svg+xml", {}
         elif start[0:6] == b"<?svg ":
             return "image/svg+xml", {}
-        elif start[0:12] == b"\x00\x00\x00\x0c\x4a\x58\x4c\x20\x0d\x0a\x87\x0a":
+        elif (
+            start[0:12] == b"\x00\x00\x00\x0c\x4a\x58\x4c\x20\x0d\x0a\x87\x0a"
+        ):
             return "image/jxl", {}
         elif start[4:12] == b"ftypheic":
             return "image/heif", {}
@@ -681,7 +696,7 @@ async def _process_optim(func, path, fast, strip, **options):
 
         after = temp_path.stat().st_size
         if after < before:
-            temp_path.rename(path)
+            temp_path.replace(path)
         else:
             after = before
 
@@ -725,23 +740,29 @@ async def _process_convert(path, source_mimetype, target_mimetype):
         case "image/heif":
             num_frames = await magick_convert.get_number_of_frames(path)
             if num_frames != 1:
-                raise InvalidSourceImage(path, "heif must contain exactly one frame")
+                raise InvalidSourceImage(
+                    path, "heif must contain exactly one frame"
+                )
 
     dest = path.parent / name
     with contextlib.ExitStack() as stack:
         temp_path = stack.enter_context(
-            TempPath(dir=path.parent, prefix=".imgconvert_", suffix=path.name + ".tmp")
+            TempPath(
+                dir=path.parent,
+                prefix=".imgconvert_",
+                suffix=path.name + ".tmp",
+            )
         )
         match target_mimetype:
             case "image/bmp":
                 await convert_to_bmp(path, temp_path)
-                temp_path.rename(dest)
+                temp_path.replace(dest)
             case "image/x-portable-pixmap":
                 await convert_to_ppm(path, temp_path)
-                temp_path.rename(dest)
+                temp_path.replace(dest)
             case "image/png":
                 await convert_to_png(path, temp_path)
-                temp_path.rename(dest)
+                temp_path.replace(dest)
             case "image/tiff":
                 match source_mimetype:
                     case "image/jxl":
@@ -765,7 +786,7 @@ async def _process_convert(path, source_mimetype, target_mimetype):
                         await exiftool.from_json(temp_path, new_metadata)
                     case _:
                         await convert_to_tiff_vips(path, temp_path)
-                temp_path.rename(dest)
+                temp_path.replace(dest)
             case "image/jxl":
                 match source_mimetype:
                     case "image/heif":
@@ -799,7 +820,7 @@ async def _process_convert(path, source_mimetype, target_mimetype):
                         await exiftool.from_json(temp_path, new_metadata)
                     case _:
                         await convert_to_jxl(path, temp_path)
-                temp_path.rename(dest)
+                temp_path.replace(dest)
             case "image/jpeg":
                 match source_mimetype:
                     case "image/heif" | "image/webp":
@@ -821,10 +842,10 @@ async def _process_convert(path, source_mimetype, target_mimetype):
                             )
                         )
                         await convert_djxl(path, temp_path_2)
-                        temp_path_2.rename(temp_path)
+                        temp_path_2.replace(temp_path)
                     case _:
                         await convert_to_jpeg(path, temp_path)
-                temp_path.rename(dest)
+                temp_path.replace(dest)
             case _:
                 raise RuntimeError("invalid target_type")
     return path, dest
@@ -908,7 +929,13 @@ async def sha256sum(pipe):
 async def sha256sum_djxl(source):
     read, write = os.pipe()
     proc = await asyncio.create_subprocess_exec(
-        "djxl", "--quiet", "--output_format=ppm", "--", source, "-", stdout=write
+        "djxl",
+        "--quiet",
+        "--output_format=ppm",
+        "--",
+        source,
+        "-",
+        stdout=write,
     )
     os.close(write)
     sha256 = await sha256sum_vips_copy(read)
@@ -933,7 +960,14 @@ async def sha256sum_vips_copy(source):
 
     read2, write2 = os.pipe()
     proc2 = await asyncio.create_subprocess_exec(
-        "magick", "ppm:-", "-set", "comment", "", "ppm:-", stdin=read1, stdout=write2
+        "magick",
+        "ppm:-",
+        "-set",
+        "comment",
+        "",
+        "ppm:-",
+        stdin=read1,
+        stdout=write2,
     )
     os.close(write2)
 
@@ -989,7 +1023,9 @@ async def main_convert():
         required=True,
     )
     parser.add_argument("--fast", action="store_true")
-    parser.add_argument("paths", metavar="path", nargs="+", type=_parser_path_file)
+    parser.add_argument(
+        "paths", metavar="path", nargs="+", type=_parser_path_file
+    )
 
     jpeg_group = parser.add_argument_group("JPEG Options")
     jpeg_group.add_argument(
@@ -1002,7 +1038,10 @@ async def main_convert():
 
     jxl_group = parser.add_argument_group("JXL Options")
     jxl_group.add_argument(
-        "--jxl-lossy", action="store_true", default=False, help="default: %(default)s"
+        "--jxl-lossy",
+        action="store_true",
+        default=False,
+        help="default: %(default)s",
     )
 
     args = parser.parse_args()
@@ -1094,7 +1133,12 @@ async def main_optim():
 
         if func := _MIME_OPTIM.get(mimetype):
             executor.submit(
-                _process_optim, func, file, fast=args.fast, strip=args.strip, **options
+                _process_optim,
+                func,
+                file,
+                fast=args.fast,
+                strip=args.strip,
+                **options,
             )
 
     size_diff_printer = SizeDiffPrinter(num_items=len(executor))
@@ -1152,7 +1196,9 @@ async def _has_incorrect_colorspace(path):
 
 
 async def _fix_colorspace(path):
-    with TempPath(dir=path.parent, prefix=".imgfixcolorspace", suffix=".png") as tmp:
+    with TempPath(
+        dir=path.parent, prefix=".imgfixcolorspace", suffix=".png"
+    ) as tmp:
         proc = await asyncio.create_subprocess_exec(
             "magick",
             path,
@@ -1167,7 +1213,7 @@ async def _fix_colorspace(path):
         await proc.wait()
         if proc.returncode:
             raise ProcessError(proc)
-        tmp.rename(path)
+        tmp.replace(path)
 
 
 async def main_fixcolorspace():

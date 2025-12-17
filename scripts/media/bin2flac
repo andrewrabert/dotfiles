@@ -2,8 +2,8 @@
 import argparse
 import contextlib
 import pathlib
-import tempfile
 import subprocess
+import tempfile
 
 
 @contextlib.contextmanager
@@ -44,7 +44,7 @@ def bin_to_flac(source, target):
             ],
             check=True,
         )
-        tmp.rename(target)
+        tmp.replace(target)
 
 
 def _parser_bin(value):

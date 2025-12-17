@@ -41,7 +41,7 @@ def rename_files(root, dry_run=True):
                 raise ValueError(f'"{new_f}" already exists')
             if not dry_run:
                 new_f.parent.mkdir(parents=True, exist_ok=True)
-                f.rename(new_f)
+                f.replace(new_f)
             renamed_paths.append(new_f)
             print(f)
             print(new_f)

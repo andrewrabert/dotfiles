@@ -54,7 +54,7 @@ def main():
                 if newpath.exists():
                     raise RuntimeError
                 print(newpath)
-                path.rename(newpath)
+                path.replace(newpath)
 
 
 if __name__ == "__main__":

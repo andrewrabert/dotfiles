@@ -45,7 +45,7 @@ def safe_write_bytes(path, data):
                     except PermissionError:
                         pass
                 temp_path.chmod(stat.st_mode)
-            temp_path.rename(path)
+            temp_path.replace(path)
         finally:
             try:
                 temp_path.unlink()

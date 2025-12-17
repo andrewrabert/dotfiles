@@ -149,7 +149,7 @@ def split_flac(flac_path, cue_path, dry_run=False):
             check=True,
         )
         for path in pathlib.Path(tmpdir).iterdir():
-            path.rename(parent / path.name)
+            path.replace(parent / path.name)
     flac_path.unlink()
 
 
@@ -184,7 +184,7 @@ def organize_images(root_path, dry_run=False):
         target = image.parent / (IMAGE_PREFIX + image.suffix)
         if image != target:
             if not dry_run:
-                image.rename(pathlib.Path(image.parent, target))
+                image.replace(pathlib.Path(image.parent, target))
             else:
                 LOGGER.info(f"Would rename image: {image} -> {target}")
     elif len(images) > 1:
@@ -299,7 +299,7 @@ def safe_rename(source, name, dry_run=False):
         else:
             LOGGER.info(f'Renaming "{source}" to "{target}"')
             if not dry_run:
-                source.rename(target)
+                source.replace(target)
 
 
 def all_dirs(root):
@@ -470,7 +470,7 @@ def main():
                                         correct_album_path.mkdir(exist_ok=True)
                                         for path in root_path.iterdir():
                                             if path.is_file():
-                                                path.rename(
+                                                path.replace(
                                                     correct_album_path
                                                     / path.name
                                                 )
@@ -483,7 +483,7 @@ def main():
                                     )
                                     if not args.dry_run:
                                         correct_artist_dir.mkdir(exist_ok=True)
-                                        root_path.rename(correct_album_path)
+                                        root_path.replace(correct_album_path)
                                         root_path = correct_album_path
                         elif root_path.name != expected_album:
                             # Album is in correct artist folder but has wrong name
@@ -500,7 +500,7 @@ def main():
                                 continue
                             else:
                                 if not args.dry_run:
-                                    root_path.rename(new_root)
+                                    root_path.replace(new_root)
                                     root_path = new_root
                     else:
                         # No albumartist or multiple albumartists, just rename if needed
@@ -518,7 +518,7 @@ def main():
                                 continue
                             else:
                                 if not args.dry_run:
-                                    root_path.rename(new_root)
+                                    root_path.replace(new_root)
                                     root_path = new_root
 
             if len(albumartists) > 1:

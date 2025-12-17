@@ -74,7 +74,7 @@ async def ffmpeg_extract_slice(source, target, start, end):
         await proc.wait()
         if proc.returncode != 0:
             raise ProcessError(proc)
-        tmp.rename(target)
+        tmp.replace(target)
 
 
 def _parse_ffmpeg_slice_time(value):
@@ -105,7 +105,9 @@ async def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("-o", "--output", type=pathlib.Path, required=True)
     parser.add_argument("source", type=pathlib.Path)
-    parser.add_argument("--start", type=_parse_ffmpeg_slice_time, required=True)
+    parser.add_argument(
+        "--start", type=_parse_ffmpeg_slice_time, required=True
+    )
     parser.add_argument("--end", type=_parser_ffmpeg_slice_end, required=True)
     args = parser.parse_args()
 

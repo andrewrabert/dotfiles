@@ -8,13 +8,13 @@ Fix non-UTF8 filename encoding issues.
 # ]
 # ///
 """
+
 import argparse
 import os
 import pathlib
 import sys
 
 import charset_normalizer
-
 
 parser = argparse.ArgumentParser()
 parser.add_argument("-a", "--all", action="store_true")
@@ -33,11 +33,11 @@ except UnicodeDecodeError:
     else:
         result = results.best()
         print(result)
-        if args.rename:
+        if args.replace:
             target = args.path.parent / str(result)
             if target.exists():
                 print("error: target exists", file=sys.stderr)
                 sys.exit(1)
-            args.path.rename(target)
+            args.path.replace(target)
             sys.exit(0)
     sys.exit(1)

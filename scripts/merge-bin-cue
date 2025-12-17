@@ -48,7 +48,7 @@ async def create_img(path):
         newpaths = []
         for tmppath in tmp_files:
             newpath = (tmppath.parent.parent / tmppath.name).absolute()
-            tmppath.rename(newpath)
+            tmppath.replace(newpath)
             newpaths.append(newpath)
         for oldpath in set(files) - set(newpaths):
             oldpath.unlink()

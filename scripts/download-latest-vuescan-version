@@ -27,7 +27,6 @@ import tempfile
 import async_executor
 import httpx
 
-
 LOGGER = logging.getLogger("download-latest-vuescan-version")
 
 _LOG_CONTEXT = {}
@@ -75,7 +74,9 @@ class VueScanDownloader:
         ".rpm",
         ".tgz",
     }
-    RELEASE_NOTES_URL = "https://www.hamrick.com/vuescan-versions/{version}.html"
+    RELEASE_NOTES_URL = (
+        "https://www.hamrick.com/vuescan-versions/{version}.html"
+    )
 
     VERSION_SERIES = "9.8."
     DOWNLOAD_URLS = {
@@ -166,11 +167,15 @@ class VueScanDownloader:
         if not version.startswith(self.VERSION_SERIES):
             raise NotImplementedError(f"unsupported version: {version}")
 
-        executor = async_executor.AsyncExecutor(max_concurrent=self.max_concurrent)
+        executor = async_executor.AsyncExecutor(
+            max_concurrent=self.max_concurrent
+        )
         executor.submit(self._download_release_notes, version)
         for architecture, urls in self.DOWNLOAD_URLS.items():
             for url in urls:
-                executor.submit(self._download_application, url, version, architecture)
+                executor.submit(
+                    self._download_application, url, version, architecture
+                )
         for language, url in self.OCR_URLS.items():
             executor.submit(self._download_ocr, url, language)
 
@@ -186,12 +191,16 @@ class VueScanDownloader:
         log_context("version", version)
         LOGGER.info("Downloading release notes")
 
-        release_date_dest = self.path / f"VueScan {version}" / "release_date.txt"
+        release_date_dest = (
+            self.path / f"VueScan {version}" / "release_date.txt"
+        )
         html_dest = self._release_notes_path(version)
         if release_date_dest.is_file() and html_dest.is_file():
             LOGGER.info("Already downloaded")
             return
-        async with self.client.stream("GET", url, follow_redirects=True) as response:
+        async with self.client.stream(
+            "GET", url, follow_redirects=True
+        ) as response:
             try:
                 response.raise_for_status()
             except Exception as e:
@@ -223,7 +232,9 @@ class VueScanDownloader:
         log_context("url", url)
 
         LOGGER.info("Downloading")
-        async with self.client.stream("GET", url, follow_redirects=True) as response:
+        async with self.client.stream(
+            "GET", url, follow_redirects=True
+        ) as response:
             try:
                 response.raise_for_status()
             except Exception as e:
@@ -256,7 +267,9 @@ class VueScanDownloader:
 
         LOGGER.info("Downloading OCR")
         parent_path = self.path / "OCR" / language
-        async with self.client.stream("GET", url, follow_redirects=True) as response:
+        async with self.client.stream(
+            "GET", url, follow_redirects=True
+        ) as response:
             try:
                 response.raise_for_status()
             except Exception as e:
@@ -285,7 +298,7 @@ def safe_write(path, data):
         temp_path = pathlib.Path(handle.name)
         try:
             temp_path.write_bytes(data)
-            temp_path.rename(path)
+            temp_path.replace(path)
         finally:
             try:
                 temp_path.unlink()
@@ -311,7 +324,9 @@ async def main():
     if not args.verbose:
         logging.getLogger("httpx").setLevel(logging.WARNING)
 
-    client = VueScanDownloader(path=args.dest, max_concurrent=args.max_concurrent)
+    client = VueScanDownloader(
+        path=args.dest, max_concurrent=args.max_concurrent
+    )
 
     await client.download_all()
 

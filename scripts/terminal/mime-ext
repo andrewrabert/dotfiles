@@ -8,6 +8,7 @@ MIME type and file extension detection tool.
 # ]
 # ///
 """
+
 import argparse
 import collections
 import itertools
@@ -153,13 +154,15 @@ def main():
                     continue
                 sep_count = 0
                 while True:
-                    target = path.with_name(f"{path.name}{'_' * sep_count}{suffix}")
+                    target = path.with_name(
+                        f"{path.name}{'_' * sep_count}{suffix}"
+                    )
                     if target.exists():
                         sep_count += 1
                     else:
                         break
                 print(f'Renaming "{path}" to "{target}"')
-                path.rename(target)
+                path.replace(target)
         exit()
 
     if args.check:
@@ -183,7 +186,10 @@ def main():
         for mime in sorted(missing):
             print(f'warning: suffix unknown for "{mime}"', file=sys.stderr)
 
-    exts = {ext: sorted(str(p.resolve()) for p in paths) for ext, paths in exts.items()}
+    exts = {
+        ext: sorted(str(p.resolve()) for p in paths)
+        for ext, paths in exts.items()
+    }
 
     print(json.dumps(exts, indent=2, sort_keys=True))
 
@@ -203,7 +209,7 @@ def main():
                         if not target.exists():
                             break
                         sep_cnt += 1
-                    pathlib.Path(path).rename(target)
+                    pathlib.Path(path).replace(target)
         else:
             sys.exit(1)
 

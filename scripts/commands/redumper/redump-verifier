@@ -8,9 +8,10 @@ Redump database verification tool with HTTP client support.
 # ]
 # ///
 """
+
 import argparse
-import collections
 import asyncio
+import collections
 import contextvars
 import hashlib
 import io
@@ -87,7 +88,9 @@ class Redump:
     _DEFAULT_DAT_PATH = pathlib.Path("/storage/Cache/redump.pickle")
 
     def __init__(self):
-        pathlib.Path(self._DEFAULT_DAT_PATH).parent.mkdir(parents=True, exist_ok=True)
+        pathlib.Path(self._DEFAULT_DAT_PATH).parent.mkdir(
+            parents=True, exist_ok=True
+        )
 
         if self._DEFAULT_DAT_PATH.exists():
             self.hashes = pickle.loads(self._DEFAULT_DAT_PATH.read_bytes())
@@ -171,7 +174,8 @@ async def find_dump_hashes(root, recorded=None):
     paths = [
         path
         for path in files
-        if path.name.endswith(SUFFIXES) and not path.name.endswith(IGNORE_ENDSWITH)
+        if path.name.endswith(SUFFIXES)
+        and not path.name.endswith(IGNORE_ENDSWITH)
     ]
 
     if len(paths) > 1:
@@ -190,7 +194,9 @@ async def find_dump_hashes(root, recorded=None):
         }
     else:
         if hash_cache:
-            hashes = {path: hash_cache[str(path)]["sha1"] for path in sorted(paths)}
+            hashes = {
+                path: hash_cache[str(path)]["sha1"] for path in sorted(paths)
+            }
         else:
             hashes = {path: sha1sum(path) for path in sorted(paths)}
     LOGGER.debug("sha1 hashes %s", hashes)
@@ -326,21 +332,23 @@ async def process_path(redump, path, args):
                 LOGGER.info("✅ validated")
                 return
 
-            if args.rename:
+            if args.replace:
                 LOGGER.info("ℹ️ RENAMING %s", target)
                 if target.exists():
                     raise RuntimeError(f"target exists {target}")
-                path.rename(target)
+                path.replace(target)
             else:
                 LOGGER.info("ℹ️ REDUMP ID CORRECT, BUT NAME DIFFERS %s", target)
         else:
             LOGGER.error("⚠️ no match")
             if not path.name.startswith("unknown "):
-                target = path.absolute().with_name(f"unknown {path.absolute().name}")
+                target = path.absolute().with_name(
+                    f"unknown {path.absolute().name}"
+                )
                 while target.exists():
                     target = target.with_name(f"{target.name}_")
-                if args.rename:
-                    path.rename(target)
+                if args.replace:
+                    path.replace(target)
 
 
 async def main():

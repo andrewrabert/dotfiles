@@ -80,7 +80,7 @@ class MKVFile:
                 self.path,
             ]
             subprocess.run(args, stdout=subprocess.DEVNULL, check=True)
-            temp.rename(self.path)
+            temp.replace(self.path)
 
 
 @contextlib.contextmanager

@@ -107,7 +107,7 @@ async def sync_single_rom(item):
         temp_target = target_path.with_name(f"._romsync_{target_path.name}")
         shutil.copy2(extracted_file, temp_target)
         os.utime(temp_target, (item["nas_mtime"], item["nas_mtime"]))
-        temp_target.rename(target_path)
+        temp_target.replace(target_path)
 
     return True, None
 

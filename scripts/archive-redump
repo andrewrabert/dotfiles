@@ -3,7 +3,6 @@ import argparse
 import asyncio
 import pathlib
 
-
 INFO_SUFFIXES = (
     " (Track 0).bin",
     " (Track 00).bin",
@@ -94,10 +93,10 @@ async def process_path(path, dump_name):
     info_dest.mkdir()
 
     for path in dump_paths:
-        path.rename(dump_dest / path.name)
+        path.replace(dump_dest / path.name)
 
     for path in info_paths:
-        path.rename(info_dest / path.name)
+        path.replace(info_dest / path.name)
 
     for path in delete_paths:
         path.unlink()
