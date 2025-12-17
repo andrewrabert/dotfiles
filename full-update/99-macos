@@ -51,6 +51,7 @@ EXPECTED_PACKAGES = {
     "stylua",
     "tmux",
     "tree-sitter-cli",
+    "ty",
     "unzip",
     "uv",
     "vips",
