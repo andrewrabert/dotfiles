@@ -1,7 +1,7 @@
 -- Modern LSP setup using vim.lsp.start instead of deprecated lspconfig
 
--- Cache for uv script python paths (filepath -> python_path)
-local uv_python_cache = {}
+-- Cache for uv script venv roots (filepath -> venv_root)
+local uv_venv_cache = {}
 
 -- Check if a buffer is a uv inline script (has --script in shebang)
 local function is_uv_script(bufnr)
@@ -9,10 +9,10 @@ local function is_uv_script(bufnr)
 	return first_line:match("^#!.-uv.-run.-%-%-script") ~= nil
 end
 
--- Blocking resolve uv script python path
-local function resolve_uv_python_sync(filepath)
-	if uv_python_cache[filepath] then
-		return uv_python_cache[filepath]
+-- Blocking resolve uv script venv root
+local function resolve_uv_venv_sync(filepath)
+	if uv_venv_cache[filepath] then
+		return uv_venv_cache[filepath]
 	end
 
 	-- Run uv sync --dry-run --offline to get env path without network/changes
@@ -21,41 +21,45 @@ local function resolve_uv_python_sync(filepath)
 	local output = (result.stderr or "") .. (result.stdout or "")
 	local env_path = output:match("Would %w+ script environment at: ([^\n]+)")
 	if env_path then
-		local python_path = env_path .. "/bin/python"
-		uv_python_cache[filepath] = python_path
-		return python_path
+		uv_venv_cache[filepath] = env_path
+		return env_path
 	end
 	return nil
 end
 
--- Get python path for a buffer (sync, uses cache)
-local function get_python_path(bufnr)
-	local filepath = vim.api.nvim_buf_get_name(bufnr)
-
-	-- For uv scripts, resolve blocking
-	if is_uv_script(bufnr) then
-		return resolve_uv_python_sync(filepath)
-	end
-
-	-- Search for .venv/env directories
-	local current_dir = vim.fn.expand("#" .. bufnr .. ":p:h")
+-- Find venv root by searching up from dir
+local function find_venv_root(dir)
 	local venv_names = { ".venv", "env" }
-
-	local function find_venv(dir)
-		for _, venv_name in ipairs(venv_names) do
-			local venv_python = dir .. "/" .. venv_name .. "/bin/python"
-			if vim.fn.filereadable(venv_python) == 1 then
-				return venv_python
-			end
+	for _, venv_name in ipairs(venv_names) do
+		local venv_dir = dir .. "/" .. venv_name
+		if vim.fn.filereadable(venv_dir .. "/bin/python") == 1 then
+			return venv_dir
 		end
-		local parent = vim.fn.fnamemodify(dir, ":h")
-		if parent ~= dir and parent ~= "/" then
-			return find_venv(parent)
-		end
-		return nil
 	end
+	local parent = vim.fn.fnamemodify(dir, ":h")
+	if parent ~= dir and parent ~= "/" then
+		return find_venv_root(parent)
+	end
+	return nil
+end
 
-	return find_venv(current_dir)
+-- Get venv root directory for a buffer
+local function get_venv_root(bufnr)
+	local filepath = vim.api.nvim_buf_get_name(bufnr)
+	if is_uv_script(bufnr) then
+		return resolve_uv_venv_sync(filepath)
+	end
+	local current_dir = vim.fn.expand("#" .. bufnr .. ":p:h")
+	return find_venv_root(current_dir)
+end
+
+-- Get python path for a buffer
+local function get_python_path(bufnr)
+	local venv_root = get_venv_root(bufnr)
+	if venv_root then
+		return venv_root .. "/bin/python"
+	end
+	return nil
 end
 
 -- Use an on_attach function to only map the following keys
@@ -111,32 +115,43 @@ local servers = {
 		filetypes = { "python" },
 		root_patterns = { "pyproject.toml", "setup.py", "setup.cfg", "requirements.txt", "Pipfile" },
 	},
-	pyright = {
-		cmd = { "pyright-langserver", "--stdio" },
+	ty = {
+		cmd = { "ty", "server" },
 		filetypes = { "python" },
-		root_patterns = {
-			"pyproject.toml",
-			"setup.py",
-			"setup.cfg",
-			"requirements.txt",
-			"Pipfile",
-			"pyrightconfig.json",
-		},
-		settings = function(root_dir, bufnr)
-			return {
-				pyright = {
-					disableOrganizeImports = true,
-				},
-				python = {
-					pythonPath = get_python_path(bufnr),
-					analysis = {
-						ignore = { "*" },
-						typeCheckingMode = "off",
-					},
-				},
-			}
+		root_patterns = { "pyproject.toml", "setup.py", "setup.cfg", "requirements.txt", "Pipfile" },
+		cmd_env = function(bufnr)
+			local venv_root = get_venv_root(bufnr)
+			if venv_root then
+				return { VIRTUAL_ENV = venv_root }
+			end
 		end,
 	},
+	-- pyright = {
+	-- 	cmd = { "pyright-langserver", "--stdio" },
+	-- 	filetypes = { "python" },
+	-- 	root_patterns = {
+	-- 		"pyproject.toml",
+	-- 		"setup.py",
+	-- 		"setup.cfg",
+	-- 		"requirements.txt",
+	-- 		"Pipfile",
+	-- 		"pyrightconfig.json",
+	-- 	},
+	-- 	settings = function(root_dir, bufnr)
+	-- 		return {
+	-- 			pyright = {
+	-- 				disableOrganizeImports = true,
+	-- 			},
+	-- 			python = {
+	-- 				pythonPath = get_python_path(bufnr),
+	-- 				analysis = {
+	-- 					ignore = { "*" },
+	-- 					typeCheckingMode = "off",
+	-- 				},
+	-- 			},
+	-- 		}
+	-- 	end,
+	-- },
 }
 
 -- Setup LSP servers using modern vim.lsp API
@@ -149,17 +164,23 @@ for server_name, config in pairs(servers) do
 			if type(settings) == "function" then
 				settings = settings(root_dir, args.buf)
 			end
+			local cmd_env = config.cmd_env
+			if type(cmd_env) == "function" then
+				cmd_env = cmd_env(args.buf)
+			end
 
 			local client_config = vim.tbl_deep_extend("force", config, {
 				name = server_name,
 				root_dir = root_dir,
 				settings = settings,
+				cmd_env = cmd_env,
 				on_attach = function(client, bufnr)
 					on_attach(client, bufnr)
 				end,
 			})
-			-- Remove the function version of settings to avoid conflicts
+			-- Remove function versions to avoid conflicts
 			client_config.settings = settings
+			client_config.cmd_env = cmd_env
 
 			vim.lsp.start(client_config)
 		end,
