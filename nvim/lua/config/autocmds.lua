@@ -41,3 +41,8 @@ vim.api.nvim_create_autocmd({ "BufRead", "BufNewFile" }, {
 		end
 	end,
 })
+
+vim.api.nvim_create_user_command("UvSyncScript", function()
+	local filepath = vim.fn.expand("%:p")
+	vim.fn.system({ "uv-update-all", filepath })
+end, { desc = "Run uv-update-all for current file" })
