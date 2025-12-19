@@ -408,6 +408,7 @@ if HOSTNAME in ("mars", "phobos"):
             "flatpak-builder",
             "flatpak-kcm",
             "foot",
+            "ghostty",
             "gifski",
             "gimp",
             "gparted",
