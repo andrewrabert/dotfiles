@@ -1,0 +1,9 @@
+cursor-style = block
+cursor-style-blink = false
+shell-integration-features = no-cursor
+confirm-close-surface = false
+
+font-family = Hack
+
+#ewline in claude code
+keybind = shift+enter=text:\x1b\r

@@ -1,0 +1,16 @@
+#!/usr/bin/env sh
+set -eu
+
+SOURCE="${DOTFILES}/ghostty"
+TARGET=~/.config/ghostty
+
+if ! command -v ghostty > /dev/null; then
+    rm -rf "${TARGET}"
+    exit
+fi
+
+if [ "$(realpath "${TARGET}")" != "${SOURCE}" ]; then
+    echo 'Linking configuration ...'
+    rm -rf "${TARGET}"
+    ln -sT "${SOURCE}" "${TARGET}"
+fi
