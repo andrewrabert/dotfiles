@@ -1,5 +1,10 @@
 #!/usr/bin/env sh
+APP_ID='dotfiles.andrewrabert.tmux-scratchpad'
+TITLE='tmux'
+
 ww-rs \
     --toggle \
-    --filter tmux-scratchpad \
-    -- foot --title tmux --app-id tmux-scratchpad -- zsh -ic 'tmux-attach --prompt'
+    --center=initial \
+    --filter "${APP_ID}" \
+    -- ghostty --title="${TITLE}" --class="${APP_ID}" -e zsh -ic 'tmux-attach --prompt'
+    #-- foot --title="${TITLE}" --app-id="${APP_ID}" -- zsh -ic 'tmux-attach --prompt'

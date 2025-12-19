@@ -85,13 +85,13 @@ TITLEBAR_CONFIGS = {
             inactive_bg="#ffffff",
         ),
     ),
-    "Foot": TitlebarConfig(
+    "Terminal": TitlebarConfig(
         classes=[
             WindowClass(description="foot", wmclass="foot"),
+            WindowClass(description="ghostty", wmclass="ghostty"),
             WindowClass(
                 description="tmux-scratchpad",
-                wmclass="foot tmux-scratchpad",
-                wmclasscomplete=True,
+                wmclass="dotfiles.andrewrabert.tmux-scratchpad",
             ),
         ],
         dark=ColorScheme(

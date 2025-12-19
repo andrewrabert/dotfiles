@@ -1,3 +1,6 @@
+window-width = 160
+window-height = 50
+
 cursor-style = block
 cursor-style-blink = false
 shell-integration-features = no-cursor
