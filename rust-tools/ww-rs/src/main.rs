@@ -103,9 +103,7 @@ fn build_script(
 
     let needs_resize = width.is_some() || height.is_some() || scale_factor.is_some()
         || min_width.is_some() || max_width.is_some() || min_height.is_some() || max_height.is_some();
-    let center_always = center == Some("always");
-    let center_initial = center == Some("initial");
-    let any_center = center.is_some();
+    let do_center = center.is_some();
 
     // parseSize only if needed
     if needs_resize {
@@ -114,14 +112,9 @@ fn build_script(
     }
 
     // setActiveClient - build only what's needed
-    // For initial centering, pass a flag indicating whether to center
-    if center_initial {
-        script.push_str("function setActiveClient(c,doCenter){c.minimized=false;");
-    } else {
-        script.push_str("function setActiveClient(c){c.minimized=false;");
-    }
+    script.push_str("function setActiveClient(c){c.minimized=false;");
 
-    if needs_resize || any_center {
+    if needs_resize || do_center {
         script.push_str("var scr=workspace.activeScreen,sw=scr.geometry.width,sh=scr.geometry.height,w=c.frameGeometry.width,h=c.frameGeometry.height;");
 
         if let Some(sf) = scale_factor {
@@ -153,10 +146,8 @@ fn build_script(
             script.push_str(&format!("var maxH=parseSize('{}',sh);if(maxH)h=Math.min(maxH,h);", v));
         }
 
-        if center_always {
+        if do_center {
             script.push_str("var x=(sw-w)/2,y=(sh-h)/2;");
-        } else if center_initial {
-            script.push_str("var x=doCenter?(sw-w)/2:c.frameGeometry.x,y=doCenter?(sh-h)/2:c.frameGeometry.y;");
         } else {
             script.push_str("var x=c.frameGeometry.x,y=c.frameGeometry.y;");
         }
@@ -168,11 +159,7 @@ fn build_script(
 
     // Main logic
     if filter_focused {
-        if center_initial {
-            script.push_str("var aw=workspace.activeClient||workspace.activeWindow;if(aw)setActiveClient(aw,false);");
-        } else {
-            script.push_str("var aw=workspace.activeClient||workspace.activeWindow;if(aw)setActiveClient(aw);");
-        }
+        script.push_str("var aw=workspace.activeClient||workspace.activeWindow;if(aw)setActiveClient(aw);");
     } else {
         script.push_str("var aw=workspace.activeClient||workspace.activeWindow;");
         script.push_str("var cs=workspace.clientList?workspace.clientList():workspace.windowList();var m=[];");
@@ -186,19 +173,11 @@ fn build_script(
             script.push_str(&format!("var re=new RegExp('{}','i');for(var i=0;i<cs.length;i++)if(re.exec(cs[i].caption))m.push(cs[i]);", filter_alt));
         }
 
-        if center_initial {
-            script.push_str("if(m.length===1){var c=m[0];if(aw!==c)setActiveClient(c,true);");
-            if toggle {
-                script.push_str("else c.minimized=!c.minimized;");
-            }
-            script.push_str("}else if(m.length>1){m.sort(function(a,b){return a.stackingOrder-b.stackingOrder;});setActiveClient(m[0],true);}");
-        } else {
-            script.push_str("if(m.length===1){var c=m[0];if(aw!==c)setActiveClient(c);");
-            if toggle {
-                script.push_str("else c.minimized=!c.minimized;");
-            }
-            script.push_str("}else if(m.length>1){m.sort(function(a,b){return a.stackingOrder-b.stackingOrder;});setActiveClient(m[0]);}");
+        script.push_str("if(m.length===1){var c=m[0];if(aw!==c)setActiveClient(c);");
+        if toggle {
+            script.push_str("else c.minimized=!c.minimized;");
         }
+        script.push_str("}else if(m.length>1){m.sort(function(a,b){return a.stackingOrder-b.stackingOrder;});setActiveClient(m[0]);}");
     }
 
     script
@@ -539,13 +518,14 @@ fn main() -> Result<(), String> {
         is_process_running(process, user_filter.as_deref())
     };
 
-    if is_running || args.filter_focused {
+    // Helper closure to run a kwin script
+    let run_script = |center: Option<&str>, toggle: bool| -> Result<(), String> {
         let script_file = create_script(
             filter,
             filter_alt,
             filter_regex,
-            args.toggle,
-            args.center.as_deref(),
+            toggle,
+            center,
             args.scale_factor,
             args.max_aspect,
             args.width.as_deref(),
@@ -572,16 +552,50 @@ fn main() -> Result<(), String> {
             ("org.kde.kwin.Scripting", format!("/{}", id))
         };
 
-        // Run script
         let _ = kwin_script_run(&conn, &dbus_path, script_api_path);
-
-        // Stop script
         let _ = kwin_script_stop(&conn, &dbus_path, script_api_path);
+        Ok(())
+    };
+
+    if is_running || args.filter_focused {
+        // For "initial" mode, don't center when raising existing window
+        let effective_center = if args.center.as_deref() == Some("initial") {
+            None
+        } else {
+            args.center.as_deref()
+        };
+        run_script(effective_center, args.toggle)?;
     } else if !args.command.is_empty() {
         Command::new(&args.command[0])
             .args(&args.command[1..])
             .spawn()
             .map_err(|e| e.to_string())?;
+
+        // For centering after spawn, operate on the now-active window
+        if args.center.is_some() {
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            let script_file = create_script(
+                "", "", "", false, Some("always"),
+                args.scale_factor, args.max_aspect,
+                args.width.as_deref(), args.height.as_deref(),
+                args.min_width.as_deref(), args.max_width.as_deref(),
+                args.min_height.as_deref(), args.max_height.as_deref(),
+                true, // filter_focused - operate on active window
+            )?;
+            let script_path = script_file.path().to_string_lossy();
+            let random_name = format!("ww{}", rand::random::<u32>() % 10000);
+            let id = kwin_load_script(&conn, &script_path, &random_name)?;
+            let kwin_version = get_kwin_version(&conn)?;
+            let (script_api_path, dbus_path) = if ver_between("5.21.90", &kwin_version, "5.27.79") {
+                ("org.kde.kwin.Script", format!("/{}", id))
+            } else if ver_lt("5.27.80", &kwin_version) {
+                ("org.kde.kwin.Script", format!("/Scripting/Script{}", id))
+            } else {
+                ("org.kde.kwin.Scripting", format!("/{}", id))
+            };
+            let _ = kwin_script_run(&conn, &dbus_path, script_api_path);
+            let _ = kwin_script_stop(&conn, &dbus_path, script_api_path);
+        }
     }
 
     Ok(())
