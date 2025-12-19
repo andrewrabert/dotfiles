@@ -38,6 +38,10 @@ struct Args {
     #[arg(short = 'c', long = "center", num_args = 0..=1, default_missing_value = "always")]
     center: Option<String>,
 
+    /// Delay in ms before centering after launch (default: 1000)
+    #[arg(long = "center-delay", default_value = "1000")]
+    center_delay: u64,
+
     /// Scale factor for center-scale
     #[arg(long = "scale-factor")]
     scale_factor: Option<f64>,
@@ -573,7 +577,7 @@ fn main() -> Result<(), String> {
 
         // For centering after spawn, operate on the now-active window
         if args.center.is_some() {
-            std::thread::sleep(std::time::Duration::from_millis(500));
+            std::thread::sleep(std::time::Duration::from_millis(args.center_delay));
             let script_file = create_script(
                 "", "", "", false, Some("always"),
                 args.scale_factor, args.max_aspect,
