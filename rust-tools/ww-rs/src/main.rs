@@ -6,7 +6,8 @@ use zbus::zvariant::Value;
 
 #[derive(Parser, Debug)]
 #[command(
-    about = "Utility to launch a window (or raise it, if it was minimized), or to show information about the active window, or to perform other operations with windows in KDE Plasma. It interacts with KWin using KWin scripts and it is compatible with X11 and Wayland."
+    about = "Utility to launch a window (or raise it, if it was minimized), or to show information about the active window, or to perform other operations with windows in KDE Plasma. It interacts with KWin using KWin scripts and it is compatible with X11 and Wayland.",
+    arg_required_else_help = true
 )]
 struct Args {
     /// Show information about the active window
