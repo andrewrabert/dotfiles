@@ -8,5 +8,8 @@ confirm-close-surface = false
 
 font-family = Hack
 
+app-notifications = no-clipboard-copy
+link-previews = osc8
+
 #ewline in claude code
 keybind = shift+enter=text:\x1b\r
