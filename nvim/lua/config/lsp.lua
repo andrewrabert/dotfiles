@@ -115,43 +115,43 @@ local servers = {
 		filetypes = { "python" },
 		root_patterns = { "pyproject.toml", "setup.py", "setup.cfg", "requirements.txt", "Pipfile" },
 	},
-	ty = {
-		cmd = { "ty", "server" },
-		filetypes = { "python" },
-		root_patterns = { "pyproject.toml", "setup.py", "setup.cfg", "requirements.txt", "Pipfile" },
-		cmd_env = function(bufnr)
-			local venv_root = get_venv_root(bufnr)
-			if venv_root then
-				return { VIRTUAL_ENV = venv_root }
-			end
-		end,
-	},
-	-- pyright = {
-	-- 	cmd = { "pyright-langserver", "--stdio" },
+	-- ty = {
+	-- 	cmd = { "ty", "server" },
 	-- 	filetypes = { "python" },
-	-- 	root_patterns = {
-	-- 		"pyproject.toml",
-	-- 		"setup.py",
-	-- 		"setup.cfg",
-	-- 		"requirements.txt",
-	-- 		"Pipfile",
-	-- 		"pyrightconfig.json",
-	-- 	},
-	-- 	settings = function(root_dir, bufnr)
-	-- 		return {
-	-- 			pyright = {
-	-- 				disableOrganizeImports = true,
-	-- 			},
-	-- 			python = {
-	-- 				pythonPath = get_python_path(bufnr),
-	-- 				analysis = {
-	-- 					ignore = { "*" },
-	-- 					typeCheckingMode = "off",
-	-- 				},
-	-- 			},
-	-- 		}
+	-- 	root_patterns = { "pyproject.toml", "setup.py", "setup.cfg", "requirements.txt", "Pipfile" },
+	-- 	cmd_env = function(bufnr)
+	-- 		local venv_root = get_venv_root(bufnr)
+	-- 		if venv_root then
+	-- 			return { VIRTUAL_ENV = venv_root }
+	-- 		end
 	-- 	end,
 	-- },
+	pyright = {
+		cmd = { "pyright-langserver", "--stdio" },
+		filetypes = { "python" },
+		root_patterns = {
+			"pyproject.toml",
+			"setup.py",
+			"setup.cfg",
+			"requirements.txt",
+			"Pipfile",
+			"pyrightconfig.json",
+		},
+		settings = function(root_dir, bufnr)
+			return {
+				pyright = {
+					disableOrganizeImports = true,
+				},
+				python = {
+					pythonPath = get_python_path(bufnr),
+					analysis = {
+						ignore = { "*" },
+						typeCheckingMode = "off",
+					},
+				},
+			}
+		end,
+	},
 }
 
 -- Setup LSP servers using modern vim.lsp API
