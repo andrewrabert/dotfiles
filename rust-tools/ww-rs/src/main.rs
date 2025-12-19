@@ -33,9 +33,9 @@ struct Args {
     #[arg(short = 't', long = "toggle")]
     toggle: bool,
 
-    /// Center the window on screen
-    #[arg(short = 'c', long = "center")]
-    center: bool,
+    /// Center the window on screen (optional: "always" or "initial")
+    #[arg(short = 'c', long = "center", num_args = 0..=1, default_missing_value = "always")]
+    center: Option<String>,
 
     /// Scale factor for center-scale
     #[arg(long = "scale-factor")]
@@ -87,7 +87,7 @@ fn build_script(
     filter_alt: &str,
     filter_regex: &str,
     toggle: bool,
-    center: bool,
+    center: Option<&str>,
     scale_factor: Option<f64>,
     max_aspect: Option<f64>,
     width: Option<&str>,
@@ -102,6 +102,9 @@ fn build_script(
 
     let needs_resize = width.is_some() || height.is_some() || scale_factor.is_some()
         || min_width.is_some() || max_width.is_some() || min_height.is_some() || max_height.is_some();
+    let center_always = center == Some("always");
+    let center_initial = center == Some("initial");
+    let any_center = center.is_some();
 
     // parseSize only if needed
     if needs_resize {
@@ -110,9 +113,14 @@ fn build_script(
     }
 
     // setActiveClient - build only what's needed
-    script.push_str("function setActiveClient(c){c.minimized=false;");
+    // For initial centering, pass a flag indicating whether to center
+    if center_initial {
+        script.push_str("function setActiveClient(c,doCenter){c.minimized=false;");
+    } else {
+        script.push_str("function setActiveClient(c){c.minimized=false;");
+    }
 
-    if needs_resize || center {
+    if needs_resize || any_center {
         script.push_str("var scr=workspace.activeScreen,sw=scr.geometry.width,sh=scr.geometry.height,w=c.frameGeometry.width,h=c.frameGeometry.height;");
 
         if let Some(sf) = scale_factor {
@@ -144,8 +152,10 @@ fn build_script(
             script.push_str(&format!("var maxH=parseSize('{}',sh);if(maxH)h=Math.min(maxH,h);", v));
         }
 
-        if center {
+        if center_always {
             script.push_str("var x=(sw-w)/2,y=(sh-h)/2;");
+        } else if center_initial {
+            script.push_str("var x=doCenter?(sw-w)/2:c.frameGeometry.x,y=doCenter?(sh-h)/2:c.frameGeometry.y;");
         } else {
             script.push_str("var x=c.frameGeometry.x,y=c.frameGeometry.y;");
         }
@@ -157,7 +167,11 @@ fn build_script(
 
     // Main logic
     if filter_focused {
-        script.push_str("var aw=workspace.activeClient||workspace.activeWindow;if(aw)setActiveClient(aw);");
+        if center_initial {
+            script.push_str("var aw=workspace.activeClient||workspace.activeWindow;if(aw)setActiveClient(aw,false);");
+        } else {
+            script.push_str("var aw=workspace.activeClient||workspace.activeWindow;if(aw)setActiveClient(aw);");
+        }
     } else {
         script.push_str("var aw=workspace.activeClient||workspace.activeWindow;");
         script.push_str("var cs=workspace.clientList?workspace.clientList():workspace.windowList();var m=[];");
@@ -171,11 +185,19 @@ fn build_script(
             script.push_str(&format!("var re=new RegExp('{}','i');for(var i=0;i<cs.length;i++)if(re.exec(cs[i].caption))m.push(cs[i]);", filter_alt));
         }
 
-        script.push_str("if(m.length===1){var c=m[0];if(aw!==c)setActiveClient(c);");
-        if toggle {
-            script.push_str("else c.minimized=!c.minimized;");
+        if center_initial {
+            script.push_str("if(m.length===1){var c=m[0];if(aw!==c)setActiveClient(c,true);");
+            if toggle {
+                script.push_str("else c.minimized=!c.minimized;");
+            }
+            script.push_str("}else if(m.length>1){m.sort(function(a,b){return a.stackingOrder-b.stackingOrder;});setActiveClient(m[0],true);}");
+        } else {
+            script.push_str("if(m.length===1){var c=m[0];if(aw!==c)setActiveClient(c);");
+            if toggle {
+                script.push_str("else c.minimized=!c.minimized;");
+            }
+            script.push_str("}else if(m.length>1){m.sort(function(a,b){return a.stackingOrder-b.stackingOrder;});setActiveClient(m[0]);}");
         }
-        script.push_str("}else if(m.length>1){m.sort(function(a,b){return a.stackingOrder-b.stackingOrder;});setActiveClient(m[0]);}");
     }
 
     script
@@ -459,7 +481,7 @@ fn create_script(
     filter_alt: &str,
     filter_regex: &str,
     toggle: bool,
-    center: bool,
+    center: Option<&str>,
     scale_factor: Option<f64>,
     max_aspect: Option<f64>,
     width: Option<&str>,
@@ -522,7 +544,7 @@ fn main() -> Result<(), String> {
             filter_alt,
             filter_regex,
             args.toggle,
-            args.center,
+            args.center.as_deref(),
             args.scale_factor,
             args.max_aspect,
             args.width.as_deref(),
