@@ -53,13 +53,27 @@ local function get_venv_root(bufnr)
 	return find_venv_root(current_dir)
 end
 
+-- Extract interpreter path from shebang (direct path only, no env)
+local function get_shebang_interpreter(bufnr)
+	local first_line = vim.api.nvim_buf_get_lines(bufnr, 0, 1, false)[1] or ""
+	-- Match direct path: #!/usr/bin/python3, #! /usr/bin/fart
+	-- Allows spaces after #! and trailing spaces
+	-- Won't match #!/usr/bin/env anything (space within path)
+	return first_line:match("^#!%s*(/[^%s]+)%s*$")
+end
+
 -- Get python path for a buffer
 local function get_python_path(bufnr)
+	-- VIRTUAL_ENV takes precedence over everything
+	local virtual_env = vim.env.VIRTUAL_ENV
+	if virtual_env then
+		return virtual_env .. "/bin/python"
+	end
 	local venv_root = get_venv_root(bufnr)
 	if venv_root then
 		return venv_root .. "/bin/python"
 	end
-	return nil
+	return get_shebang_interpreter(bufnr)
 end
 
 -- Use an on_attach function to only map the following keys
