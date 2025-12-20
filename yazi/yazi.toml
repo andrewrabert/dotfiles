@@ -6,9 +6,12 @@ show_symlink = false
 suppress_preload = true
 macro_workers = 1
 micro_workers = 1
+#image_bound = [20000, 20000]
 
 [preview]
 wrap = "no"
+#max_width = 1200
+#max_height = 1800
 
 [plugin]
 # too slow - especially on network mounts
@@ -19,6 +22,7 @@ fetchers = [
 preloaders = []
 previewers = [
 	{ name = "*/", run = "folder" },
+#    { mime = "image/*", run = "image-preview" },
     { mime = "*", run = 'piper -- preview "$1"' },
 ]
 #prepend_previewers = [
