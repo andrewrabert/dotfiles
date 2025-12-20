@@ -1,0 +1,263 @@
+#!/usr/bin/env -S uv --quiet run --script
+# /// script
+# dependencies = [
+#   "httpx",
+#   "yarl",
+# ]
+# ///
+
+import argparse
+import asyncio
+import os
+import sys
+
+import httpx
+import yarl
+
+
+class UserError(Exception):
+    pass
+
+
+class JellyfinClient:
+    def __init__(self, url, api_key):
+        self.url = yarl.URL(url)
+        self.client = httpx.AsyncClient(
+            headers={"Authorization": f'MediaBrowser Token="{api_key}"'},
+            timeout=30,
+        )
+
+    async def get(self, path, params=None):
+        url = self.url / path.lstrip("/")
+        if params:
+            url = url.with_query(params)
+        resp = await self.client.get(str(url))
+        resp.raise_for_status()
+        return resp.json()
+
+    async def post(self, path):
+        resp = await self.client.post(str(self.url / path.lstrip("/")))
+        resp.raise_for_status()
+        return resp
+
+    async def get_tasks(self):
+        return await self.get("/ScheduledTasks")
+
+    async def get_libraries(self):
+        return await self.get("/Library/VirtualFolders")
+
+    async def search_items(self, query, parent_id=None, item_types=None):
+        params = {"searchTerm": query, "recursive": "true", "fields": "Path"}
+        if parent_id:
+            params["parentId"] = parent_id
+        if item_types:
+            params["includeItemTypes"] = item_types
+        return await self.get("/Items", params)
+
+    async def get_items(self, parent_id, item_types):
+        params = {
+            "parentId": parent_id,
+            "includeItemTypes": item_types,
+            "recursive": "true",
+            "sortBy": "SortName",
+            "fields": "ProductionYear",
+        }
+        return await self.get("/Items", params)
+
+    async def get_album_artists(self, parent_id):
+        params = {"parentId": parent_id, "sortBy": "SortName"}
+        return await self.get("/Artists/AlbumArtists", params)
+
+    async def start_library_scan(self):
+        return await self.post("/Library/Refresh")
+
+    async def start_task(self, task_id):
+        return await self.post(f"/ScheduledTasks/Running/{task_id}")
+
+
+async def cmd_scan(client, args):
+    await client.start_library_scan()
+    print("library scan started")
+
+
+async def cmd_status(client, args):
+    tasks = await client.get_tasks()
+
+    library_tasks = [
+        t
+        for t in tasks
+        if any(
+            kw in (t.get("Name") or "").lower()
+            for kw in ["library", "scan", "refresh", "media"]
+        )
+    ]
+
+    if not library_tasks:
+        library_tasks = tasks
+
+    running = [t for t in library_tasks if t.get("State") == "Running"]
+    idle = [t for t in library_tasks if t.get("State") == "Idle"]
+    cancelling = [t for t in library_tasks if t.get("State") == "Cancelling"]
+
+    if running:
+        print("running:")
+        for t in running:
+            progress = t.get("CurrentProgressPercentage")
+            name = t.get("Name", "unknown")
+            if progress is not None:
+                print(f"  {name}: {progress:.1f}%")
+            else:
+                print(f"  {name}")
+
+    if cancelling:
+        print("cancelling:")
+        for t in cancelling:
+            print(f"  {t.get('Name', 'unknown')}")
+
+    if not running and not cancelling:
+        print("no scans running")
+
+    if args.verbose:
+        print("\nidle tasks:")
+        for t in idle:
+            print(f"  {t.get('Name', 'unknown')}")
+
+
+async def cmd_list(client, args):
+    libraries = await client.get_libraries()
+    for lib in libraries:
+        name = lib.get("Name", "unknown")
+        item_id = lib.get("ItemId", "")
+        paths = lib.get("Locations", [])
+        print(f"{name} ({item_id})")
+        for p in paths:
+            print(f"  {p}")
+
+
+async def cmd_search(client, args):
+    result = await client.search_items(
+        args.query,
+        parent_id=args.library,
+        item_types=args.type,
+    )
+    items = result.get("Items", [])
+    if not items:
+        print("no results")
+        return
+    for item in items:
+        name = item.get("Name", "unknown")
+        item_type = item.get("Type", "")
+        path = item.get("Path", "")
+        print(f"{name} [{item_type}]")
+        if path:
+            print(f"  {path}")
+
+
+async def find_library(client, library_arg):
+    libraries = await client.get_libraries()
+    for lib in libraries:
+        if lib.get("ItemId") == library_arg or lib.get("Name") == library_arg:
+            return lib
+    raise UserError(f"library not found: {library_arg}")
+
+
+async def cmd_contents(client, args):
+    lib = await find_library(client, args.library)
+    lib_id = lib.get("ItemId")
+    lib_type = lib.get("CollectionType", "")
+
+    match lib_type:
+        case "movies":
+            result = await client.get_items(lib_id, "Movie")
+            items = result.get("Items", [])
+            for item in items:
+                name = item.get("Name", "unknown")
+                year = item.get("ProductionYear")
+                print(f"{name} ({year})" if year else name)
+        case "tvshows":
+            result = await client.get_items(lib_id, "Series")
+            items = result.get("Items", [])
+            for item in items:
+                name = item.get("Name", "unknown")
+                year = item.get("ProductionYear")
+                print(f"{name} ({year})" if year else name)
+        case "music":
+            result = await client.get_album_artists(lib_id)
+            items = result.get("Items", [])
+            for item in items:
+                print(item.get("Name", "unknown"))
+        case _:
+            raise UserError(f"unsupported library type: {lib_type}")
+
+
+async def main():
+    parser = argparse.ArgumentParser(
+        description="jellyfin library scan control",
+    )
+    parser.add_argument(
+        "--url",
+        default=os.environ.get("JELLYFIN_URL"),
+        help="jellyfin server url (or JELLYFIN_URL env)",
+    )
+    parser.add_argument(
+        "--api-key",
+        default=os.environ.get("JELLYFIN_API_KEY"),
+        help="api key (or JELLYFIN_API_KEY env)",
+    )
+
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    subparsers.add_parser("scan", help="start library scan")
+
+    status_parser = subparsers.add_parser("status", help="show scan status")
+    status_parser.add_argument(
+        "-v", "--verbose", action="store_true", help="show idle tasks"
+    )
+
+    subparsers.add_parser("list", help="list libraries")
+
+    search_parser = subparsers.add_parser("search", help="search items")
+    search_parser.add_argument("query", help="search term")
+    search_parser.add_argument(
+        "-l", "--library", help="library id to search within"
+    )
+    search_parser.add_argument(
+        "-t", "--type", help="item type (Movie, Series, Episode, Audio, etc)"
+    )
+
+    contents_parser = subparsers.add_parser(
+        "contents", help="list library contents"
+    )
+    contents_parser.add_argument("library", help="library name or id")
+
+    args = parser.parse_args()
+
+    if not args.url:
+        raise UserError("--url or JELLYFIN_URL required")
+    if not args.api_key:
+        raise UserError("--api-key or JELLYFIN_API_KEY required")
+
+    client = JellyfinClient(args.url, args.api_key)
+
+    match args.command:
+        case "scan":
+            await cmd_scan(client, args)
+        case "status":
+            await cmd_status(client, args)
+        case "list":
+            await cmd_list(client, args)
+        case "search":
+            await cmd_search(client, args)
+        case "contents":
+            await cmd_contents(client, args)
+
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except UserError as e:
+        print(f"error: {e}", file=sys.stderr)
+        sys.exit(1)
+    except httpx.HTTPStatusError as e:
+        print(f"http error: {e.response.status_code}", file=sys.stderr)
+        sys.exit(1)
