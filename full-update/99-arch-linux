@@ -1,4 +1,5 @@
 #!/usr/bin/env sh
 if [ -f /etc/arch-release ]; then
+    pacman -Q pyalpm >/dev/null 2>&1 || sudo pacman -S --noconfirm pyalpm
     full-update .99-arch-linux "$@"
 fi

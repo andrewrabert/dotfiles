@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-# use /usr/bin/python3 intstead of /usr/bin/env python3
+# use /usr/bin/python3    intstead of /usr/bin/env python3
 # allows using the native pyalpm package
 import argparse
 import asyncio
@@ -14,11 +14,7 @@ import sys
 if not pathlib.Path("/etc/arch-release").is_file():
     exit()
 
-try:
-    import pyalpm
-except ImportError:
-    subprocess.run(["yay", "-S", "--noconfirm", "pyalpm"], check=True)
-    import pyalpm
+import pyalpm
 
 
 class UV:
@@ -929,6 +925,31 @@ async def ensure_flatpak_permissions():
                 await Flatpak.override_filesystem(app, path)
 
 
+async def dump_installed_packages():
+    """Dump installed packages list to DOTFILES_PRIVATE if configured."""
+    dotfiles_private = os.environ.get("DOTFILES_PRIVATE")
+    if not dotfiles_private:
+        return
+
+    output_file = (
+        pathlib.Path(dotfiles_private)
+        / "arch-linux"
+        / f"packages_{HOSTNAME}.txt"
+    )
+    packages = sorted(all_packages(), key=lambda p: p.name)
+
+    lines = []
+    for pkg in packages:
+        reason = (
+            "explicit"
+            if pkg.reason == pyalpm.PKG_REASON_EXPLICIT
+            else "dependency"
+        )
+        lines.append(f"{pkg.name} {reason}")
+
+    output_file.write_text("\n".join(lines) + "\n")
+
+
 async def ensure_flatpaks():
     if not shutil.which("flatpak"):
         return
@@ -1037,6 +1058,7 @@ async def main():
             await ensure_packages()
             await ensure_package_dependencies()
             await ensure_flatpaks()
+            await dump_installed_packages()
 
             if HOSTNAME in ("mars", "phobos", "sol"):
                 await ensure_python_freethreaded()
