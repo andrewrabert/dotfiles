@@ -29,11 +29,13 @@ System commands executed by this script:
 import argparse
 import asyncio
 import contextlib
+import hashlib
 import json
 import os
 import pathlib
 import shutil
 import signal
+import sqlite3
 import sys
 import tempfile
 import types
@@ -51,6 +53,121 @@ CONFIG = types.SimpleNamespace(
         lossless=True,
     ),
 )
+
+
+class ImageOptimCache:
+    SCHEMA = """
+    CREATE TABLE IF NOT EXISTS images(
+        sha256 TEXT PRIMARY KEY,
+        type TEXT,
+        fast INTEGER DEFAULT 0,
+        strip INTEGER DEFAULT 0,
+        inserted_at REAL DEFAULT (unixepoch('now', 'subsec'))
+    );
+    CREATE TABLE IF NOT EXISTS paths(
+        path TEXT PRIMARY KEY,
+        sha256 TEXT,
+        size INTEGER,
+        mtime REAL,
+        FOREIGN KEY(sha256) REFERENCES images(sha256)
+    );
+    """
+
+    def __init__(self, path):
+        self.path = path.absolute()
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.conn = sqlite3.connect(self.path)
+        self.conn.row_factory = self._dict_factory
+        cur = self.conn.cursor()
+        cur.executescript(self.SCHEMA)
+        cur.close()
+
+    def close(self):
+        self.conn.close()
+
+    @staticmethod
+    def _dict_factory(cursor, row):
+        fields = [column[0] for column in cursor.description]
+        return {key: value for key, value in zip(fields, row)}
+
+    def get(self, path):
+        cur = self.conn.cursor()
+        cur.execute(
+            """
+            SELECT p.path, p.size, p.mtime, i.sha256, i.type, i.fast, i.strip
+            FROM paths p
+            JOIN images i ON p.sha256 = i.sha256
+            WHERE p.path = :path
+            """,
+            {"path": path},
+        )
+        row = cur.fetchone()
+        cur.close()
+        return row
+
+    def get_by_sha256(self, sha256):
+        cur = self.conn.cursor()
+        cur.execute(
+            "SELECT * FROM images WHERE sha256 = :sha256",
+            {"sha256": sha256},
+        )
+        row = cur.fetchone()
+        cur.close()
+        return row
+
+    def upsert_path(self, path, sha256, size, mtime):
+        cur = self.conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO paths(path, sha256, size, mtime)
+            VALUES(:path, :sha256, :size, :mtime)
+            ON CONFLICT DO UPDATE
+                SET sha256 = :sha256,
+                    size = :size,
+                    mtime = :mtime
+            """,
+            {"path": path, "sha256": sha256, "size": size, "mtime": mtime},
+        )
+        self.conn.commit()
+        cur.close()
+
+    def upsert(self, path, size, mtime, img_type, sha256, fast, strip):
+        cur = self.conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO images(sha256, type, fast, strip, inserted_at)
+            VALUES(:sha256, :type, :fast, :strip, unixepoch('now', 'subsec'))
+            ON CONFLICT DO UPDATE
+                SET type = :type,
+                    fast = :fast,
+                    strip = :strip,
+                    inserted_at = unixepoch('now', 'subsec')
+            """,
+            {
+                "sha256": sha256,
+                "type": img_type,
+                "fast": int(fast),
+                "strip": int(strip),
+            },
+        )
+        cur.execute(
+            """
+            INSERT INTO paths(path, sha256, size, mtime)
+            VALUES(:path, :sha256, :size, :mtime)
+            ON CONFLICT DO UPDATE
+                SET sha256 = :sha256,
+                    size = :size,
+                    mtime = :mtime
+            """,
+            {
+                "path": path,
+                "sha256": sha256,
+                "size": size,
+                "mtime": mtime,
+            },
+        )
+        self.conn.commit()
+        cur.close()
 
 
 @contextlib.contextmanager
@@ -686,7 +803,9 @@ async def convert_to_jxl_vips(source, dest):
         raise ProcessError(proc)
 
 
-async def _process_optim(func, path, fast, strip, **options):
+async def _process_optim(
+    func, path, fast, strip, compute_hash=False, **options
+):
     before = path.stat().st_size
 
     with TempPath(
@@ -700,7 +819,14 @@ async def _process_optim(func, path, fast, strip, **options):
         else:
             after = before
 
-    return path, before, after
+    sha256 = None
+    if compute_hash:
+        data = await asyncio.to_thread(path.read_bytes)
+        sha256 = await asyncio.to_thread(
+            lambda: hashlib.sha256(data).hexdigest()
+        )
+
+    return path, before, after, sha256
 
 
 _SUPPORTED_CONVERT_SUFFIXES = {
@@ -1114,13 +1240,29 @@ async def main_optim():
         help="number of parallel jobs (default: %(default)s)",
     )
     parser.add_argument("-q", "--quiet", action="store_true")
+    parser.add_argument(
+        "--cache",
+        action="store_true",
+        help="skip files already processed with same options",
+    )
+    parser.add_argument(
+        "--cache-path",
+        type=pathlib.Path,
+        default=pathlib.Path.home() / ".cache" / "imgoptim.db",
+        help="path to cache database (default: ~/.cache/imgoptim.db)",
+    )
     parser.add_argument("paths", metavar="path", nargs="+", type=pathlib.Path)
 
     args = parser.parse_args()
 
     mimetypes = set(_TYPE_TO_MIME[t] for t in (args.types or _DEFAULT_TYPES))
 
+    cache = None
+    if args.cache:
+        cache = ImageOptimCache(args.cache_path)
+
     executor = async_executor.AsyncExecutor(args.num_procs)
+    future_to_file = {}
     for file in all_files(*args.paths):
         try:
             mimetype, options = determine_mime(file)
@@ -1131,27 +1273,81 @@ async def main_optim():
         if mimetype not in mimetypes:
             continue
 
+        if cache:
+            abs_path = str(file.absolute())
+            stat = file.stat()
+            cached = cache.get(abs_path)
+
+            def should_skip(rec):
+                # fast=0 strip=1 is most thorough, always skip
+                if rec["fast"] == 0 and rec["strip"] == 1:
+                    return True
+                # otherwise skip only if args match
+                if rec["fast"] == int(args.fast) and rec["strip"] == int(
+                    args.strip
+                ):
+                    return True
+                return False
+
+            if cached:
+                if (
+                    cached["size"] == stat.st_size
+                    and cached["mtime"] == stat.st_mtime
+                    and cached["type"] == mimetype
+                    and should_skip(cached)
+                ):
+                    continue
+            else:
+                # path not in cache, check if content already optimized
+                data = file.read_bytes()
+                sha256 = hashlib.sha256(data).hexdigest()
+                img_rec = cache.get_by_sha256(sha256)
+                if img_rec and img_rec["type"] == mimetype:
+                    cache.upsert_path(
+                        abs_path, sha256, stat.st_size, stat.st_mtime
+                    )
+                    if should_skip(img_rec):
+                        continue
+
         if func := _MIME_OPTIM.get(mimetype):
-            executor.submit(
+            future = executor.submit(
                 _process_optim,
                 func,
                 file,
                 fast=args.fast,
                 strip=args.strip,
+                compute_hash=bool(cache),
                 **options,
             )
+            future_to_file[future] = (file, mimetype)
 
     size_diff_printer = SizeDiffPrinter(num_items=len(executor))
-    async for result in executor:
+    async for future in executor:
         try:
-            path, before, after = result.result()
+            path, before, after, sha256 = future.result()
         except ProcessError as e:
             # TODO give this a competent error message
             print(f"error: {e}", file=sys.stderr)
             continue
 
+        if cache:
+            _, mimetype = future_to_file[future]
+            stat = path.stat()
+            cache.upsert(
+                str(path.absolute()),
+                stat.st_size,
+                stat.st_mtime,
+                mimetype,
+                sha256,
+                args.fast,
+                args.strip,
+            )
+
         if not args.quiet:
             size_diff_printer.print(before, after, path)
+
+    if cache:
+        cache.close()
 
     if not args.quiet:
         size_diff_printer.print_total()
