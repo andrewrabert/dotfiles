@@ -1,0 +1,2 @@
+#!/usr/bin/env sh
+exec sol-docker --profile jellyfin-web-dev up jellyfin-web-dev
