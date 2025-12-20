@@ -25,14 +25,17 @@ vim.opt.rtp:prepend(lazypath)
 require("lazy").setup({
 
 	change_detection = {
-		-- change detection is annoying
 		enabled = false,
 	},
 
+	install = {
+		-- don't auto-install missing plugins on startup
+		missing = false,
+	},
+
 	spec = {
-		-- import your plugins
 		{ import = "plugins" },
 	},
-	-- automatically check for plugin updates
+
 	checker = { enabled = false },
 })
