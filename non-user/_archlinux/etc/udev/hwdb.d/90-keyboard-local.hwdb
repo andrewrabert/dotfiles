@@ -8,10 +8,6 @@
 evdev:atkbd:dmi:*
  KEYBOARD_KEY_3a=esc            # capslock -> escape
 
-# logitech k400 plus
-evdev:input:b0003v046Dp404D*
- KEYBOARD_KEY_70039=esc         # capslock -> escape
-
 # Rii K06 mini keyboard
 evdev:name:Telink Wireless Receiver:*
  KEYBOARD_KEY_70039=esc         # capslock -> escape

@@ -466,6 +466,10 @@ if HOSTNAME in ("mars", "phobos"):
         }
     )
 
+VHBA_MODULE_PACKAGE = "vhba-module"
+if HOSTNAME in ("phobos",):
+    VHBA_MODULE_PACKAGE = "vhba-module-dkms"
+
 EXPECTED_PACKAGE_DEPENDENCIES = {
     "86box": {
         "86box-roms",
@@ -481,7 +485,7 @@ EXPECTED_PACKAGE_DEPENDENCIES = {
     },
     "cdemu-daemon": {
         "pulse-native-provider",
-        "vhba-module-dkms",
+        VHBA_MODULE_PACKAGE,
     },
     "cmake": {
         "ninja",
@@ -716,6 +720,7 @@ EXPECTED_SERVICES = {
 EFI_SHELL_HOSTS = ("mars", "phobos", "lounge-htpc", "sol")
 if HOSTNAME in EFI_SHELL_HOSTS:
     EXPECTED_PACKAGES.add("edk2-shell")
+    EXPECTED_SERVICES.add("systemd-boot-update.service")
 
 if HOSTNAME in ("lounge-htpc"):
     EXPECTED_GROUPS.setdefault("lounge-htpc", set())
@@ -802,7 +807,7 @@ if HOSTNAME == "phobos":
         }
     )
 
-if HOSTNAME in ("lounge-htpc", "mars", "phobos", "sol"):
+if HOSTNAME in ("lounge-htpc", "phobos", "sol"):
     EXPECTED_PACKAGES.update(
         {
             "linux-lts",

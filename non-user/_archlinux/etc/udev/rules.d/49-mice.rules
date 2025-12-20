@@ -9,9 +9,3 @@ SUBSYSTEMS=="usb", ATTRS{idVendor}=="3554", ATTRS{idProduct}=="f508", MODE="0660
 
 # MCHOSE G3 Ultra (wired; wireless 8k receiver)
 SUBSYSTEMS=="usb", ATTRS{idVendor}=="0bda", ATTRS{idProduct}=="4762", MODE="0660", TAG+="uaccess"
-
-# MCHOSE L7 Ultra
-## wired
-SUBSYSTEMS=="usb", ATTRS{idVendor}=="5253", ATTRS{idProduct}=="00b1", MODE="0660", TAG+="uaccess"
-## wireless 8k receiver
-SUBSYSTEMS=="usb", ATTRS{idVendor}=="5253", ATTRS{idProduct}=="1020", MODE="0660", TAG+="uaccess"
