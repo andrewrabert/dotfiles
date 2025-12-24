@@ -1,0 +1,134 @@
+#!/usr/bin/env python3
+"""Index local directories with zoekt."""
+
+import argparse
+import asyncio
+import os
+import pathlib
+import sys
+
+
+class UserError(Exception):
+    pass
+
+
+class ProcessError(Exception):
+    def __init__(self, process, message=None):
+        self.process = process
+        self.message = message
+
+    def __str__(self):
+        text = f"exit {self.process.returncode}"
+        if self.message:
+            text = f"{text} - {self.message}"
+        return text
+
+
+INDEX_DIR = pathlib.Path.home() / ".zoekt"
+
+
+async def index_path(path, name_override=None):
+    """Index a directory using tar | zoekt-archive-index."""
+    path = path.resolve()
+    if not path.exists():
+        raise UserError(f"path does not exist: {path}")
+    if not path.is_dir():
+        raise UserError(f"not a directory: {path}")
+
+    INDEX_DIR.mkdir(parents=True, exist_ok=True)
+
+    if name_override:
+        # --name repo/prefix -> repo name + path prefix
+        parts = name_override.split("/", 1)
+        repo_name = parts[0]
+        tar_base = str(path.parent)
+        tar_path = parts[1] if len(parts) > 1 else path.name
+        # Symlink so tar sees the custom name
+        transform = f"s|^{path.name}/|{tar_path}/|"
+    else:
+        # Default: local + full path from root
+        repo_name = "local"
+        tar_base = "/"
+        tar_path = str(path).lstrip("/")
+        transform = None
+
+    # tar from base, pipe to zoekt-archive-index
+    read_fd, write_fd = os.pipe()
+
+    tar_args = ["tar", "-C", tar_base, "-cf", "-", tar_path]
+    if transform:
+        tar_args = [
+            "tar",
+            "-C",
+            tar_base,
+            "--transform",
+            transform,
+            "-cf",
+            "-",
+            path.name,
+        ]
+
+    tar_proc = await asyncio.create_subprocess_exec(
+        *tar_args,
+        stdout=write_fd,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    os.close(write_fd)
+
+    index_proc = await asyncio.create_subprocess_exec(
+        "zoekt-archive-index",
+        "-index",
+        str(INDEX_DIR),
+        "-name",
+        repo_name,
+        "-branch",
+        "HEAD",
+        "-",
+        stdin=read_fd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    os.close(read_fd)
+
+    _, index_stderr = await index_proc.communicate()
+    await tar_proc.wait()
+
+    if index_proc.returncode != 0:
+        raise ProcessError(
+            index_proc,
+            message=index_stderr.decode().strip() if index_stderr else None,
+        )
+
+    print(f"indexed {path} as {repo_name}")
+
+
+async def main():
+    parser = argparse.ArgumentParser(
+        description="Index local directories with zoekt",
+    )
+    parser.add_argument(
+        "dirs",
+        type=pathlib.Path,
+        nargs="+",
+        metavar="DIR",
+        help="directories to index",
+    )
+    parser.add_argument(
+        "--name",
+        help="repo/prefix format (default: local/<full-path>)",
+    )
+    args = parser.parse_args()
+
+    for d in args.dirs:
+        await index_path(d, args.name)
+
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except UserError as e:
+        print(f"error: {e}", file=sys.stderr)
+        sys.exit(1)
+    except ProcessError as e:
+        print(f"error: {e}", file=sys.stderr)
+        sys.exit(1)
