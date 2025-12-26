@@ -50,12 +50,14 @@ clipboard_wayland() {
 
 
 clipboard_tmux() {
-    if command -v tmux > /dev/null; then
+    if [ -n "$TMUX" ]; then
         case "$MODE" in
             copy)
-                tmux load-buffer -
+                tmux load-buffer -w -
                 ;;
             paste)
+                tmux refresh-client -l
+                sleep 0.1
                 tmux save-buffer -
                 ;;
         esac

@@ -9,6 +9,7 @@ confirm-close-surface = false
 font-family = Hack
 
 app-notifications = no-clipboard-copy
+clipboard-read = allow
 link-previews = osc8
 
 #ewline in claude code
