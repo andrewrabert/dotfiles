@@ -1,4 +1,4 @@
---- @since 25.5.31
+--- @since 25.9.15
 
 local M = {}
 
@@ -8,7 +8,7 @@ end
 
 function M:peek(job)
 	local child, err = Command("sh")
-		:arg({ "-c", job.args[1], "sh", tostring(job.file.url) })
+		:arg({ "-c", job.args[1], "sh", tostring(job.file.cache or job.file.url) })
 		:env("w", job.area.w)
 		:env("h", job.area.h)
 		:stdout(Command.PIPED)
@@ -61,7 +61,7 @@ function M.format(job, lines)
 
 		local icon = File({
 			url = Url(lines[i]),
-			cha = Cha({ kind = lines[i]:sub(-1) == "/" and 1 or 0 }),
+			cha = Cha({ mode = tonumber(lines[i]:sub(-1) == "/" and "40700" or "100644", 8) }),
 		}):icon()
 
 		if icon then

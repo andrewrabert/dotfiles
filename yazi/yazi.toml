@@ -17,13 +17,14 @@ wrap = "no"
 # too slow - especially on network mounts
 # this can also result in processes lingering after exit
 fetchers = [
-	{ id = "mime", name = "*", run = "dummy-mime", prio = "high" },
+	{ id = "mime", url = "*/", run = "mime.dir", prio = "high" },
+	{ id = "mime", url = "*", run = "dummy-mime", prio = "high" },
 ]
 preloaders = []
 previewers = [
-	{ name = "*/", run = "folder" },
+	{ url = "*/", run = "folder" },
 #    { mime = "image/*", run = "image-preview" },
-    { mime = "*", run = 'piper -- preview "$1"' },
+    { url = "*", run = 'piper -- preview "$1"' },
 ]
 #prepend_previewers = [
 #    { mime = "audio/*", run = "audio-preview" },
