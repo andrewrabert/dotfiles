@@ -1,0 +1,164 @@
+#!/usr/bin/env python3
+"""Edit MKV properties interactively via $EDITOR."""
+
+import asyncio
+import json
+import os
+import pathlib
+import sys
+import tempfile
+
+
+class ProcessError(Exception):
+    def __init__(self, process, message=None):
+        self.process = process
+        self.message = message
+
+    def __str__(self):
+        text = f"exit {self.process.returncode}"
+        if self.message:
+            text = f"{text} - {self.message}"
+        return text
+
+
+async def mkvmerge_identify(path):
+    proc = await asyncio.create_subprocess_exec(
+        "mkvmerge",
+        "-J",
+        str(path),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await proc.communicate()
+    if proc.returncode != 0:
+        raise ProcessError(proc, stderr.decode().strip())
+    return json.loads(stdout)
+
+
+async def mkvpropedit(path, actions):
+    args = ["mkvpropedit"]
+    for action in actions:
+        selector = action["selector"]
+        props = action["properties"]
+        args.extend(["--edit", selector])
+        for name, value in props.items():
+            if value is None:
+                args.extend(["--delete", name])
+            else:
+                args.extend(["--set", f"{name}={value}"])
+    args.append(str(path))
+
+    proc = await asyncio.create_subprocess_exec(
+        *args,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await proc.communicate()
+    if proc.returncode not in (0, 1):  # 1 = warnings
+        msg = stderr.decode().strip() or stdout.decode().strip()
+        raise ProcessError(proc, msg)
+
+
+def extract_props(info):
+    """Extract editable properties from mkvmerge identify output."""
+    props = {
+        "title": info.get("container", {}).get("properties", {}).get("title")
+    }
+    props["tracks"] = []
+    for track in info.get("tracks", []):
+        tp = track.get("properties", {})
+        props["tracks"].append(
+            {
+                "id": track["id"],
+                "type": track["type"],
+                "codec": track.get("codec"),
+                "language": tp.get("language"),
+                "name": tp.get("track_name"),
+            }
+        )
+    return props
+
+
+def build_actions(old, new):
+    """Build mkvpropedit actions from property diff."""
+    actions = []
+
+    if old.get("title") != new.get("title"):
+        actions.append(
+            {
+                "selector": "info",
+                "properties": {"title": new.get("title")},
+            }
+        )
+
+    for old_track, new_track in zip(
+        old.get("tracks", []), new.get("tracks", [])
+    ):
+        tid = old_track["id"]
+        changed = {}
+        if old_track.get("language") != new_track.get("language"):
+            changed["language"] = new_track.get("language")
+        if old_track.get("name") != new_track.get("name"):
+            changed["name"] = new_track.get("name")
+        if changed:
+            actions.append(
+                {"selector": f"track:{tid + 1}", "properties": changed}
+            )
+
+    return actions
+
+
+async def main():
+    if len(sys.argv) < 2:
+        print(
+            f"usage: {sys.argv[0]} <file.mkv> [file2.mkv ...]", file=sys.stderr
+        )
+        sys.exit(1)
+
+    paths = [pathlib.Path(arg).resolve() for arg in sys.argv[1:]]
+    editor = os.environ.get("EDITOR", "vi")
+
+    all_props = {}
+    for path in paths:
+        info = await mkvmerge_identify(path)
+        all_props[str(path)] = extract_props(info)
+
+    with tempfile.NamedTemporaryFile(
+        mode="w",
+        suffix=".json",
+        delete=False,
+    ) as tmp:
+        tmp.write(json.dumps(all_props, ensure_ascii=False, indent=2))
+        tmp_path = pathlib.Path(tmp.name)
+
+    try:
+        proc = await asyncio.create_subprocess_exec(editor, str(tmp_path))
+        await proc.wait()
+        if proc.returncode != 0:
+            sys.exit(proc.returncode)
+
+        new_all_props = json.loads(tmp_path.read_text())
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+    total_changes = 0
+    for path_str, old_props in all_props.items():
+        new_props = new_all_props.get(path_str)
+        if not new_props:
+            continue
+        actions = build_actions(old_props, new_props)
+        if actions:
+            await mkvpropedit(path_str, actions)
+            print(f"{path_str}: {len(actions)} change(s)")
+            total_changes += len(actions)
+
+    if total_changes == 0:
+        print("no changes")
+
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except ProcessError as e:
+        print(f"error: {e}", file=sys.stderr)
+        sys.exit(1)

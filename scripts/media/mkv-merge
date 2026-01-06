@@ -1,0 +1,126 @@
+#!/usr/bin/env python3
+"""Merge files into a single MKV. If first arg is MKV, adds others into it."""
+
+import asyncio
+import pathlib
+import sys
+import tempfile
+
+
+class ProcessError(Exception):
+    def __init__(self, process, message=None):
+        self.process = process
+        self.message = message
+
+    def __str__(self):
+        text = f"exit {self.process.returncode}"
+        if self.message:
+            text = f"{text} - {self.message}"
+        return text
+
+
+SUBTITLE_EXTS = {
+    ".srt",
+    ".ass",
+    ".ssa",
+    ".sub",
+    ".idx",
+    ".vtt",
+    ".pgs",
+    ".sup",
+}
+
+
+def is_subtitle(path):
+    return path.suffix.lower() in SUBTITLE_EXTS
+
+
+async def mkvmerge(output, inputs, title=None):
+    """
+    Merge inputs into output MKV.
+    inputs: list of (path, track_name) tuples. track_name can be None.
+    """
+    args = ["mkvmerge", "-o", str(output)]
+
+    if title:
+        args.extend(["--title", title])
+
+    for path, track_name in inputs:
+        if track_name:
+            args.extend(["--track-name", f"0:{track_name}"])
+        args.append(str(path))
+
+    proc = await asyncio.create_subprocess_exec(
+        *args,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await proc.communicate()
+    if proc.returncode not in (0, 1):  # 1 = warnings
+        raise ProcessError(proc, stderr.decode().strip())
+    return stdout.decode().strip()
+
+
+async def main():
+    if len(sys.argv) < 3:
+        print(
+            f"usage: {sys.argv[0]} <output.mkv> <input1> [input2 ...]",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    output = pathlib.Path(sys.argv[1]).resolve()
+    input_paths = [pathlib.Path(arg).resolve() for arg in sys.argv[2:]]
+
+    inputs = []
+
+    # If output already exists and is MKV, include it as first input
+    if output.exists() and output.suffix.lower() == ".mkv":
+        inputs.append((output, None))
+
+    # Add other inputs, with track names for subtitles
+    for path in input_paths:
+        if is_subtitle(path):
+            track_name = path.stem
+        else:
+            track_name = None
+        inputs.append((path, track_name))
+
+    if not inputs:
+        print("error: no inputs", file=sys.stderr)
+        sys.exit(1)
+
+    # If output is also an input, merge to temp then replace (preserve existing title)
+    if output.exists() and output.suffix.lower() == ".mkv":
+        with tempfile.NamedTemporaryFile(
+            dir=output.parent,
+            suffix=".mkv",
+            delete=False,
+        ) as tmp:
+            tmp_path = pathlib.Path(tmp.name)
+
+        try:
+            await mkvmerge(tmp_path, inputs)
+            tmp_path.replace(output)
+        except Exception:
+            tmp_path.unlink(missing_ok=True)
+            raise
+    else:
+        # New MKV - set title from filename
+        await mkvmerge(output, inputs, title=output.stem)
+
+    # Remove source files (but not the output)
+    for path in input_paths:
+        if path != output and path.exists():
+            path.unlink()
+            print(f"removed {path}")
+
+    print(f"merged {len(inputs)} file(s) -> {output}")
+
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except ProcessError as e:
+        print(f"error: {e}", file=sys.stderr)
+        sys.exit(1)
