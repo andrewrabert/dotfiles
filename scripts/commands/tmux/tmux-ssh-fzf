@@ -63,6 +63,8 @@ class fzf:
 
 
 async def main():
+    popup_mode = "--popup" in sys.argv
+
     cache = HistoryCache(CACHE_HOME / "tmux-ssh-history")
     history = cache.read()
 
@@ -98,9 +100,14 @@ async def main():
 
     cache.add(selected)
 
-    os.execvp(
-        "ssh-tmux-attach", ["ssh-tmux-attach", "--current-window", selected]
-    )
+    if popup_mode:
+        os.execvp(
+            "tmux", ["tmux", "new-window", "ssh-tmux-attach", "--current-window", selected]
+        )
+    else:
+        os.execvp(
+            "ssh-tmux-attach", ["ssh-tmux-attach", "--current-window", selected]
+        )
 
 
 if __name__ == "__main__":
