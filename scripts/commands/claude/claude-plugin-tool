@@ -309,6 +309,12 @@ def parse_args():
         action="store_true",
         help="Install plugins that exist in marketplace but aren't installed",
     )
+    update_parser.add_argument(
+        "-f",
+        "--force",
+        action="store_true",
+        help="Force reinstall plugins (uninstall+install) even if version unchanged",
+    )
 
     return parser.parse_args()
 
@@ -513,6 +519,20 @@ def remove_from_settings(marketplace, plugin=None):
         safe_write_json(SETTINGS_PATH, settings)
 
     return perms_removed, plugins_removed
+
+
+def remove_from_installed_plugins(marketplace, plugin):
+    """Remove a plugin from installed_plugins.json."""
+    installed = load_json(INSTALLED_PLUGINS_PATH)
+    if not installed:
+        return False
+    plugins = installed.get("plugins", {})
+    plugin_ref = f"{plugin}@{marketplace}"
+    if plugin_ref in plugins:
+        del plugins[plugin_ref]
+        safe_write_json(INSTALLED_PLUGINS_PATH, installed)
+        return True
+    return False
 
 
 async def cmd_install(args):
@@ -739,7 +759,7 @@ async def cmd_update(args):
             plugin_ref = f"{plugin}@{marketplace}"
             log(f"Pruning {plugin_ref} (no longer in marketplace)...")
             code, stdout, stderr = await ClaudeCLI.plugin_uninstall(plugin_ref)
-            if code == 0:
+            if code == 0 or "not found" in stderr.lower():
                 total_pruned += 1
             else:
                 print(f"error: {stderr}", file=sys.stderr)
@@ -748,6 +768,7 @@ async def cmd_update(args):
         if to_prune:
             for plugin in to_prune:
                 remove_from_settings(marketplace, plugin)
+                remove_from_installed_plugins(marketplace, plugin)
 
         # Install missing plugins if requested
         if args.install_missing:
@@ -770,8 +791,13 @@ async def cmd_update(args):
         to_update = installed_plugins & valid_plugins
         for plugin in sorted(to_update):
             plugin_ref = f"{plugin}@{marketplace}"
-            log(f"Updating {plugin_ref}...")
-            code, stdout, stderr = await ClaudeCLI.plugin_update(plugin_ref)
+            if args.force:
+                log(f"Reinstalling {plugin_ref}...")
+                await ClaudeCLI.plugin_uninstall(plugin_ref)
+                code, stdout, stderr = await ClaudeCLI.plugin_install(plugin_ref)
+            else:
+                log(f"Updating {plugin_ref}...")
+                code, stdout, stderr = await ClaudeCLI.plugin_update(plugin_ref)
             if stdout:
                 log_indent(stdout.rstrip())
             if code == 0:
