@@ -223,6 +223,15 @@ def get_installed_plugins_for_marketplace(marketplace):
     return result
 
 
+def is_local_marketplace(marketplace):
+    """Check if a marketplace source is a local path."""
+    known = load_json(KNOWN_MARKETPLACES_PATH)
+    if marketplace not in known:
+        return False
+    source = known[marketplace].get("source", {})
+    return source.get("source") == "local"
+
+
 def parse_args():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(
@@ -789,9 +798,10 @@ async def cmd_update(args):
 
         # Update remaining plugins
         to_update = installed_plugins & valid_plugins
+        force_reinstall = args.force or is_local_marketplace(marketplace)
         for plugin in sorted(to_update):
             plugin_ref = f"{plugin}@{marketplace}"
-            if args.force:
+            if force_reinstall:
                 log(f"Reinstalling {plugin_ref}...")
                 await ClaudeCLI.plugin_uninstall(plugin_ref)
                 code, stdout, stderr = await ClaudeCLI.plugin_install(plugin_ref)
