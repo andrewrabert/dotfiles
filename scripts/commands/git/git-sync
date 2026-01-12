@@ -192,9 +192,12 @@ def parse_repo(repo):
                         raise RuntimeError("invalid invent.kde.org url")
                     path = "/".join(parts[0:])
                 case _:
-                    raise NotImplementedError(
-                        f"unhandled netloc: {parsed.netloc}"
-                    )
+                    # Use netloc directly as SSH host (e.g. aweber.ghe.com)
+                    host = parsed.netloc
+                    parts = path.split("/")
+                    if len(parts) < 2:
+                        raise RuntimeError(f"invalid {parsed.netloc} url")
+                    path = "/".join(parts[0:])
         elif parsed.scheme:
             host = parsed.scheme
         else:
