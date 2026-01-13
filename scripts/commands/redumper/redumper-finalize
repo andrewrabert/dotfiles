@@ -1,4 +1,4 @@
-#!/usr/bin/env -S uv --quiet run --script
+#!/usr/bin/env -S uv run --script
 """
 Redumper finalization tool with async processing.
 

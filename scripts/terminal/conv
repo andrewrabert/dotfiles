@@ -1,4 +1,4 @@
-#!/usr/bin/env -S uv --quiet run --script
+#!/usr/bin/env -S uv run --script
 """
 Unit conversion tool using pint library.
 

@@ -1,4 +1,4 @@
-#!/usr/bin/env -S uv --quiet run --python=python3.13 --script
+#!/usr/bin/env -S uv run --python=python3.13 --script
 """
 Interactive USB device attach/detach for libvirt VMs using fzf.
 
