@@ -467,7 +467,11 @@ def watch_loop(
             # Detect external attaches
             for dev in current_devices:
                 id_key = get_id_key(dev)
-                if id_key in current_attached_set and id_key not in attached_ids and id_key not in existing_ids:
+                if (
+                    id_key in current_attached_set
+                    and id_key not in attached_ids
+                    and id_key not in existing_ids
+                ):
                     desc = (
                         f"{dev['vendor_name']} {dev['product_name']}".strip()
                     )
