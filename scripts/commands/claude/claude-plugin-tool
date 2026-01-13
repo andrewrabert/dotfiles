@@ -117,7 +117,7 @@ class ClaudeCLI:
 
 def get_local_path(source):
     """Return Path if source is a local path, None if URL/remote."""
-    if source.startswith(("/", "./")):
+    if source in (".", "..") or source.startswith(("/", "./", "../")):
         return pathlib.Path(source)
     return None
 
