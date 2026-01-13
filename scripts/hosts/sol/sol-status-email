@@ -1,11 +1,18 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --script
+"""
+# /// script
+# dependencies = [
+#     "jinja2",
+# ]
+# ///
+"""
+
 import argparse
 import collections
 import datetime
 import subprocess
 
 import jinja2
-
 
 SYSTEM_UNITS = {
     "fstrim.service",
@@ -135,7 +142,8 @@ def main():
 
     output = template.render(units=units)
     subject = "{} Report {}".format(
-        "✅" if success else "❌", datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+        "✅" if success else "❌",
+        datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
     )
 
     if args.dummy:

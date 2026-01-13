@@ -1,4 +1,12 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --script
+"""
+# /// script
+# dependencies = [
+#     "tabulate",
+# ]
+# ///
+"""
+
 import json
 import os
 import pathlib
@@ -8,7 +16,9 @@ import sys
 import tabulate
 
 COMPOSE_PROJECT_NAME = "sol-docker"
-SOL_DOCKER_PATH = pathlib.Path("~/src/git.nullsum.net/nvllsvm/sol-docker").expanduser()
+SOL_DOCKER_PATH = pathlib.Path(
+    "~/src/git.nullsum.net/nvllsvm/sol-docker"
+).expanduser()
 
 
 KILLABLE = [
@@ -41,7 +51,9 @@ def _command_restart():
 
 
 def _command_status():
-    proc = docker_compose("ps", "--all", "--format=json", stdout=subprocess.PIPE)
+    proc = docker_compose(
+        "ps", "--all", "--format=json", stdout=subprocess.PIPE
+    )
     data = [json.loads(line) for line in proc.stdout.splitlines()]
 
     containers = []
