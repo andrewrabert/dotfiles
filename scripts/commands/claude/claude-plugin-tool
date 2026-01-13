@@ -394,9 +394,16 @@ async def install_or_update_marketplace(name, source):
     return True
 
 
-async def install_or_update_plugin(marketplace, name):
+async def install_or_update_plugin(marketplace, name, force=False):
     """Install or update a single plugin. Returns (name, success, message)."""
     plugin_ref = f"{name}@{marketplace}"
+
+    if force:
+        await ClaudeCLI.plugin_uninstall(plugin_ref)
+        code, stdout, stderr = await ClaudeCLI.plugin_install(plugin_ref)
+        if code == 0:
+            return name, True, stdout.rstrip() if stdout else "reinstalled"
+        return name, False, stderr.rstrip() if stderr else "failed"
 
     code, stdout, stderr = await ClaudeCLI.plugin_install(plugin_ref)
     if code == 0:
@@ -409,9 +416,9 @@ async def install_or_update_plugin(marketplace, name):
     return name, False, stderr.rstrip() if stderr else "failed"
 
 
-async def install_all_plugins(marketplace, plugins):
+async def install_all_plugins(marketplace, plugins, force=False):
     """Install all plugins concurrently. Returns failure count."""
-    tasks = [install_or_update_plugin(marketplace, p) for p in plugins]
+    tasks = [install_or_update_plugin(marketplace, p, force) for p in plugins]
     results = await asyncio.gather(*tasks)
 
     # Print results in order after all complete
@@ -600,7 +607,8 @@ async def cmd_install(args):
         return 1
 
     log("")
-    failures = await install_all_plugins(marketplace_name, plugins)
+    force = get_local_path(source) is not None
+    failures = await install_all_plugins(marketplace_name, plugins, force)
 
     log(f"\nDone: {len(plugins) - failures}/{len(plugins)} plugins installed")
 
