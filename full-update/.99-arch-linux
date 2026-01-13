@@ -1078,7 +1078,8 @@ async def main():
             await ensure_flatpaks()
             await dump_installed_packages()
 
-            if HOSTNAME in ("mars", "phobos", "sol"):
+            # if HOSTNAME in ("mars", "phobos", "sol"):
+            if HOSTNAME in ():
                 await ensure_python_freethreaded()
 
             for service in EXPECTED_SERVICES:
