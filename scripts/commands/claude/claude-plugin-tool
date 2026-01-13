@@ -10,6 +10,8 @@ import pathlib
 import re
 import sys
 import tempfile
+import urllib.request
+import urllib.error
 
 CLAUDE_DIR = pathlib.Path.home() / ".claude"
 SETTINGS_PATH = CLAUDE_DIR / "settings.json"
@@ -114,21 +116,60 @@ class ClaudeCLI:
 
 
 def get_local_path(source):
-    """Return Path if source is a local path, None if URL."""
-    if source.startswith(("http://", "https://", "git@")):
+    """Return Path if source is a local path, None if URL/remote."""
+    if source.startswith(("/", "./")):
+        return pathlib.Path(source)
+    return None
+
+
+def get_github_repo(source):
+    """Extract owner/repo from GitHub URL or shorthand. Returns None if not GitHub."""
+    if source.startswith(("http://", "https://")):
+        match = re.match(r"https?://github\.com/([^/]+/[^/]+?)(?:\.git)?/?$", source)
+        if match:
+            return match.group(1)
         return None
-    return pathlib.Path(source)
+    if source.startswith("git@"):
+        match = re.match(r"git@github\.com:([^/]+/[^/]+?)(?:\.git)?$", source)
+        if match:
+            return match.group(1)
+        return None
+    # Assume owner/repo shorthand
+    if "/" in source and not source.startswith(("/", "./")):
+        return source
+    return None
+
+
+def fetch_github_manifest(repo):
+    """Fetch marketplace.json from GitHub repo. Tries main then master branch."""
+    for branch in ("main", "master"):
+        url = f"https://raw.githubusercontent.com/{repo}/{branch}/.claude-plugin/marketplace.json"
+        try:
+            with urllib.request.urlopen(url, timeout=10) as resp:
+                return json.loads(resp.read().decode())
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                continue
+            raise UserError(f"failed to fetch manifest from {url}: {e}")
+        except urllib.error.URLError as e:
+            raise UserError(f"failed to fetch manifest from {url}: {e}")
+    raise UserError(f"manifest not found in {repo} (tried main and master branches)")
 
 
 def load_manifest(source):
-    """Load marketplace.json from source."""
+    """Load marketplace.json from source (local path or GitHub)."""
     local = get_local_path(source)
-    if not local:
-        raise UserError(f"cannot read manifest from remote URL: {source}")
-    manifest = local / ".claude-plugin" / "marketplace.json"
-    if not manifest.exists():
-        raise UserError(f"manifest not found: {manifest}")
-    return load_json(manifest)
+    if local:
+        manifest = local / ".claude-plugin" / "marketplace.json"
+        if not manifest.exists():
+            raise UserError(f"manifest not found: {manifest}")
+        return load_json(manifest)
+
+    repo = get_github_repo(source)
+    if repo:
+        return fetch_github_manifest(repo)
+
+    raise UserError(f"unsupported source: {source}")
 
 
 def get_marketplace_name(source):
