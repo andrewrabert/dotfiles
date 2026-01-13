@@ -543,9 +543,11 @@ class Database:
         - Its name is needed, OR
         - Its pkgbase is needed, OR
         - It provides something that's needed
+        - It's in the manual set (never auto-remove)
         """
         in_repo = {pkg.name for pkg in self.packages()}
         to_keep = self._calculate_needed_packages()
+        manual = self.config.get_no_update_packages()
         orphans = set()
 
         for name in in_repo - to_keep:
@@ -557,7 +559,10 @@ class Database:
                 identifier in to_keep for identifier in identifiers
             )
 
-            if not is_needed:
+            # Manual packages are never auto-removed
+            is_manual = pkg.name in manual or pkg.pkgbase in manual
+
+            if not is_needed and not is_manual:
                 orphans.add(name)
 
         return orphans
@@ -761,6 +766,13 @@ class Database:
 
         for package in packages:
             maybe_path = pathlib.Path(package)
+            # Check if this looks like a file path but doesn't exist
+            is_file_like = "/" in package or package.endswith(
+                (".pkg.tar.zst", ".pkg.tar.xz", ".pkg.tar.gz")
+            )
+            if is_file_like and not maybe_path.is_file():
+                logger.error(f"Package file not found: {package}")
+                continue
             if maybe_path.is_file():
                 # Handle package file
                 await run_cmd(
@@ -771,14 +783,24 @@ class Database:
                     check=True,
                 )
                 await run_cmd(
-                    "repo-add", "--sign", str(self.db_tar), str(maybe_path), check=True
+                    "repo-add",
+                    "--sign",
+                    str(self.db_tar),
+                    str(maybe_path),
+                    check=True,
                 )
                 await self._sign(self.directory / maybe_path.name)
 
                 # Extract package name and pkgbase using pyalpm
-                pkg_file = self.pkg_db.load_package_file(maybe_path)
-                pkg_name_only = pkg_file.name
-                pkgbase = pkg_file.base
+                try:
+                    pkg_file = self.pkg_db.load_package_file(maybe_path)
+                    pkg_name_only = pkg_file.name
+                    pkgbase = pkg_file.base or pkg_name_only
+                except Exception as e:
+                    logger.error(
+                        f"Failed to load package file {maybe_path}: {e}"
+                    )
+                    continue
 
                 new_files.append(pkg_name_only)
 
@@ -1369,7 +1391,7 @@ class Database:
 
         sync_dbs = self.pkg_db.get_official_dbs()
 
-        # Remove packages now in official repos
+        # Check packages now in official repos
         packages_in_official_repos = set()
         repo_packages = {pkg.name for pkg in self.packages()}
 
@@ -1380,13 +1402,27 @@ class Database:
                     break
 
         if packages_in_official_repos:
-            logger.info(
-                f"Found {len(packages_in_official_repos)} packages now in official repos, removing from sol:"
+            # Separate manual packages (warn only) from non-manual (remove)
+            manual_in_official = (
+                packages_in_official_repos & self.config.manual
             )
-            for pkg in sorted(packages_in_official_repos):
-                logger.info(f"  - {pkg}")
-            await self.remove(*packages_in_official_repos)
-            repo_packages = {pkg.name for pkg in self.packages()}
+            to_remove = packages_in_official_repos - self.config.manual
+
+            if manual_in_official:
+                logger.warning(
+                    f"Found {len(manual_in_official)} manual package(s) now in official repos (not removing):"
+                )
+                for pkg in sorted(manual_in_official):
+                    logger.warning(f"  - {pkg}")
+
+            if to_remove:
+                logger.info(
+                    f"Found {len(to_remove)} package(s) now in official repos, removing from sol:"
+                )
+                for pkg in sorted(to_remove):
+                    logger.info(f"  - {pkg}")
+                await self.remove(*to_remove)
+                repo_packages = {pkg.name for pkg in self.packages()}
 
         # Determine which pkgbases to check
         # Build mapping of pkgbase -> packages and package -> pkgbase
