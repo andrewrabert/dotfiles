@@ -296,7 +296,6 @@ if HOSTNAME in ("sol", "mars", "phobos"):
             "inetutils",  # hostname command
             "innoextract",
             "iperf3",
-            "iptables",
             "iw",
             "jpegoptim",
             "jq",
@@ -369,6 +368,11 @@ if HOSTNAME in ("sol", "mars", "phobos"):
             "zsh",
         }
     )
+
+if HOSTNAME == "sol":
+    EXPECTED_PACKAGES.add("iptables-nft")
+else:
+    EXPECTED_PACKAGES.add("iptables")
 
 if HOSTNAME in ("mars", "phobos", "lounge-htpc"):
     EXPECTED_PACKAGES.update(
@@ -468,7 +472,7 @@ if HOSTNAME in ("mars", "phobos"):
     )
 
 VHBA_MODULE_PACKAGE = "vhba-module"
-if HOSTNAME in ("phobos",):
+if HOSTNAME in ("phobos", "sol"):
     VHBA_MODULE_PACKAGE = "vhba-module-dkms"
 
 EXPECTED_PACKAGE_DEPENDENCIES = {

@@ -155,7 +155,13 @@ class AURCLI:
         no_ver: bool = False,
     ):
         """Sync packages from AUR. Returns True on success."""
-        args = ["sync", "--no-view", "--no-confirm", f"--database={database}"]
+        args = [
+            "sync",
+            "--no-view",
+            "--no-confirm",
+            "--sign",
+            f"--database={database}",
+        ]
         if no_ver:
             args.append("--no-ver")
         if makepkg_args:
@@ -174,7 +180,7 @@ class AURCLI:
         force: bool = False,
     ):
         """Build a package in the given directory. Returns True on success."""
-        args = ["build", f"--database={database}"]
+        args = ["build", f"--database={database}", "--sign"]
         if force:
             args.append("--force")
         if makepkg_args:
@@ -1844,8 +1850,14 @@ class Database:
         )
 
 
-def db_list(orphans=False, as_json=False, show_all=False):
+def db_list(orphans=False, as_json=False, show_all=False, depends_on=None):
     database = Database(DATABASE)
+
+    if depends_on:
+        reverse_deps = _find_reverse_deps(database, depends_on)
+        for pkg in sorted(reverse_deps):
+            print(pkg)
+        return
 
     if orphans:
         # Show orphaned packages
@@ -2099,7 +2111,23 @@ async def db_update(packages=None, makepkg_flags=None):
     await database.update(packages=packages, makepkg_flags=makepkg_flags)
 
 
-async def db_rebuild(packages, makepkg_flags=None):
+def _find_reverse_deps(database, target_packages):
+    """Find all packages in sol that depend on target_packages (anywhere in tree)."""
+    target_set = set(target_packages)
+    reverse_deps = set()
+
+    # Get all packages and their full dependency info
+    all_pkgs = {pkg.name: pkg for pkg in database.packages()}
+
+    for pkg_name, pkg in all_pkgs.items():
+        all_deps = set(pkg.depends + pkg.optdepends + pkg.makedepends)
+        if all_deps & target_set:
+            reverse_deps.add(pkg.pkgbase)
+
+    return reverse_deps
+
+
+async def db_rebuild(packages=None, makepkg_flags=None, depends_on=None):
     database = Database(DATABASE)
     await database._sign_database()
     await database._pacsync()
@@ -2116,18 +2144,34 @@ async def db_rebuild(packages, makepkg_flags=None):
 
     pkgbases_to_rebuild = set()
     not_in_repo = []
-    for pkg in packages:
-        if pkg in package_to_pkgbase:
-            pkgbases_to_rebuild.add(package_to_pkgbase[pkg])
-        elif pkg in {p.pkgbase for p in database.packages()}:
-            pkgbases_to_rebuild.add(pkg)
-        else:
-            not_in_repo.append(pkg)
 
-    if not_in_repo:
-        logger.warning(f"{len(not_in_repo)} package(s) not in repository:")
-        for pkg in sorted(not_in_repo):
-            logger.warning(f"  - {pkg}")
+    # Handle --dependson flag
+    if depends_on:
+        pkgbases_to_rebuild = _find_reverse_deps(database, depends_on)
+        if not pkgbases_to_rebuild:
+            logger.info(
+                f"No packages in sol depend on: {', '.join(depends_on)}"
+            )
+            return
+        logger.info(
+            f"Found {len(pkgbases_to_rebuild)} package(s) depending on: {', '.join(depends_on)}"
+        )
+    elif packages:
+        for pkg in packages:
+            if pkg in package_to_pkgbase:
+                pkgbases_to_rebuild.add(package_to_pkgbase[pkg])
+            elif pkg in {p.pkgbase for p in database.packages()}:
+                pkgbases_to_rebuild.add(pkg)
+            else:
+                not_in_repo.append(pkg)
+
+        if not_in_repo:
+            logger.warning(f"{len(not_in_repo)} package(s) not in repository:")
+            for pkg in sorted(not_in_repo):
+                logger.warning(f"  - {pkg}")
+    else:
+        logger.error("Must specify packages or --dependson")
+        return
 
     if not pkgbases_to_rebuild:
         logger.info("No packages to rebuild")
@@ -2152,7 +2196,9 @@ async def db_rebuild(packages, makepkg_flags=None):
             makepkg_args=makepkg_args,
             force=True,
         )
-        if not success:
+        if success:
+            await database._sign_database()
+        else:
             logger.error(f"Failed to build {pkgbase}")
 
     await database._sign_database()
@@ -2256,6 +2302,13 @@ def main():
         action="store_true",
         help="Include all dependencies (not just sol packages)",
     )
+    list_parser.add_argument(
+        "--dependson",
+        action="append",
+        dest="depends_on",
+        metavar="PKG",
+        help="List packages that depend on PKG (can be repeated)",
+    )
 
     prune_parser = subparsers.add_parser(
         "prune", help="Remove packages not in config"
@@ -2305,7 +2358,14 @@ def main():
 
     rebuild_parser = subparsers.add_parser("rebuild", help="Rebuild packages")
     rebuild_parser.add_argument(
-        "package", nargs="+", help="Packages to rebuild"
+        "package", nargs="*", help="Packages to rebuild"
+    )
+    rebuild_parser.add_argument(
+        "--dependson",
+        action="append",
+        dest="depends_on",
+        metavar="PKG",
+        help="Rebuild packages that depend on PKG (can be repeated)",
     )
     rebuild_parser.add_argument(
         "--skippgpcheck", action="store_true", help="Skip PGP signature checks"
@@ -2334,7 +2394,12 @@ def main():
 
     match args.command:
         case "list":
-            db_list(orphans=args.orphans, as_json=args.json, show_all=args.all)
+            db_list(
+                orphans=args.orphans,
+                as_json=args.json,
+                show_all=args.all,
+                depends_on=args.depends_on,
+            )
         case "prune":
             asyncio.run(db_prune(dry_run=args.dry_run))
         case "update":
@@ -2385,8 +2450,9 @@ def main():
                 makepkg_flags.append("--skipchecksums")
             asyncio.run(
                 db_rebuild(
-                    args.package,
+                    packages=args.package if args.package else None,
                     makepkg_flags=makepkg_flags if makepkg_flags else None,
+                    depends_on=args.depends_on,
                 )
             )
         case "show-deps":
