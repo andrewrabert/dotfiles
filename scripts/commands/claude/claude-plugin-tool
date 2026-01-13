@@ -8,6 +8,7 @@ import json
 import os
 import pathlib
 import re
+import shutil
 import sys
 import tempfile
 import urllib.request
@@ -17,6 +18,7 @@ CLAUDE_DIR = pathlib.Path.home() / ".claude"
 SETTINGS_PATH = CLAUDE_DIR / "settings.json"
 INSTALLED_PLUGINS_PATH = CLAUDE_DIR / "plugins" / "installed_plugins.json"
 KNOWN_MARKETPLACES_PATH = CLAUDE_DIR / "plugins" / "known_marketplaces.json"
+PLUGIN_CACHE_PATH = CLAUDE_DIR / "plugins" / "cache"
 
 QUIET = False
 
@@ -378,13 +380,24 @@ async def marketplace_exists(name):
 async def install_or_update_marketplace(name, source):
     """Install or update the marketplace."""
     exists = await marketplace_exists(name)
+    local_path = get_local_path(source)
 
-    if exists:
+    # For local paths, remove and re-add to ensure we use the local source
+    # (marketplace_update would pull from the originally recorded source)
+    if exists and local_path:
+        log(f"Re-adding marketplace {name} from local path...")
+        await ClaudeCLI.marketplace_remove(name)
+        # Use absolute path - claude CLI doesn't accept bare "." or ".."
+        code, stdout, stderr = await ClaudeCLI.marketplace_add(
+            str(local_path.resolve())
+        )
+    elif exists:
         log(f"Updating marketplace {name}...")
         code, stdout, stderr = await ClaudeCLI.marketplace_update(name)
     else:
         log(f"Adding marketplace {name}...")
-        code, stdout, stderr = await ClaudeCLI.marketplace_add(source)
+        add_source = str(local_path.resolve()) if local_path else source
+        code, stdout, stderr = await ClaudeCLI.marketplace_add(add_source)
 
     if stdout:
         log(stdout.rstrip())
@@ -394,12 +407,20 @@ async def install_or_update_marketplace(name, source):
     return True
 
 
+def clear_plugin_cache(marketplace, plugin):
+    """Delete cached plugin versions to force fresh install."""
+    cache_dir = PLUGIN_CACHE_PATH / marketplace / plugin
+    if cache_dir.exists():
+        shutil.rmtree(cache_dir)
+
+
 async def install_or_update_plugin(marketplace, name, force=False):
     """Install or update a single plugin. Returns (name, success, message)."""
     plugin_ref = f"{name}@{marketplace}"
 
     if force:
         await ClaudeCLI.plugin_uninstall(plugin_ref)
+        clear_plugin_cache(marketplace, name)
         code, stdout, stderr = await ClaudeCLI.plugin_install(plugin_ref)
         if code == 0:
             return name, True, stdout.rstrip() if stdout else "reinstalled"
@@ -853,6 +874,7 @@ async def cmd_update(args):
             if force_reinstall:
                 log(f"Reinstalling {plugin_ref}...")
                 await ClaudeCLI.plugin_uninstall(plugin_ref)
+                clear_plugin_cache(marketplace, plugin)
                 code, stdout, stderr = await ClaudeCLI.plugin_install(plugin_ref)
             else:
                 log(f"Updating {plugin_ref}...")
