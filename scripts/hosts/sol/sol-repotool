@@ -2139,7 +2139,9 @@ async def db_rebuild(packages, makepkg_flags=None):
 
     for pkgbase in pkgbases_to_rebuild:
         # Fetch latest PKGBUILD
-        if not await AURCLI.fetch(pkgbase, cwd=database.aurutils_cache, reset=True):
+        if not await AURCLI.fetch(
+            pkgbase, cwd=database.aurutils_cache, reset=True
+        ):
             logger.error(f"Failed to fetch {pkgbase}")
             continue
 
@@ -2163,7 +2165,10 @@ async def db_sign(all_pkgs=False):
     database = Database(DATABASE)
     signed_count = 0
     for path in database.directory.iterdir():
-        if not (path.name.endswith(".pkg.tar.zst") or path.name.endswith(".pkg.tar.xz")):
+        if not (
+            path.name.endswith(".pkg.tar.zst")
+            or path.name.endswith(".pkg.tar.xz")
+        ):
             continue
         sig_path = path.with_name(path.name + ".sig")
         if all_pkgs or not sig_path.exists():
@@ -2299,7 +2304,9 @@ def main():
     )
 
     rebuild_parser = subparsers.add_parser("rebuild", help="Rebuild packages")
-    rebuild_parser.add_argument("package", nargs="+", help="Packages to rebuild")
+    rebuild_parser.add_argument(
+        "package", nargs="+", help="Packages to rebuild"
+    )
     rebuild_parser.add_argument(
         "--skippgpcheck", action="store_true", help="Skip PGP signature checks"
     )
