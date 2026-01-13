@@ -771,7 +771,7 @@ class Database:
                     check=True,
                 )
                 await run_cmd(
-                    "repo-add", str(self.db_tar), str(maybe_path), check=True
+                    "repo-add", "--sign", str(self.db_tar), str(maybe_path), check=True
                 )
                 await self._sign(self.directory / maybe_path.name)
 

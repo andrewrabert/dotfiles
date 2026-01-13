@@ -45,6 +45,13 @@ if ! command -v yay > /dev/null 2>&1; then
     cd -
 fi
 
+KEY_ID="952DF315E396E06A"
+if ! pacman-key --list-keys "$KEY_ID" > /dev/null 2>&1; then
+    log 'Adding personal GPG key to pacman keyring'
+    sudo pacman-key --recv-keys "$KEY_ID"
+    sudo pacman-key --lsign-key "$KEY_ID"
+fi
+
 log 'Updating repository packages'
 sudo pacman -Syu --noconfirm
 
