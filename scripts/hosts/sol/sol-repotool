@@ -648,6 +648,7 @@ class Database:
                 logger.debug(f"Clearing cache for {path.name}")
                 shutil.rmtree(path)
 
+        await self._sign_database()
         await self._pacsync()
         await self._paccache()
         await self.sync_to_nullsum_net()
@@ -698,6 +699,7 @@ class Database:
                 except FileNotFoundError:
                     pass
 
+        await self._sign_database()
         await self._pacsync()
         await self.sync_to_nullsum_net()
 
@@ -728,6 +730,7 @@ class Database:
         parents=None,
         makepkg_flags=None,
     ):
+        await self._sign_database()
         await self._pacsync()
 
         # Build makepkg args from flags
@@ -893,6 +896,7 @@ class Database:
 
         # Only sync if we actually built/added packages or added files
         if new_packages or new_files:
+            await self._sign_database()
             await self._pacsync()
             await self.sync_to_nullsum_net()
         elif reclassified:
@@ -1349,6 +1353,7 @@ class Database:
         """
         # Initialization
         await self.cleanup()
+        await self._sign_database()
         await self._pacsync()
         self.aurutils_cache.mkdir(exist_ok=True, parents=True)
 
@@ -1461,6 +1466,7 @@ class Database:
 
         # Cleanup and sync
         if sorted_packages:
+            await self._sign_database()
             await self._pacsync()
             await self._paccache()
             await self.sync_to_nullsum_net()
@@ -2093,14 +2099,83 @@ async def db_update(packages=None, makepkg_flags=None):
     await database.update(packages=packages, makepkg_flags=makepkg_flags)
 
 
-async def db_sign(all=False):
+async def db_rebuild(packages, makepkg_flags=None):
     database = Database(DATABASE)
-    if all:
-        for path in database.directory.iterdir():
-            if not path.name.endswith(".pkg.tar.zst"):
-                continue
+    await database._sign_database()
+    await database._pacsync()
+    database.aurutils_cache.mkdir(exist_ok=True, parents=True)
+
+    makepkg_args = []
+    if makepkg_flags:
+        makepkg_args.extend(makepkg_flags)
+
+    # Resolve package names to pkgbases
+    package_to_pkgbase = {}
+    for pkg in database.packages():
+        package_to_pkgbase[pkg.name] = pkg.pkgbase
+
+    pkgbases_to_rebuild = set()
+    not_in_repo = []
+    for pkg in packages:
+        if pkg in package_to_pkgbase:
+            pkgbases_to_rebuild.add(package_to_pkgbase[pkg])
+        elif pkg in {p.pkgbase for p in database.packages()}:
+            pkgbases_to_rebuild.add(pkg)
+        else:
+            not_in_repo.append(pkg)
+
+    if not_in_repo:
+        logger.warning(f"{len(not_in_repo)} package(s) not in repository:")
+        for pkg in sorted(not_in_repo):
+            logger.warning(f"  - {pkg}")
+
+    if not pkgbases_to_rebuild:
+        logger.info("No packages to rebuild")
+        return
+
+    logger.info(f"Rebuilding {len(pkgbases_to_rebuild)} package(s):")
+    for pkg in sorted(pkgbases_to_rebuild):
+        logger.info(f"  - {pkg}")
+
+    for pkgbase in pkgbases_to_rebuild:
+        # Fetch latest PKGBUILD
+        if not await AURCLI.fetch(pkgbase, cwd=database.aurutils_cache, reset=True):
+            logger.error(f"Failed to fetch {pkgbase}")
+            continue
+
+        pkg_dir = database.aurutils_cache / pkgbase
+        success = await AURCLI.build(
+            database=database.name,
+            cwd=pkg_dir,
+            makepkg_args=makepkg_args,
+            force=True,
+        )
+        if not success:
+            logger.error(f"Failed to build {pkgbase}")
+
+    await database._sign_database()
+    await database._pacsync()
+    await database._paccache()
+    await database.sync_to_nullsum_net()
+
+
+async def db_sign(all_pkgs=False):
+    database = Database(DATABASE)
+    signed_count = 0
+    for path in database.directory.iterdir():
+        if not (path.name.endswith(".pkg.tar.zst") or path.name.endswith(".pkg.tar.xz")):
+            continue
+        sig_path = path.with_name(path.name + ".sig")
+        if all_pkgs or not sig_path.exists():
+            logger.info(f"Signing {path.name}")
             await database._sign(path)
-    # database._sign_database()
+            signed_count += 1
+    if signed_count:
+        logger.info(f"Signed {signed_count} package(s)")
+    else:
+        logger.info("All packages already signed")
+    logger.info("Signing database")
+    await database._sign_database()
     await database.sync_to_nullsum_net()
 
 
@@ -2223,6 +2298,18 @@ def main():
         "--skipchecksums", action="store_true", help="Skip checksum checks"
     )
 
+    rebuild_parser = subparsers.add_parser("rebuild", help="Rebuild packages")
+    rebuild_parser.add_argument("package", nargs="+", help="Packages to rebuild")
+    rebuild_parser.add_argument(
+        "--skippgpcheck", action="store_true", help="Skip PGP signature checks"
+    )
+    rebuild_parser.add_argument(
+        "--skipinteg", action="store_true", help="Skip integrity checks"
+    )
+    rebuild_parser.add_argument(
+        "--skipchecksums", action="store_true", help="Skip checksum checks"
+    )
+
     args = parser.parse_args()
 
     # Set logging level based on verbose flag
@@ -2281,12 +2368,26 @@ def main():
             )
         case "remove":
             asyncio.run(db_remove(args.package))
+        case "rebuild":
+            makepkg_flags = []
+            if args.skippgpcheck:
+                makepkg_flags.append("--skippgpcheck")
+            if args.skipinteg:
+                makepkg_flags.append("--skipinteg")
+            if args.skipchecksums:
+                makepkg_flags.append("--skipchecksums")
+            asyncio.run(
+                db_rebuild(
+                    args.package,
+                    makepkg_flags=makepkg_flags if makepkg_flags else None,
+                )
+            )
         case "show-deps":
             db_show_deps(args.package if args.package else None)
         case "check-deps":
             db_check_deps()
         case "sign":
-            asyncio.run(db_sign(all=args.all))
+            asyncio.run(db_sign(all_pkgs=args.all))
         case "sync":
             asyncio.run(db_sync())
         case _:
