@@ -338,7 +338,7 @@ if HOSTNAME in ("sol", "mars", "phobos"):
             "rust-analyzer",
             "shellcheck",
             "shntool",
-            "speedtest-go",
+            "speedtest-cli",
             "sshfs",
             "sshuttle",
             "stylua",
