@@ -332,7 +332,7 @@ async def process_path(redump, path, args):
                 LOGGER.info("✅ validated")
                 return
 
-            if args.replace:
+            if args.rename:
                 LOGGER.info("ℹ️ RENAMING %s", target)
                 if target.exists():
                     raise RuntimeError(f"target exists {target}")
@@ -347,7 +347,7 @@ async def process_path(redump, path, args):
                 )
                 while target.exists():
                     target = target.with_name(f"{target.name}_")
-                if args.replace:
+                if args.rename:
                     path.replace(target)
 
 
