@@ -412,6 +412,7 @@ if HOSTNAME in ("mars", "phobos"):
             "ghostty",
             "gifski",
             "gimp",
+            "google-chrome",
             "gparted",
             "inkscape",
             "k9s",
