@@ -9,10 +9,11 @@ import os
 import pathlib
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
-import urllib.request
 import urllib.error
+import urllib.request
 
 CLAUDE_DIR = pathlib.Path.home() / ".claude"
 SETTINGS_PATH = CLAUDE_DIR / "settings.json"
@@ -142,6 +143,41 @@ def get_github_repo(source):
     return None
 
 
+def is_git_url(source):
+    """Check if source looks like a git URL."""
+    if source.startswith("git@"):
+        return True
+    if source.startswith(("http://", "https://")):
+        # URL with .git suffix or known git host patterns
+        if source.endswith(".git"):
+            return True
+        # Common git hosting patterns (github, gitlab, bitbucket, ghe)
+        if re.match(r"https?://[^/]+/(repos|scm|git)/", source):
+            return True
+        # GitHub Enterprise and similar: has org/repo structure
+        if re.match(r"https?://[^/]+/[^/]+/[^/]+/?$", source):
+            return True
+    return False
+
+
+def clone_and_read_manifest(source):
+    """Clone git repo to temp dir and read manifest. Raises UserError on failure."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        result = subprocess.run(
+            ["git", "clone", "--depth=1", "--quiet", source, tmpdir],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            raise UserError(f"git clone failed: {result.stderr.strip()}")
+
+        manifest_path = pathlib.Path(tmpdir) / ".claude-plugin" / "marketplace.json"
+        if not manifest_path.exists():
+            raise UserError(f"manifest not found in cloned repo: {source}")
+
+        return load_json(manifest_path)
+
+
 def fetch_github_manifest(repo):
     """Fetch marketplace.json from GitHub repo. Tries main then master branch."""
     for branch in ("main", "master"):
@@ -159,7 +195,7 @@ def fetch_github_manifest(repo):
 
 
 def load_manifest(source):
-    """Load marketplace.json from source (local path or GitHub)."""
+    """Load marketplace.json from source (local path, GitHub, or git URL)."""
     local = get_local_path(source)
     if local:
         manifest = local / ".claude-plugin" / "marketplace.json"
@@ -170,6 +206,9 @@ def load_manifest(source):
     repo = get_github_repo(source)
     if repo:
         return fetch_github_manifest(repo)
+
+    if is_git_url(source):
+        return clone_and_read_manifest(source)
 
     raise UserError(f"unsupported source: {source}")
 
