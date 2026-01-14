@@ -72,6 +72,7 @@ def main():
     )
     parser.add_argument("--use", metavar="VERSION", default="system")
     parser.add_argument("--cd", action="store_true")
+    parser.add_argument("--wayland", action="store_true", help="force Wayland mode")
     parser.add_argument("args", nargs="*")
 
     args = parser.parse_args()
@@ -123,6 +124,8 @@ def main():
             "WINEPREFIX": str(prefix / "pfx"),
         }
     )
+    if args.wayland:
+        os.environ.pop("DISPLAY", None)
     os.execl(*proton_bin, *cmd)
 
 
