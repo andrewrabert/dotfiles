@@ -147,6 +147,12 @@ async def main():
         action="store_true",
         help="read null-delimited input from stdin",
     )
+    parser.add_argument(
+        "-c",
+        "--show-commit",
+        action="store_true",
+        help="show the last commit where the file exists instead of restoring",
+    )
     parser.add_argument("paths", nargs="+", type=pathlib.Path)
     args = parser.parse_args()
 
@@ -174,7 +180,12 @@ async def main():
                 or path in filters
                 or filters.intersection(set(path.parents))
             ):
-                print(path)
+                if args.show_commit:
+                    commit = await repo.lastest_commit_for_path(str(path))
+                    if commit:
+                        print(f"{commit}\t{path}")
+                else:
+                    print(path)
     else:
         # If user provided paths, expand directories to deleted files
         if normalized_paths:
@@ -201,10 +212,14 @@ async def main():
             paths_to_restore = []
 
         for path in sorted(paths_to_restore):
-            print(path)
             commit = await repo.lastest_commit_for_path(path)
-            if commit:
-                await repo.restore_path(path, commit)
+            if args.show_commit:
+                if commit:
+                    print(f"{path}\t{commit}")
+            else:
+                print(path)
+                if commit:
+                    await repo.restore_path(path, commit)
 
 
 if __name__ == "__main__":

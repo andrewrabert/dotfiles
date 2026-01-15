@@ -1,0 +1,7 @@
+#!/usr/bin/env sh
+set -eu
+if ! command -v clangd > /dev/null; then
+    rm -rf ~/.config/clangd
+else
+    ln -sfT "${DOTFILES}/clangd" ~/.config/clangd
+fi
