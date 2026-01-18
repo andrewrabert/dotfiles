@@ -808,6 +808,7 @@ if HOSTNAME == "mars":
     EXPECTED_PACKAGES.update(
         {
             "digikam",
+            "litra",
         }
     )
 
