@@ -74,10 +74,60 @@ class JellyfinClient:
     async def start_task(self, task_id):
         return await self.post(f"/ScheduledTasks/Running/{task_id}")
 
+    async def stop_task(self, task_id):
+        resp = await self.client.delete(
+            str(self.url / f"ScheduledTasks/Running/{task_id}")
+        )
+        resp.raise_for_status()
+        return resp
+
+
+def get_running_library_tasks(tasks):
+    return [
+        t
+        for t in tasks
+        if t.get("State") == "Running"
+        and any(
+            kw in (t.get("Name") or "").lower()
+            for kw in ["library", "scan", "refresh", "media"]
+        )
+    ]
+
 
 async def cmd_scan(client, args):
-    await client.start_library_scan()
-    print("library scan started")
+    tasks = await client.get_tasks()
+    running = get_running_library_tasks(tasks)
+
+    if args.cancel:
+        if not running:
+            print("no scan running")
+            return
+        for t in running:
+            await client.stop_task(t["Id"])
+            print(f"cancelled: {t.get('Name', 'unknown')}")
+        return
+
+    if running:
+        print("scan already running")
+    else:
+        await client.start_library_scan()
+        print("library scan started")
+
+    if args.wait:
+        while True:
+            await asyncio.sleep(2)
+            tasks = await client.get_tasks()
+            running = get_running_library_tasks(tasks)
+            if not running:
+                print("scan complete")
+                break
+            for t in running:
+                progress = t.get("CurrentProgressPercentage")
+                name = t.get("Name", "unknown")
+                if progress is not None:
+                    print(f"  {name}: {progress:.1f}%")
+                else:
+                    print(f"  {name}: running")
 
 
 async def cmd_status(client, args):
@@ -207,7 +257,13 @@ async def main():
 
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    subparsers.add_parser("scan", help="start library scan")
+    scan_parser = subparsers.add_parser("scan", help="start library scan")
+    scan_parser.add_argument(
+        "-w", "--wait", action="store_true", help="wait for scan to complete"
+    )
+    scan_parser.add_argument(
+        "-c", "--cancel", action="store_true", help="cancel running scan"
+    )
 
     status_parser = subparsers.add_parser("status", help="show scan status")
     status_parser.add_argument(
