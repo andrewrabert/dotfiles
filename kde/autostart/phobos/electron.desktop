@@ -1,8 +1,0 @@
-[Desktop Entry]
-Type=Application
-Version=1.0
-Name=electron
-Comment=electronstartup script
-Exec=/usr/lib/electron39/electron --hidden
-StartupNotify=false
-Terminal=false
