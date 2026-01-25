@@ -300,6 +300,7 @@ if HOSTNAME in ("sol", "mars", "phobos"):
             "jpegoptim",
             "jq",
             "less",
+            "libva-utils",  # vainfo command
             "libvips",
             "mac",
             "man-db",
