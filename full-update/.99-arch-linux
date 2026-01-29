@@ -357,7 +357,6 @@ if HOSTNAME in ("sol", "mars", "phobos"):
             "unzip",
             "usbutils",
             "uv",
-            "vi",
             "vim",
             "vorbis-tools",
             "which",
