@@ -1,0 +1,32 @@
+#!/usr/bin/env sh
+set -eu
+
+exec 9<"$0"
+flock -n 9 || exit 1
+
+SRC=/storage/Syncthing/Default/notes
+DEST=/storage/Code/nullsum/ar/notes
+
+if [ ! -d "${SRC}" ]; then
+    echo "error: source not found: ${SRC}" >&2
+    exit 1
+fi
+
+if [ ! -d "${DEST}" ]; then
+    echo "error: dest not found: ${DEST}" >&2
+    exit 1
+fi
+
+rsync \
+    -qav \
+    --delete \
+    --exclude='.git' \
+    "${SRC}/" \
+    "${DEST}/"
+
+cd "${DEST}"
+if [ -n "$(git status --porcelain)" ]; then
+    git add -A
+    git commit -m "snapshot"
+    git push
+fi

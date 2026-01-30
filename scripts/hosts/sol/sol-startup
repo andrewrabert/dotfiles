@@ -38,6 +38,7 @@ systemctl --user enable --now gog-update.timer
 systemctl --user enable --now harmonize-library.timer
 systemctl --user enable --now mbsync.timer
 systemctl --user enable --now sol-fix-permissions.timer
+systemctl --user enable --now sol-notes-snapshot.timer
 systemctl --user enable --now sol-update-remotes.timer
 systemctl --user enable --now sol-ytdl-sub.timer
 

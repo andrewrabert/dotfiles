@@ -1,0 +1,10 @@
+[Unit]
+Description=Run sol-notes-snapshot
+StartLimitInterval=1d
+StartLimitBurst=3
+
+[Service]
+ExecStart=zsh -lc sol-notes-snapshot
+SyslogIdentifier=sol-notes-snapshot
+Restart=on-failure
+RestartSec=15m
