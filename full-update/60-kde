@@ -245,7 +245,10 @@ async def configure_kde():
             "activate application launcher": "Alt+F1,Meta\tAlt+F1,Activate Application Launcher",
         },
         ("services", "org.kde.krunner.desktop"): {
-            "_launch": "Search\tAlt+F2\tMeta+Space",
+            # "_launch": "Search\tAlt+F2\tMeta+Space",
+        },
+        ("services", "vicinae.desktop"): {
+            "toggle": "Meta+Space",
         },
     }
 
