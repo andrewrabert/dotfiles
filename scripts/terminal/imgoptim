@@ -9,6 +9,7 @@ System commands executed by this script:
 - exiftool: Read and write EXIF metadata
 - exiv2: Read, write, and manipulate EXIF metadata
 - gifsicle: GIF optimization and manipulation
+- inkscape: SVG to PNG conversion
 - jpegoptim: JPEG optimization
 - magick: ImageMagick for various image operations
 - oxipng: PNG optimization
@@ -561,6 +562,7 @@ _MIME_SUFFIXES = {
     "image/jpeg": (".jpg", ".jpeg"),
     "image/jxl": (".jxl",),
     "image/png": (".png",),
+    "image/svg+xml": (".svg",),
     "image/tiff": (".tiff", ".tif"),
     "image/webp": (".webp",),
     "image/x-portable-pixmap": (".ppm",),
@@ -754,6 +756,26 @@ async def convert_to_png(source, dest, fast=True):
         raise ProcessError(proc)
 
 
+async def convert_svg_to_png(source, dest, max_w, max_h):
+    args = [
+        "inkscape",
+        "--export-type=png",
+        "--export-area-page",
+    ]
+    if max_w:
+        args.append(f"--export-width={max_w}")
+    if max_h:
+        args.append(f"--export-height={max_h}")
+    args.extend(["-o", dest, "--", source])
+    proc = await asyncio.create_subprocess_exec(
+        *args,
+        stderr=asyncio.subprocess.DEVNULL,
+    )
+    await proc.wait()
+    if proc.returncode != 0:
+        raise ProcessError(proc)
+
+
 async def convert_to_jxl(source, dest, fast=False):
     args = [
         "cjxl",
@@ -843,7 +865,7 @@ _SUPPORTED_CONVERT_SUFFIXES = {
 }
 
 
-async def _process_convert(path, source_mimetype, target_mimetype):
+async def _process_convert(path, source_mimetype, target_mimetype, **options):
     source_suffixes = _MIME_SUFFIXES[source_mimetype]
     name = path.name
     if path.suffix.lower() in source_suffixes:
@@ -887,8 +909,22 @@ async def _process_convert(path, source_mimetype, target_mimetype):
                 await convert_to_ppm(path, temp_path)
                 temp_path.replace(dest)
             case "image/png":
-                await convert_to_png(path, temp_path)
-                temp_path.replace(dest)
+                match source_mimetype:
+                    case "image/svg+xml":
+                        max_w = options.get("max_w")
+                        max_h = options.get("max_h")
+                        png_temp = stack.enter_context(
+                            TempPath(
+                                dir=path.parent,
+                                prefix=".imgconvert_",
+                                suffix=".png",
+                            )
+                        )
+                        await convert_svg_to_png(path, png_temp, max_w, max_h)
+                        png_temp.replace(dest)
+                    case _:
+                        await convert_to_png(path, temp_path)
+                        temp_path.replace(dest)
             case "image/tiff":
                 match source_mimetype:
                     case "image/jxl":
@@ -1041,6 +1077,13 @@ def _parser_path_file(value):
         raise argparse.ArgumentError("invalid path")
 
 
+def _positive_int(value):
+    v = int(value)
+    if v <= 0:
+        raise argparse.ArgumentTypeError("must be positive")
+    return v
+
+
 async def sha256sum(pipe):
     proc = await asyncio.create_subprocess_exec(
         "sha256sum", stdin=pipe, stdout=asyncio.subprocess.PIPE
@@ -1170,6 +1213,20 @@ async def main_convert():
         help="default: %(default)s",
     )
 
+    png_group = parser.add_argument_group("PNG Options (SVG source)")
+    png_group.add_argument(
+        "-W", "--width",
+        type=_positive_int,
+        default=None,
+        help="output width in pixels",
+    )
+    png_group.add_argument(
+        "-H", "--height",
+        type=_positive_int,
+        default=None,
+        help="output height in pixels",
+    )
+
     args = parser.parse_args()
 
     CONFIG.jpeg.quality = args.jpeg_quality
@@ -1193,6 +1250,8 @@ async def main_convert():
             path,
             source_mimetype=mimetype,
             target_mimetype=_TYPE_TO_MIME[args.format],
+            max_w=args.width,
+            max_h=args.height,
         )
 
     has_error = False
