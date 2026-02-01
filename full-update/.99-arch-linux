@@ -224,6 +224,90 @@ class Flatpak:
         if proc.returncode:
             raise subprocess.CalledProcessError(proc.returncode, args)
 
+    @staticmethod
+    async def get_sockets(app):
+        """Get socket permissions for a flatpak app."""
+        args = [
+            "flatpak",
+            "info",
+            "--show-permissions",
+            "--user",
+            app,
+        ]
+        proc = await asyncio.create_subprocess_exec(
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        stdout, _ = await proc.communicate()
+        if proc.returncode:
+            return set()
+
+        sockets = set()
+        for line in stdout.decode().splitlines():
+            line = line.strip()
+            if line.startswith("sockets="):
+                perms = line.split("=", 1)[1]
+                sockets.update(p.strip() for p in perms.split(";") if p.strip())
+        return sockets
+
+    @staticmethod
+    async def override_socket(app, socket):
+        """Grant flatpak app socket access."""
+        args = [
+            "flatpak",
+            "override",
+            "--user",
+            app,
+            f"--socket={socket}",
+        ]
+        proc = await asyncio.create_subprocess_exec(*args)
+        await proc.communicate()
+        if proc.returncode:
+            raise subprocess.CalledProcessError(proc.returncode, args)
+
+    @staticmethod
+    async def get_sockets(app):
+        """Get socket permissions for a flatpak app."""
+        args = [
+            "flatpak",
+            "info",
+            "--show-permissions",
+            "--user",
+            app,
+        ]
+        proc = await asyncio.create_subprocess_exec(
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        stdout, _ = await proc.communicate()
+        if proc.returncode:
+            return set()
+
+        sockets = set()
+        for line in stdout.decode().splitlines():
+            line = line.strip()
+            if line.startswith("sockets="):
+                perms = line.split("=", 1)[1]
+                sockets.update(p.strip() for p in perms.split(";") if p.strip())
+        return sockets
+
+    @staticmethod
+    async def override_socket(app, socket):
+        """Grant flatpak app socket access."""
+        args = [
+            "flatpak",
+            "override",
+            "--user",
+            app,
+            f"--socket={socket}",
+        ]
+        proc = await asyncio.create_subprocess_exec(*args)
+        await proc.communicate()
+        if proc.returncode:
+            raise subprocess.CalledProcessError(proc.returncode, args)
+
 
 class UserGroup:
     @staticmethod
@@ -471,6 +555,10 @@ if HOSTNAME in ("mars", "phobos"):
             "org.prismlauncher.PrismLauncher",
         }
     )
+
+EXPECTED_FLATPAK_SOCKETS = {
+    "md.obsidian.Obsidian": {"wayland"},
+}
 
 VHBA_MODULE_PACKAGE = "vhba-module"
 if HOSTNAME in ("phobos", "sol"):
@@ -943,6 +1031,15 @@ async def ensure_flatpak_permissions():
             if not any(p == normalized_path for p in current_perms):
                 print(f"Granting {app} access to {path}")
                 await Flatpak.override_filesystem(app, path)
+
+    for app, sockets in EXPECTED_FLATPAK_SOCKETS.items():
+        if app not in installed_flatpaks:
+            continue
+
+        current_sockets = await Flatpak.get_sockets(app)
+        for socket in sockets - current_sockets:
+            print(f"Granting {app} socket {socket}")
+            await Flatpak.override_socket(app, socket)
 
 
 async def dump_installed_packages():
