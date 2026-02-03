@@ -1,3 +1,8 @@
+[input]
+prepend_keymap = [
+  { on = "<Esc>", run = [ "close", "mgr:escape --filter" ], desc = "Close and cancel filter" },
+]
+
 [mgr]
 prepend_keymap = [
     { on = "<Up>", run = "arrow -1", description = "Previous task" },
