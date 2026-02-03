@@ -15,7 +15,7 @@ import tempfile
 import urllib.error
 import urllib.request
 
-CLAUDE_DIR = pathlib.Path.home() / ".claude"
+CLAUDE_DIR = pathlib.Path(os.environ.get("CLAUDE_CONFIG_DIR", pathlib.Path.home() / ".claude"))
 SETTINGS_PATH = CLAUDE_DIR / "settings.json"
 INSTALLED_PLUGINS_PATH = CLAUDE_DIR / "plugins" / "installed_plugins.json"
 KNOWN_MARKETPLACES_PATH = CLAUDE_DIR / "plugins" / "known_marketplaces.json"
