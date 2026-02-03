@@ -114,6 +114,7 @@ def make_parser():
 
 
 def default_config(work_dir, claude_dir, home):
+    git_config = home / ".config/git"
     return {
         "proc": ["/proc"],
         "dev": ["/dev"],
@@ -121,16 +122,20 @@ def default_config(work_dir, claude_dir, home):
         "dir": [pathlib.Path("/run/user") / str(os.getuid())],
         "bind": {
             "rw": [claude_dir, work_dir],
-            "ro": [
-                "/bin",
-                "/etc",
-                "/lib",
-                "/lib64",
-                "/opt",
-                "/run/systemd/resolve",
-                "/usr",
-                home / ".local/bin",
-            ],
+            "ro": list(
+                {
+                    "/bin",
+                    "/etc",
+                    "/lib",
+                    "/lib64",
+                    "/opt",
+                    "/run/systemd/resolve",
+                    "/usr",
+                    home / ".local/bin",
+                    git_config,
+                    git_config.resolve(),
+                }
+            ),
         },
         "env": {
             "inherit": ["CLAUDE_CONFIG_DIR", "PATH", "TERM", "USER"],
