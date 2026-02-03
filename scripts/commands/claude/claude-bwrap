@@ -1,0 +1,220 @@
+#!/usr/bin/env python3
+"""Sandbox claude using bubblewrap with filesystem isolation."""
+
+import argparse
+import os
+import pathlib
+import shutil
+
+
+class Bubblewrap:
+    _BIN = "bwrap"
+
+    def __init__(self, *args):
+        self._args = [self._BIN, *args]
+
+    def _add(self, *args):
+        self._args.extend(a for a in args if a is not None)
+        return self
+
+    def ro_bind(self, src, dest=None):
+        return self._add("--ro-bind", str(src), str(dest or src))
+
+    def bind(self, src, dest=None):
+        return self._add("--bind", str(src), str(dest or src))
+
+    def symlink(self, target, link):
+        return self._add("--symlink", str(target), str(link))
+
+    def tmpfs(self, path):
+        return self._add("--tmpfs", path)
+
+    def proc(self, path):
+        return self._add("--proc", path)
+
+    def dev(self, path):
+        return self._add("--dev", path)
+
+    def dir(self, path):
+        return self._add("--dir", str(path))
+
+    def setenv(self, name, value=None):
+        if value is None:
+            value = os.environ.get(name, "")
+        return self._add("--setenv", name, str(value))
+
+    def chdir(self, path):
+        return self._add("--chdir", str(path))
+
+    def arg(self, *args):
+        return self._add(*args)
+
+    def unshare_pid(self, enable=True):
+        return self._add("--unshare-pid") if enable else self
+
+    def unshare_net(self, enable=True):
+        return self._add("--unshare-net") if enable else self
+
+    def die_with_parent(self, enable=True):
+        return self._add("--die-with-parent") if enable else self
+
+    def __iter__(self):
+        return iter(self._args)
+
+
+def existing_dir(value):
+    path = pathlib.Path(value).resolve()
+    if not path.is_dir():
+        raise argparse.ArgumentTypeError(f"directory not found: {path}")
+    return path
+
+
+def make_parser():
+    parser = argparse.ArgumentParser(
+        description="Sandbox claude using bubblewrap with filesystem isolation.",
+        add_help=False,
+    )
+    parser.add_argument(
+        "-h", "--help", action="store_true", help="Show this help"
+    )
+    parser.add_argument(
+        "--help-claude", action="store_true", help="Show claude --help"
+    )
+    parser.add_argument(
+        "-w",
+        "--workdir",
+        dest="work_dir",
+        type=existing_dir,
+        default=pathlib.Path.cwd().resolve(),
+        help="Working directory (default: current)",
+    )
+    parser.add_argument(
+        "--bind",
+        action="append",
+        default=[],
+        metavar="PATH",
+        help="Additional read-write bind mount (can be repeated)",
+    )
+    parser.add_argument(
+        "--ro-bind",
+        action="append",
+        default=[],
+        dest="ro_bind",
+        metavar="PATH",
+        help="Additional read-only bind mount (can be repeated)",
+    )
+    parser.add_argument(
+        "--setenv",
+        action="append",
+        default=[],
+        metavar="NAME[=VALUE]",
+        help="Set environment variable (inherits from env if no value; can be repeated)",
+    )
+    return parser
+
+
+def default_config(work_dir, claude_dir, home):
+    return {
+        "proc": ["/proc"],
+        "dev": ["/dev"],
+        "tmpfs": ["/tmp", "/run"],
+        "dir": [pathlib.Path("/run/user") / str(os.getuid())],
+        "bind": {
+            "rw": [claude_dir, work_dir],
+            "ro": [
+                "/bin",
+                "/etc",
+                "/lib",
+                "/lib64",
+                "/opt",
+                "/run/systemd/resolve",
+                "/usr",
+                home / ".local/bin",
+            ],
+        },
+        "env": {
+            "inherit": ["CLAUDE_CONFIG_DIR", "PATH", "TERM", "USER"],
+            "set": {
+                "HOME": home,
+                "TMPDIR": "/tmp",
+            },
+        },
+        "chdir": work_dir,
+        "unshare_pid": True,
+        "die_with_parent": True,
+        "command": ["/usr/bin/claude", "--dangerously-skip-permissions"],
+    }
+
+
+def build_command(args, claude_args):
+    work_dir = args.work_dir
+    home = pathlib.Path.home()
+    claude_dir = os.environ.get("CLAUDE_CONFIG_DIR")
+    if not claude_dir:
+        raise EnvironmentError("CLAUDE_CONFIG_DIR not set")
+    claude_dir = pathlib.Path(claude_dir)
+
+    config = default_config(work_dir, claude_dir, home)
+
+    bwrap = Bubblewrap()
+    for path in config["proc"]:
+        bwrap.proc(path)
+    for path in config["dev"]:
+        bwrap.dev(path)
+    for path in config["tmpfs"]:
+        bwrap.tmpfs(path)
+    for path in config["dir"]:
+        bwrap.dir(path)
+    for path in config["bind"]["rw"]:
+        bwrap.bind(path)
+    for path in config["bind"]["ro"]:
+        bwrap.ro_bind(path)
+
+    for path in args.bind:
+        bwrap.bind(pathlib.Path(path).resolve())
+    for path in args.ro_bind:
+        bwrap.ro_bind(pathlib.Path(path).resolve())
+
+    for name in config["env"]["inherit"]:
+        bwrap.setenv(name)
+    for name, value in config["env"]["set"].items():
+        bwrap.setenv(name, value)
+    for env in args.setenv:
+        if "=" in env:
+            name, value = env.split("=", 1)
+            bwrap.setenv(name, value)
+        else:
+            bwrap.setenv(env)
+
+    bwrap.chdir(config["chdir"])
+    bwrap.unshare_pid(config["unshare_pid"])
+    bwrap.die_with_parent(config["die_with_parent"])
+    bwrap.arg(*config["command"])
+    bwrap.arg(*claude_args)
+
+    return list(bwrap)
+
+
+def main():
+    parser = make_parser()
+    args, claude_args = parser.parse_known_args()
+
+    if args.help:
+        parser.print_help()
+        return
+
+    if args.help_claude:
+        claude_args = ["--help"]
+
+    if not shutil.which("bwrap"):
+        raise FileNotFoundError("bubblewrap (bwrap) not found")
+    if not shutil.which("claude"):
+        raise FileNotFoundError("claude not found")
+
+    cmd = build_command(args, claude_args)
+
+    os.execvp(cmd[0], cmd)
+
+
+if __name__ == "__main__":
+    main()
