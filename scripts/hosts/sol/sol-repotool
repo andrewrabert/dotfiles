@@ -1119,15 +1119,23 @@ class Database:
                     continue
 
                 try:
-                    new_version = None
+                    pkgver = pkgrel = epoch = None
                     with open(srcinfo_path, "r") as f:
                         for line in f:
-                            if line.strip().startswith("pkgver = "):
-                                pkgver = line.split("=", 1)[1].strip()
-                            elif line.strip().startswith("pkgrel = "):
-                                pkgrel = line.split("=", 1)[1].strip()
-                                new_version = f"{pkgver}-{pkgrel}"
+                            stripped = line.strip()
+                            if stripped.startswith("epoch = "):
+                                epoch = stripped.split("=", 1)[1].strip()
+                            elif stripped.startswith("pkgver = "):
+                                pkgver = stripped.split("=", 1)[1].strip()
+                            elif stripped.startswith("pkgrel = "):
+                                pkgrel = stripped.split("=", 1)[1].strip()
+                            elif stripped.startswith("pkgname = "):
+                                # Past header section, stop parsing
                                 break
+                    if pkgver and pkgrel:
+                        new_version = f"{epoch}:{pkgver}-{pkgrel}" if epoch else f"{pkgver}-{pkgrel}"
+                    else:
+                        new_version = None
                 except Exception:
                     continue
 

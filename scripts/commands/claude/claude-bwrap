@@ -171,14 +171,22 @@ def build_command(args, claude_args):
     for path in config["dir"]:
         bwrap.dir(path)
     for path in config["bind"]["rw"]:
-        bwrap.bind(path)
+        path = pathlib.Path(path)
+        if path.exists():
+            bwrap.bind(path)
     for path in config["bind"]["ro"]:
-        bwrap.ro_bind(path)
+        path = pathlib.Path(path)
+        if path.exists():
+            bwrap.ro_bind(path)
 
     for path in args.bind:
-        bwrap.bind(pathlib.Path(path).resolve())
+        path = pathlib.Path(path)
+        if path.exists():
+            bwrap.bind(pathlib.Path(path).resolve())
     for path in args.ro_bind:
-        bwrap.ro_bind(pathlib.Path(path).resolve())
+        path = pathlib.Path(path)
+        if path.exists():
+            bwrap.ro_bind(pathlib.Path(path).resolve())
 
     for name in config["env"]["inherit"]:
         bwrap.setenv(name)
