@@ -1,0 +1,962 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.12"
+# dependencies = ["pyyaml", "pydantic"]
+# ///
+"""Manage Claude Code plugins via declarative spec files."""
+
+import argparse
+import asyncio
+import contextlib
+import json
+import os
+import pathlib
+import shutil
+import sys
+import tempfile
+import typing
+
+import pydantic
+import yaml
+
+
+class Config(pydantic.BaseModel):
+    model_config = pydantic.ConfigDict(extra="ignore")
+    autoConnectIde: bool | None = None
+    bypassPermissionsModeAccepted: bool | None = None
+    editorMode: str | None = None
+    theme: str | None = None
+    verbose: bool | None = None
+
+
+class ConfigSpec(Config):
+    model_config = pydantic.ConfigDict(extra="forbid")
+
+
+class Settings(pydantic.BaseModel):
+    model_config = pydantic.ConfigDict(extra="ignore")
+    env: dict[str, str] | None = None
+    includeCoAuthoredBy: bool | None = None
+
+
+class SettingsSpec(Settings):
+    model_config = pydantic.ConfigDict(extra="forbid")
+
+
+PluginSet = typing.Annotated[
+    set[str],
+    pydantic.PlainSerializer(
+        lambda v: sorted(v, key=str.lower), return_type=list[str]
+    ),
+]
+
+
+class MarketplaceEntry(pydantic.BaseModel):
+    model_config = pydantic.ConfigDict(extra="forbid")
+    name: str | None = None
+    type: typing.Literal["github", "git", "directory"]
+    source: str
+    enabled: PluginSet = pydantic.Field(default_factory=set)
+    disabled: PluginSet = pydantic.Field(default_factory=set)
+    available: PluginSet = pydantic.Field(default_factory=set)
+
+    @pydantic.model_validator(mode="after")
+    def check_no_overlap(self):
+        overlap = self.enabled & self.disabled
+        if overlap:
+            raise ValueError(
+                f"plugins in both enabled and disabled: {', '.join(sorted(overlap))}"
+            )
+        return self
+
+
+# Models for Claude's JSON files (extra="ignore" to allow unknown keys)
+
+
+class MarketplaceSource(pydantic.BaseModel):
+    model_config = pydantic.ConfigDict(extra="ignore")
+    source: str = ""  # "github", "directory", "local", "git"
+    repo: str = ""
+    path: str = ""
+    url: str = ""
+
+
+class KnownMarketplace(pydantic.BaseModel):
+    model_config = pydantic.ConfigDict(extra="ignore")
+    source: MarketplaceSource = pydantic.Field(
+        default_factory=MarketplaceSource
+    )
+    installLocation: str = ""
+
+    def get_source_string(self):
+        """Get the source string for this marketplace."""
+        src = self.source
+        match src.source:
+            case "github":
+                return src.repo
+            case "directory":
+                return src.path or self.installLocation
+            case "local":
+                return self.installLocation
+            case "git":
+                return src.url
+            case _:
+                raise RuntimeError(f"unknown source type: {src.source}")
+
+
+class KnownMarketplaces:
+    def __init__(self, data):
+        self._data = data
+
+    def __getitem__(self, name):
+        return self._data[name]
+
+    def __contains__(self, name):
+        return name in self._data
+
+    def __iter__(self):
+        return iter(self._data)
+
+    def __len__(self):
+        return len(self._data)
+
+    def items(self):
+        return self._data.items()
+
+    def find_by_source(self, source):
+        """Find marketplace name by normalized source."""
+        norm = normalize_source(source)
+        for name, info in self._data.items():
+            if normalize_source(info.get_source_string()) == norm:
+                return name
+        return None
+
+
+class InstalledPlugins(pydantic.BaseModel):
+    model_config = pydantic.ConfigDict(extra="ignore")
+    plugins: dict[str, typing.Any] = pydantic.Field(default_factory=dict)
+
+
+class ManifestPlugin(pydantic.BaseModel):
+    model_config = pydantic.ConfigDict(extra="ignore")
+    name: str
+
+
+class Manifest(pydantic.BaseModel):
+    model_config = pydantic.ConfigDict(extra="ignore")
+    name: str = ""
+    plugins: list[ManifestPlugin] = pydantic.Field(default_factory=list)
+
+
+class MarketplaceState(pydantic.BaseModel):
+    source: str
+    source_type: str
+    enabled: set[str] = pydantic.Field(default_factory=set)
+    disabled: set[str] = pydantic.Field(default_factory=set)
+
+    @property
+    def installed(self) -> set[str]:
+        return self.enabled | self.disabled
+
+
+class PluginRef(typing.NamedTuple):
+    plugin: str
+    marketplace: str
+
+    @classmethod
+    def parse(cls, ref: str) -> "PluginRef":
+        plugin, marketplace = ref.rsplit("@", 1)
+        return cls(plugin, marketplace)
+
+    def __str__(self) -> str:
+        return f"{self.plugin}@{self.marketplace}"
+
+
+MarketplaceList = typing.Annotated[
+    list[MarketplaceEntry],
+    pydantic.PlainSerializer(
+        lambda v: sorted(
+            (m.model_dump(exclude_defaults=True) for m in v),
+            key=lambda x: (x.get("name") or "").lower(),
+        ),
+        return_type=list[dict],
+    ),
+]
+
+
+class Spec(pydantic.BaseModel):
+    model_config = pydantic.ConfigDict(extra="forbid")
+    config: ConfigSpec | None = None
+    settings: SettingsSpec | None = None
+    marketplaces: MarketplaceList = pydantic.Field(default_factory=list)
+
+    def model_dump(self, **kwargs) -> dict:
+        kwargs.setdefault("exclude_none", True)
+        kwargs.setdefault("exclude_defaults", True)
+        return super().model_dump(**kwargs)
+
+
+def load_yaml(text):
+    return yaml.safe_load(text) or {}
+
+
+def dump_yaml(data):
+    return yaml.dump(
+        data,
+        default_flow_style=False,
+        sort_keys=False,
+        allow_unicode=True,
+    )
+
+
+def safe_write_bytes(path, data):
+    """Write bytes atomically, preserving permissions/ownership."""
+    stat = path.stat() if path.exists() else None
+    with tempfile.NamedTemporaryFile(delete=False, dir=path.parent) as handle:
+        temp_path = pathlib.Path(handle.name)
+        try:
+            temp_path.write_bytes(data)
+            if stat:
+                for ids in ((stat.st_uid, -1), (-1, stat.st_gid)):
+                    with contextlib.suppress(PermissionError):
+                        os.chown(temp_path, *ids)
+                temp_path.chmod(stat.st_mode)
+            temp_path.replace(path)
+        finally:
+            with contextlib.suppress(FileNotFoundError):
+                temp_path.unlink()
+
+
+def load_json(path):
+    if not path.exists():
+        return {}
+    return json.loads(path.read_text())
+
+
+def save_json(path, data):
+    text = (
+        json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    )
+    safe_write_bytes(path, text.encode())
+
+
+class ClaudeConfig:
+    def __init__(self, config_dir=None):
+        self.dir = pathlib.Path(
+            config_dir
+            or os.environ.get("CLAUDE_CONFIG_DIR")
+            or pathlib.Path.home() / ".claude"
+        )
+        self.config_path = self.dir / ".claude.json"
+        self.settings_path = self.dir / "settings.json"
+        self.installed_plugins_path = (
+            self.dir / "plugins" / "installed_plugins.json"
+        )
+        self.known_marketplaces_path = (
+            self.dir / "plugins" / "known_marketplaces.json"
+        )
+        self.plugin_cache_path = self.dir / "plugins" / "cache"
+
+    def load_config(self):
+        data = load_json(self.config_path)
+        Config.model_validate(data)
+        return data
+
+    def save_config(self, data):
+        save_json(self.config_path, data)
+
+    def load_settings(self):
+        data = load_json(self.settings_path)
+        Settings.model_validate(data)
+        return data
+
+    def save_settings(self, data):
+        save_json(self.settings_path, data)
+
+    def load_installed_plugins(self):
+        data = load_json(self.installed_plugins_path)
+        return InstalledPlugins.model_validate(data)
+
+    def load_known_marketplaces(self):
+        data = load_json(self.known_marketplaces_path)
+        parsed = {
+            k: KnownMarketplace.model_validate(v) for k, v in data.items()
+        }
+        return KnownMarketplaces(parsed)
+
+    def load_manifest(self, path):
+        data = load_json(path)
+        return Manifest.model_validate(data)
+
+    def get_current_state(self) -> dict[str, MarketplaceState]:
+        """Get marketplace states keyed by name."""
+        known = self.load_known_marketplaces()
+        installed = self.load_installed_plugins()
+        settings = self.load_settings()
+        enabled_plugins = (
+            settings.get("enabledPlugins", {}) if settings else {}
+        )
+
+        state: dict[str, MarketplaceState] = {}
+        for name, info in known.items():
+            state[name] = MarketplaceState(
+                source=info.get_source_string(),
+                source_type=info.source.source,
+            )
+
+        for plugin_ref_str in installed.plugins:
+            if "@" not in plugin_ref_str:
+                continue
+            ref = PluginRef.parse(plugin_ref_str)
+            if ref.marketplace in state:
+                if enabled_plugins.get(plugin_ref_str):
+                    state[ref.marketplace].enabled.add(ref.plugin)
+                else:
+                    state[ref.marketplace].disabled.add(ref.plugin)
+
+        return state
+
+    def get_valid_plugins(self, marketplace):
+        """Get valid plugin names from marketplace cache."""
+        known = self.load_known_marketplaces()
+        if marketplace not in known:
+            return set()
+        install_location = known[marketplace].installLocation
+        if not install_location:
+            return set()
+        manifest_path = (
+            pathlib.Path(install_location)
+            / ".claude-plugin"
+            / "marketplace.json"
+        )
+        manifest = self.load_manifest(manifest_path)
+        return {p.name for p in manifest.plugins}
+
+    def is_local_marketplace(self, marketplace):
+        """Check if a marketplace source is a local path."""
+        known = self.load_known_marketplaces()
+        if marketplace not in known:
+            return False
+        return known[marketplace].source.source == "local"
+
+    def find_marketplace_by_source(self, source):
+        """Find marketplace name by normalized source."""
+        return self.load_known_marketplaces().find_by_source(source)
+
+    def clear_plugin_cache(self, marketplace, plugin):
+        """Delete cached plugin versions to force fresh install."""
+        cache_dir = self.plugin_cache_path / marketplace / plugin
+        if cache_dir.exists():
+            shutil.rmtree(cache_dir)
+
+    def remove_from_settings(self, marketplace, plugin=None):
+        """Remove plugin/marketplace from enabledPlugins in settings."""
+        settings = self.load_settings()
+        if not settings:
+            return
+        enabled_plugins = settings.get("enabledPlugins", {})
+        if not enabled_plugins:
+            return
+
+        if plugin:
+            to_remove = [str(PluginRef(plugin, marketplace))]
+        else:
+            to_remove = [
+                r for r in enabled_plugins if r.endswith(f"@{marketplace}")
+            ]
+
+        for ref in to_remove:
+            enabled_plugins.pop(ref, None)
+        if to_remove:
+            self.save_settings(settings)
+
+
+class UserError(Exception):
+    pass
+
+
+class CLIError(Exception):
+    pass
+
+
+def apply_spec_dict(spec_model, loader, saver):
+    """Merge spec into current data and save if changed."""
+    if not spec_model:
+        return
+    current = loader()
+    updated = {**current, **spec_model.model_dump(exclude_none=True)}
+    if updated != current:
+        saver(updated)
+
+
+def load_spec_file(path):
+    """Load and parse YAML spec file."""
+    if not path.exists():
+        raise UserError(f"spec file not found: {path}")
+    return load_yaml(path.read_text())
+
+
+def write_spec_file(path, data):
+    """Write YAML spec file."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    safe_write_bytes(path, dump_yaml(data).encode())
+
+
+def normalize_source(source):
+    """Normalize source string to canonical form for comparison."""
+    local = get_local_path(source)
+    if local:
+        return str(local.resolve())
+    return source
+
+
+class DesiredState(pydantic.BaseModel):
+    source: str
+    enabled: set[str] = pydantic.Field(default_factory=set)
+    disabled: set[str] = pydantic.Field(default_factory=set)
+
+    @property
+    def installed(self) -> set[str]:
+        return self.enabled | self.disabled
+
+
+def compute_changes(current_state: dict[str, MarketplaceState], spec: Spec):
+    """Compute changes needed to reach desired spec state.
+
+    Returns:
+        - marketplaces_to_add: [(source, enabled, disabled)]
+        - marketplaces_to_remove: [name]
+        - plugins_to_install: [(marketplace, plugin)]
+        - plugins_to_remove: [(marketplace, plugin)]
+        - plugins_to_enable: [(marketplace, plugin)]
+        - plugins_to_disable: [(marketplace, plugin)]
+        - plugins_to_update: [(marketplace, plugin)]
+    """
+    # Build desired state from spec
+    desired: dict[str, DesiredState] = {}
+    for entry in spec.marketplaces:
+        norm = normalize_source(entry.source)
+        desired[norm] = DesiredState(
+            source=entry.source,
+            enabled=entry.enabled,
+            disabled=entry.disabled,
+        )
+
+    # Build current state by normalized source
+    current_by_source: dict[str, tuple[str, MarketplaceState]] = {}
+    for name, info in current_state.items():
+        norm = normalize_source(info.source)
+        current_by_source[norm] = (name, info)
+
+    marketplaces_to_add = []
+    marketplaces_to_remove = []
+    plugins_to_install = []
+    plugins_to_remove = []
+    plugins_to_enable = []
+    plugins_to_disable = []
+    plugins_to_update = []
+
+    # Find marketplaces to remove (in current but not desired)
+    for norm, (name, _) in current_by_source.items():
+        if norm not in desired:
+            marketplaces_to_remove.append(name)
+
+    # Find marketplaces to add and plugins to install/remove/enable/disable
+    for norm, d in desired.items():
+        if norm in current_by_source:
+            marketplace, c = current_by_source[norm]
+
+            # Install/remove based on combined installed set
+            for plugin in d.installed - c.installed:
+                plugins_to_install.append((marketplace, plugin))
+            for plugin in c.installed - d.installed:
+                plugins_to_remove.append((marketplace, plugin))
+
+            # Enable/disable for plugins that remain installed
+            remaining = d.installed & c.installed
+            for plugin in (d.enabled & remaining) - c.enabled:
+                plugins_to_enable.append((marketplace, plugin))
+            for plugin in (d.disabled & remaining) - c.disabled:
+                plugins_to_disable.append((marketplace, plugin))
+
+            # Update plugins that stay in same state
+            for plugin in remaining:
+                plugins_to_update.append((marketplace, plugin))
+        else:
+            # New marketplace
+            marketplaces_to_add.append(
+                (d.source, list(d.enabled), list(d.disabled))
+            )
+
+    return (
+        marketplaces_to_add,
+        marketplaces_to_remove,
+        plugins_to_install,
+        plugins_to_remove,
+        plugins_to_enable,
+        plugins_to_disable,
+        plugins_to_update,
+    )
+
+
+class ClaudeCLI:
+    """Wrapper for Claude CLI plugin commands. Methods raise CLIError on failure."""
+
+    @staticmethod
+    async def _run(*args):
+        """Run claude command. Raises CLIError on failure."""
+        proc = await asyncio.create_subprocess_exec(
+            "claude",
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await proc.communicate()
+        if proc.returncode:
+            raise CLIError(stderr.decode().rstrip() or "unknown error")
+        return stdout.decode()
+
+    @classmethod
+    async def marketplace_add(cls, source):
+        await cls._run("plugin", "marketplace", "add", source)
+
+    @classmethod
+    async def marketplace_update(cls, name):
+        await cls._run("plugin", "marketplace", "update", name)
+
+    @classmethod
+    async def marketplace_remove(cls, name):
+        await cls._run("plugin", "marketplace", "remove", name)
+
+    @classmethod
+    async def plugin_install(cls, plugin_ref):
+        await cls._run("plugin", "install", plugin_ref)
+
+    @classmethod
+    async def plugin_update(cls, plugin_ref):
+        await cls._run("plugin", "update", plugin_ref)
+
+    @classmethod
+    async def plugin_uninstall(cls, plugin_ref):
+        await cls._run("plugin", "uninstall", plugin_ref)
+
+    @classmethod
+    async def plugin_enable(cls, plugin_ref):
+        await cls._run("plugin", "enable", plugin_ref)
+
+    @classmethod
+    async def plugin_disable(cls, plugin_ref):
+        await cls._run("plugin", "disable", plugin_ref)
+
+
+def get_local_path(source):
+    """Return Path if source is a local path, None if URL/remote."""
+    if source in (".", "..") or source.startswith(("/", "./", "../", "~")):
+        return pathlib.Path(source).expanduser()
+    return None
+
+
+def collapse_home(path):
+    """Replace home directory prefix with ~."""
+    home = pathlib.Path.home()
+    try:
+        return "~" / pathlib.Path(path).relative_to(home)
+    except ValueError:
+        return pathlib.Path(path)
+
+
+def parse_args():
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser(
+        description="Manage Claude Code marketplaces and plugins."
+    )
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    # apply subcommand
+    apply_parser = subparsers.add_parser(
+        "apply",
+        help="Reconcile installed state to match spec file",
+    )
+    apply_parser.add_argument(
+        "spec",
+        nargs="?",
+        help="Spec file path",
+    )
+
+    # show subcommand
+    show_parser = subparsers.add_parser(
+        "show",
+        help="Show spec from current installed state",
+    )
+    show_parser.add_argument(
+        "-a",
+        "--all",
+        action="store_true",
+        help="Include available (not installed) plugins in output",
+    )
+    show_parser.add_argument(
+        "-o",
+        "--output",
+        type=pathlib.Path,
+        help="Output file path (default: stdout)",
+    )
+
+    # validate subcommand
+    validate_parser = subparsers.add_parser(
+        "validate",
+        help="Validate spec file syntax",
+    )
+    validate_parser.add_argument(
+        "spec",
+        nargs="?",
+        help="Spec file path",
+    )
+
+    subparsers.add_parser(
+        "update",
+        help="Update all marketplaces and installed plugins",
+    )
+
+    return parser.parse_args()
+
+
+async def add_marketplace(source):
+    """Add a new marketplace. Raises CLIError on failure."""
+    local_path = get_local_path(source)
+    add_source = str(local_path.resolve()) if local_path else source
+    await ClaudeCLI.marketplace_add(add_source)
+
+
+async def update_plugin(cfg, marketplace, plugin, force=False):
+    """Update a single plugin. Raises CLIError on failure."""
+    ref = str(PluginRef(plugin, marketplace))
+    if force:
+        await ClaudeCLI.plugin_uninstall(ref)
+        cfg.clear_plugin_cache(marketplace, plugin)
+        await ClaudeCLI.plugin_install(ref)
+    else:
+        await ClaudeCLI.plugin_update(ref)
+
+
+async def install_or_update_plugin(cfg, marketplace, name, force=False):
+    """Install or update a single plugin. Returns (success, error_msg)."""
+    ref = str(PluginRef(name, marketplace))
+    try:
+        if force:
+            await ClaudeCLI.plugin_uninstall(ref)
+            cfg.clear_plugin_cache(marketplace, name)
+        await ClaudeCLI.plugin_install(ref)
+        return True, None
+    except CLIError:
+        pass
+
+    try:
+        await ClaudeCLI.plugin_update(ref)
+        return True, None
+    except CLIError as e:
+        return False, str(e)
+
+
+async def install_all_plugins(cfg, marketplace, plugins, force=False):
+    """Install all plugins concurrently. Returns failure count."""
+    tasks = [
+        install_or_update_plugin(cfg, marketplace, p, force) for p in plugins
+    ]
+    results = await asyncio.gather(*tasks)
+
+    failures = 0
+    for (success, error), name in zip(results, plugins):
+        if not success:
+            print(f"error: {name}@{marketplace}: {error}", file=sys.stderr)
+            failures += 1
+
+    return failures
+
+
+async def cmd_apply(args, cfg):
+    """Handle apply subcommand - reconcile to match spec file."""
+    try:
+        if args.spec:
+            data = load_spec_file(pathlib.Path(args.spec))
+        elif not sys.stdin.isatty():
+            data = load_yaml(sys.stdin.read())
+        else:
+            raise UserError(
+                "spec file required (provide path or pipe to stdin)"
+            )
+    except yaml.YAMLError as e:
+        print(f"error: invalid YAML: {e}", file=sys.stderr)
+        return 1
+
+    spec = Spec.model_validate(data)
+
+    current = cfg.get_current_state()
+    (
+        marketplaces_to_add,
+        marketplaces_to_remove,
+        plugins_to_install,
+        plugins_to_remove,
+        plugins_to_enable,
+        plugins_to_disable,
+        plugins_to_update,
+    ) = compute_changes(current, spec)
+
+    err_count = 0
+
+    # Apply config and settings
+    apply_spec_dict(spec.config, cfg.load_config, cfg.save_config)
+    apply_spec_dict(spec.settings, cfg.load_settings, cfg.save_settings)
+
+    # Remove marketplaces (and their plugins)
+    for name in marketplaces_to_remove:
+        installed = cfg.load_installed_plugins()
+        for plugin_ref in installed.plugins:
+            if plugin_ref.endswith(f"@{name}"):
+                try:
+                    await ClaudeCLI.plugin_uninstall(plugin_ref)
+                except CLIError as e:
+                    print(f"error: {e}", file=sys.stderr)
+                    err_count += 1
+        try:
+            await ClaudeCLI.marketplace_remove(name)
+        except CLIError as e:
+            print(f"error: {e}", file=sys.stderr)
+            err_count += 1
+        cfg.remove_from_settings(name)
+
+    # Add new marketplaces
+    for source, enabled, disabled in marketplaces_to_add:
+        try:
+            await add_marketplace(source)
+        except CLIError as e:
+            print(f"error: {e}", file=sys.stderr)
+            err_count += 1
+            continue
+        marketplace_name = cfg.find_marketplace_by_source(source)
+        if not marketplace_name:
+            print(
+                f"error: failed to find marketplace after adding: {source}",
+                file=sys.stderr,
+            )
+            err_count += 1
+            continue
+        all_plugins = enabled + disabled
+        if all_plugins:
+            local = get_local_path(source)
+            err_count += await install_all_plugins(
+                cfg, marketplace_name, all_plugins, force=local is not None
+            )
+        # Enable only the enabled plugins (installed plugins are disabled by default)
+        for plugin in enabled:
+            try:
+                await ClaudeCLI.plugin_enable(
+                    str(PluginRef(plugin, marketplace_name))
+                )
+            except CLIError as e:
+                print(f"error: {e}", file=sys.stderr)
+                err_count += 1
+
+    # Remove plugins from existing marketplaces
+    for marketplace, plugin in plugins_to_remove:
+        try:
+            await ClaudeCLI.plugin_uninstall(
+                str(PluginRef(plugin, marketplace))
+            )
+        except CLIError as e:
+            print(f"error: {e}", file=sys.stderr)
+            err_count += 1
+
+    # Install new plugins (need to check spec to determine if enabled or disabled)
+    spec_enabled = {p for entry in spec.marketplaces for p in entry.enabled}
+
+    by_marketplace = {}
+    for marketplace, plugin in plugins_to_install:
+        by_marketplace.setdefault(marketplace, []).append(plugin)
+    for marketplace, plugins in by_marketplace.items():
+        err_count += await install_all_plugins(cfg, marketplace, plugins)
+        for plugin in plugins:
+            if plugin in spec_enabled:
+                try:
+                    await ClaudeCLI.plugin_enable(
+                        str(PluginRef(plugin, marketplace))
+                    )
+                except CLIError as e:
+                    print(f"error: {e}", file=sys.stderr)
+                    err_count += 1
+
+    # Enable plugins
+    for marketplace, plugin in plugins_to_enable:
+        try:
+            await ClaudeCLI.plugin_enable(str(PluginRef(plugin, marketplace)))
+        except CLIError as e:
+            print(f"error: {e}", file=sys.stderr)
+            err_count += 1
+
+    # Disable plugins
+    for marketplace, plugin in plugins_to_disable:
+        try:
+            await ClaudeCLI.plugin_disable(str(PluginRef(plugin, marketplace)))
+        except CLIError as e:
+            print(f"error: {e}", file=sys.stderr)
+            err_count += 1
+
+    # Update existing plugins
+    for marketplace, plugin in plugins_to_update:
+        try:
+            force = cfg.is_local_marketplace(marketplace)
+            await update_plugin(cfg, marketplace, plugin, force)
+        except CLIError as e:
+            print(f"error: {e}", file=sys.stderr)
+            err_count += 1
+
+    print(
+        f"{len(marketplaces_to_add)} added, "
+        f"{len(marketplaces_to_remove)} removed, "
+        f"{len(plugins_to_install)} installed, "
+        f"{len(plugins_to_remove)} uninstalled, "
+        f"{len(plugins_to_enable)} enabled, "
+        f"{len(plugins_to_disable)} disabled, "
+        f"{len(plugins_to_update)} updated, "
+        f"{err_count} errors"
+    )
+
+    return 1 if err_count else 0
+
+
+async def cmd_show(args, cfg):
+    """Handle show subcommand - output spec from current installed state."""
+    config_data = cfg.load_config()
+    config_filtered = {
+        k: v for k, v in config_data.items() if k in Config.model_fields
+    }
+    config = (
+        ConfigSpec.model_validate(config_filtered) if config_filtered else None
+    )
+
+    settings_data = cfg.load_settings()
+    settings_filtered = {
+        k: v for k, v in settings_data.items() if k in Settings.model_fields
+    }
+    settings = (
+        SettingsSpec.model_validate(settings_filtered)
+        if settings_filtered
+        else None
+    )
+
+    current = cfg.get_current_state()
+    marketplaces = []
+
+    for name, info in current.items():
+        source_type = info.source_type or "git"
+        source_str = (
+            str(collapse_home(info.source))
+            if source_type == "directory"
+            else info.source
+        )
+
+        valid = cfg.get_valid_plugins(name) if args.all else set()
+        available = valid - info.installed
+
+        marketplaces.append(
+            MarketplaceEntry(
+                name=name,
+                type=source_type,
+                source=source_str,
+                enabled=info.enabled,
+                disabled=info.disabled,
+                available=available if args.all else set(),
+            )
+        )
+
+    spec = Spec(config=config, settings=settings, marketplaces=marketplaces)
+
+    if args.output:
+        write_spec_file(args.output, spec.model_dump())
+        print(f"Wrote spec to {args.output}")
+    else:
+        print(dump_yaml(spec.model_dump()), end="")
+
+    return 0
+
+
+async def cmd_validate(args):
+    """Handle validate subcommand - check spec syntax."""
+    try:
+        if args.spec:
+            spec = load_spec_file(pathlib.Path(args.spec))
+        elif not sys.stdin.isatty():
+            spec = load_yaml(sys.stdin.read())
+        else:
+            raise UserError(
+                "spec file required (provide path or pipe to stdin)"
+            )
+    except yaml.YAMLError as e:
+        print(f"error: invalid YAML: {e}", file=sys.stderr)
+        return 1
+
+    Spec.model_validate(spec)
+    return 0
+
+
+async def cmd_update(cfg):
+    """Handle update subcommand - update all marketplaces and plugins."""
+    err_count = 0
+
+    # Update all marketplaces
+    known = cfg.load_known_marketplaces()
+    for name in sorted(known, key=str.lower):
+        try:
+            await ClaudeCLI.marketplace_update(name)
+        except CLIError as e:
+            print(f"error: {e}", file=sys.stderr)
+            err_count += 1
+
+    # Update all installed plugins
+    installed = cfg.load_installed_plugins()
+    plugin_refs = sorted(installed.plugins.keys(), key=str.lower)
+    for plugin_ref_str in plugin_refs:
+        ref = PluginRef.parse(plugin_ref_str)
+        try:
+            force = cfg.is_local_marketplace(ref.marketplace)
+            await update_plugin(cfg, ref.marketplace, ref.plugin, force)
+        except CLIError as e:
+            print(f"error: {e}", file=sys.stderr)
+            err_count += 1
+
+    print(
+        f"{len(known)} marketplaces, {len(plugin_refs)} plugins, {err_count} errors"
+    )
+    return 1 if err_count else 0
+
+
+async def main():
+    """Main entry point."""
+    args = parse_args()
+    config = ClaudeConfig()
+
+    match args.command:
+        case "apply":
+            return await cmd_apply(args, config)
+        case "show":
+            return await cmd_show(args, config)
+        case "update":
+            return await cmd_update(config)
+        case "validate":
+            return await cmd_validate(args)
+
+    return 1
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(asyncio.run(main()))
+    except UserError as e:
+        print(f"error: {e}", file=sys.stderr)
+        sys.exit(1)
+    except pydantic.ValidationError as e:
+        for err in e.errors():
+            loc = ".".join(str(x) for x in err["loc"])
+            print(f"error: {loc}: {err['msg']}", file=sys.stderr)
+        sys.exit(1)
+    except KeyboardInterrupt:
+        sys.exit(130)
