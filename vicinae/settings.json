@@ -93,6 +93,87 @@
             "removeYAML": false,
             "vaultPath": "/home/ar/syncthing/default/notes"
          }
+      },
+      "applications": {
+         "preferences": {
+            "paths": [
+               "/home/ar/.local/share/applications",
+               "/home/ar/.local/share/flatpak/exports/share/applications",
+               "/var/lib/flatpak/exports/share/applications",
+               "/usr/share/applications"
+            ]
+         }
+      },
+      "browser-extension": {
+         "enabled": false
+      },
+      "calculator": {
+         "enabled": false
+      },
+      "clipboard": {
+         "enabled": false
+      },
+      "core": {
+         "enabled": true,
+         "entrypoints": {
+            "documentation": {
+               "enabled": false
+            },
+            "inspect-local-storage": {
+               "enabled": false
+            },
+            "keybind-settings": {
+               "enabled": false
+            },
+            "list-extensions": {
+               "enabled": true
+            },
+            "manage-fallback": {
+               "enabled": false
+            },
+            "oauth-token-store": {
+               "enabled": false
+            },
+            "open-config-file": {
+               "enabled": false
+            },
+            "open-default-config": {
+               "enabled": false
+            },
+            "prune-memory": {
+               "enabled": false
+            },
+            "report-bug": {
+               "enabled": false
+            },
+            "sponsor": {
+               "enabled": false
+            }
+         }
+      },
+      "developer": {
+         "enabled": false
+      },
+      "files": {
+         "enabled": false
+      },
+      "font": {
+         "enabled": false
+      },
+      "manage-shortcuts": {
+         "enabled": false
+      },
+      "power": {
+         "enabled": false
+      },
+      "system": {
+         "enabled": false
+      },
+      "theme": {
+         "enabled": false
+      },
+      "wm": {
+         "enabled": false
       }
    }
 }
