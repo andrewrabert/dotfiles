@@ -1333,6 +1333,7 @@ class Database:
                     database=self.name,
                     cwd=self.aurutils_cache,
                     makepkg_args=makepkg_args,
+                    no_ver=True,
                 )
                 if not success:
                     logger.error(f"  Failed to build {pkg_name}")
