@@ -545,11 +545,19 @@ class ClaudeCLI:
 
     @classmethod
     async def plugin_enable(cls, plugin_ref):
-        await cls._run("plugin", "enable", plugin_ref)
+        try:
+            await cls._run("plugin", "enable", plugin_ref)
+        except CLIError as e:
+            if "already enabled" not in str(e):
+                raise
 
     @classmethod
     async def plugin_disable(cls, plugin_ref):
-        await cls._run("plugin", "disable", plugin_ref)
+        try:
+            await cls._run("plugin", "disable", plugin_ref)
+        except CLIError as e:
+            if "already disabled" not in str(e):
+                raise
 
 
 def get_local_path(source):
@@ -758,6 +766,15 @@ async def cmd_apply(args, cfg):
             except CLIError as e:
                 print(f"error: {e}", file=sys.stderr)
                 err_count += 1
+
+    # Update existing marketplaces that have new plugins to install
+    marketplaces_needing_update = {m for m, _ in plugins_to_install}
+    for marketplace in marketplaces_needing_update:
+        try:
+            await ClaudeCLI.marketplace_update(marketplace)
+        except CLIError as e:
+            print(f"error: {e}", file=sys.stderr)
+            err_count += 1
 
     # Remove plugins from existing marketplaces
     for marketplace, plugin in plugins_to_remove:
