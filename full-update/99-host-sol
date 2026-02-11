@@ -12,3 +12,6 @@ fi
 git-auto-update ~/src/git.nullsum.net/nvllsvm/sol-docker
 sol-docker pull
 sol-repotool update
+
+echo ':: Generating NVIDIA CDI spec'
+sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml

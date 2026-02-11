@@ -45,6 +45,9 @@ systemctl --user enable --now sol-ytdl-sub.timer
 echo Starting wireguard ...
 sudo systemctl enable --now wg-quick@wormhole
 
+# need to run this upon nvidia driver changes
+# sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml
+
 echo Starting Docker ...
 sudo systemctl enable --now docker
 sol-docker up -d
