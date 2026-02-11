@@ -247,7 +247,10 @@ class ClaudeConfig:
             or os.environ.get("CLAUDE_CONFIG_DIR")
             or pathlib.Path.home() / ".claude"
         )
-        self.config_path = self.dir / ".claude.json"
+        if config_dir or os.environ.get("CLAUDE_CONFIG_DIR"):
+            self.config_path = self.dir / ".claude.json"
+        else:
+            self.config_path = pathlib.Path.home() / ".claude.json"
         self.settings_path = self.dir / "settings.json"
         self.installed_plugins_path = (
             self.dir / "plugins" / "installed_plugins.json"
