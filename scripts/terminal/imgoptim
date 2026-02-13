@@ -11,6 +11,8 @@ System commands executed by this script:
 - gifsicle: GIF optimization and manipulation
 - inkscape: SVG to PNG conversion
 - jpegoptim: JPEG optimization
+- krita: Export KRA (Krita native) images
+- systemd-run: Optional, sandbox krita via transient service
 - magick: ImageMagick for various image operations
 - oxipng: PNG optimization
 - sha256sum: Calculate SHA-256 checksums
@@ -556,6 +558,7 @@ _TYPE_TO_MIME = {
 
 
 _MIME_SUFFIXES = {
+    "application/x-krita": (".kra",),
     "image/bmp": (".bmp",),
     "image/gif": (".gif",),
     "image/heif": (".heic",),
@@ -618,6 +621,8 @@ def determine_mime(path):
             return "image/bmp", {}
         elif path.suffix.lower() == ".svg":
             return "image/svg+xml", {}
+        elif path.suffix.lower() == ".kra":
+            return "application/x-krita", {}
     return None, None
 
 
@@ -825,6 +830,34 @@ async def convert_to_jxl_vips(source, dest):
         raise ProcessError(proc)
 
 
+async def convert_from_kra(source, dest):
+    args = []
+    if shutil.which("systemd-run"):
+        args.extend(
+            ["systemd-run", "--user", "--pty", "--same-dir", "--collect", "--"]
+        )
+    args.extend(
+        [
+            "krita",
+            "--platform",
+            "offscreen",
+            "--export",
+            "--export-filename",
+            dest,
+            "--",
+            source,
+        ]
+    )
+    proc = await asyncio.create_subprocess_exec(
+        *args,
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.DEVNULL,
+    )
+    await proc.wait()
+    if proc.returncode != 0:
+        raise ProcessError(proc)
+
+
 async def _process_optim(
     func, path, fast, strip, compute_hash=False, **options
 ):
@@ -903,10 +936,34 @@ async def _process_convert(path, source_mimetype, target_mimetype, **options):
         )
         match target_mimetype:
             case "image/bmp":
-                await convert_to_bmp(path, temp_path)
+                match source_mimetype:
+                    case "application/x-krita":
+                        kra_png = stack.enter_context(
+                            TempPath(
+                                dir=path.parent,
+                                prefix=".imgconvert_",
+                                suffix=".png",
+                            )
+                        )
+                        await convert_from_kra(path, kra_png)
+                        await convert_to_bmp(kra_png, temp_path)
+                    case _:
+                        await convert_to_bmp(path, temp_path)
                 temp_path.replace(dest)
             case "image/x-portable-pixmap":
-                await convert_to_ppm(path, temp_path)
+                match source_mimetype:
+                    case "application/x-krita":
+                        kra_png = stack.enter_context(
+                            TempPath(
+                                dir=path.parent,
+                                prefix=".imgconvert_",
+                                suffix=".png",
+                            )
+                        )
+                        await convert_from_kra(path, kra_png)
+                        await convert_to_ppm(kra_png, temp_path)
+                    case _:
+                        await convert_to_ppm(path, temp_path)
                 temp_path.replace(dest)
             case "image/png":
                 match source_mimetype:
@@ -922,6 +979,16 @@ async def _process_convert(path, source_mimetype, target_mimetype, **options):
                         )
                         await convert_svg_to_png(path, png_temp, max_w, max_h)
                         png_temp.replace(dest)
+                    case "application/x-krita":
+                        kra_png = stack.enter_context(
+                            TempPath(
+                                dir=path.parent,
+                                prefix=".imgconvert_",
+                                suffix=".png",
+                            )
+                        )
+                        await convert_from_kra(path, kra_png)
+                        kra_png.replace(dest)
                     case _:
                         await convert_to_png(path, temp_path)
                         temp_path.replace(dest)
@@ -946,6 +1013,16 @@ async def _process_convert(path, source_mimetype, target_mimetype, **options):
                                 continue
                             new_metadata[k1] = v
                         await exiftool.from_json(temp_path, new_metadata)
+                    case "application/x-krita":
+                        kra_png = stack.enter_context(
+                            TempPath(
+                                dir=path.parent,
+                                prefix=".imgconvert_",
+                                suffix=".png",
+                            )
+                        )
+                        await convert_from_kra(path, kra_png)
+                        await convert_to_tiff_vips(kra_png, temp_path)
                     case _:
                         await convert_to_tiff_vips(path, temp_path)
                 temp_path.replace(dest)
@@ -980,6 +1057,16 @@ async def _process_convert(path, source_mimetype, target_mimetype, **options):
                                 continue
                             new_metadata[k1] = v
                         await exiftool.from_json(temp_path, new_metadata)
+                    case "application/x-krita":
+                        kra_png = stack.enter_context(
+                            TempPath(
+                                dir=path.parent,
+                                prefix=".imgconvert_",
+                                suffix=".png",
+                            )
+                        )
+                        await convert_from_kra(path, kra_png)
+                        await convert_to_jxl(kra_png, temp_path)
                     case _:
                         await convert_to_jxl(path, temp_path)
                 temp_path.replace(dest)
@@ -1005,6 +1092,16 @@ async def _process_convert(path, source_mimetype, target_mimetype, **options):
                         )
                         await convert_djxl(path, temp_path_2)
                         temp_path_2.replace(temp_path)
+                    case "application/x-krita":
+                        kra_png = stack.enter_context(
+                            TempPath(
+                                dir=path.parent,
+                                prefix=".imgconvert_",
+                                suffix=".png",
+                            )
+                        )
+                        await convert_from_kra(path, kra_png)
+                        await convert_to_jpeg(kra_png, temp_path)
                     case _:
                         await convert_to_jpeg(path, temp_path)
                 temp_path.replace(dest)
@@ -1215,13 +1312,15 @@ async def main_convert():
 
     png_group = parser.add_argument_group("PNG Options (SVG source)")
     png_group.add_argument(
-        "-W", "--width",
+        "-W",
+        "--width",
         type=_positive_int,
         default=None,
         help="output width in pixels",
     )
     png_group.add_argument(
-        "-H", "--height",
+        "-H",
+        "--height",
         type=_positive_int,
         default=None,
         help="output height in pixels",
