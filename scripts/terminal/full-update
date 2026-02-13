@@ -27,10 +27,13 @@ should_skip() {
     esac
 }
 
-if command -v hostname > /dev/null; then 
+if command -v hostname > /dev/null; then
     export HOST_DOTFILES="$(hostname)"
 fi
 export HOST_DOTFILES="$(zsh -lic 'if [ -f ~/.zshenv.local ]; then . ~/.zshenv.local; fi && echo "$HOST_DOTFILES"')"
+if command -v hostnamectl > /dev/null; then
+    export HOST_DOTFILES="$(hostnamectl hostname)"
+fi
 if [ -z "$HOST_DOTFILES" ]; then
     echo 'error: cannot determine hostname' >&2
     exit 1
