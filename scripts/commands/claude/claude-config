@@ -708,6 +708,8 @@ async def cmd_apply(args, cfg):
         )
         if spec.claude_md != current:
             safe_write_bytes(cfg.claude_md_path, spec.claude_md.encode())
+    elif cfg.claude_md_path.exists():
+        cfg.claude_md_path.unlink()
 
     # Apply config and settings
     apply_spec_dict(spec.config, cfg.load_config, cfg.save_config)
