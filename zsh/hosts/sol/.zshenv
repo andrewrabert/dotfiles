@@ -1,2 +1,2 @@
 . ~/.dotfiles/private/zsh/.zshenv
-export CLAUDE_CONFIG_DIR="${DOTFILES_PRIVATE}/claude"
+export CLAUDE_CONFIG_DIR=~/.local/share/claude-code/default

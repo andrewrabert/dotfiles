@@ -669,18 +669,15 @@ async def install_or_update_plugin(cfg, marketplace, name, force=False):
 
 
 async def install_all_plugins(cfg, marketplace, plugins, force=False):
-    """Install all plugins concurrently. Returns failure count."""
-    tasks = [
-        install_or_update_plugin(cfg, marketplace, p, force) for p in plugins
-    ]
-    results = await asyncio.gather(*tasks)
-
+    """Install all plugins sequentially. Returns failure count."""
     failures = 0
-    for (success, error), name in zip(results, plugins):
+    for plugin in plugins:
+        success, error = await install_or_update_plugin(
+            cfg, marketplace, plugin, force
+        )
         if not success:
-            print(f"error: {name}@{marketplace}: {error}", file=sys.stderr)
+            print(f"error: {plugin}@{marketplace}: {error}", file=sys.stderr)
             failures += 1
-
     return failures
 
 
