@@ -45,9 +45,7 @@ class SettingsSpec(Settings):
 
 PluginSet = typing.Annotated[
     set[str],
-    pydantic.PlainSerializer(
-        lambda v: sorted(v, key=str.lower), return_type=list[str]
-    ),
+    pydantic.PlainSerializer(lambda v: sorted(v, key=str.lower), return_type=list[str]),
 ]
 
 
@@ -83,9 +81,7 @@ class MarketplaceSource(pydantic.BaseModel):
 
 class KnownMarketplace(pydantic.BaseModel):
     model_config = pydantic.ConfigDict(extra="ignore")
-    source: MarketplaceSource = pydantic.Field(
-        default_factory=MarketplaceSource
-    )
+    source: MarketplaceSource = pydantic.Field(default_factory=MarketplaceSource)
     installLocation: str = ""
 
     def get_source_string(self):
@@ -185,14 +181,16 @@ MarketplaceList = typing.Annotated[
 
 
 class Spec(pydantic.BaseModel):
-    model_config = pydantic.ConfigDict(extra="forbid")
+    model_config = pydantic.ConfigDict(extra="forbid", populate_by_name=True)
     config: ConfigSpec | None = None
     settings: SettingsSpec | None = None
     marketplaces: MarketplaceList = pydantic.Field(default_factory=list)
+    claude_md: str | None = pydantic.Field(None, alias="CLAUDE.md")
 
     def model_dump(self, **kwargs) -> dict:
         kwargs.setdefault("exclude_none", True)
         kwargs.setdefault("exclude_defaults", True)
+        kwargs.setdefault("by_alias", True)
         return super().model_dump(**kwargs)
 
 
@@ -200,12 +198,23 @@ def load_yaml(text):
     return yaml.safe_load(text) or {}
 
 
+class _YamlDumper(yaml.SafeDumper):
+    def represent_str(self, data):
+        style = "|" if "\n" in data else None
+        return self.represent_scalar("tag:yaml.org,2002:str", data, style=style)
+
+
+_YamlDumper.add_representer(str, _YamlDumper.represent_str)
+
+
 def dump_yaml(data):
     return yaml.dump(
         data,
+        Dumper=_YamlDumper,
         default_flow_style=False,
         sort_keys=False,
         allow_unicode=True,
+        width=float("inf"),
     )
 
 
@@ -234,9 +243,7 @@ def load_json(path):
 
 
 def save_json(path, data):
-    text = (
-        json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
-    )
+    text = json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
     safe_write_bytes(path, text.encode())
 
 
@@ -252,12 +259,9 @@ class ClaudeConfig:
         else:
             self.config_path = pathlib.Path.home() / ".claude.json"
         self.settings_path = self.dir / "settings.json"
-        self.installed_plugins_path = (
-            self.dir / "plugins" / "installed_plugins.json"
-        )
-        self.known_marketplaces_path = (
-            self.dir / "plugins" / "known_marketplaces.json"
-        )
+        self.installed_plugins_path = self.dir / "plugins" / "installed_plugins.json"
+        self.known_marketplaces_path = self.dir / "plugins" / "known_marketplaces.json"
+        self.claude_md_path = self.dir / "CLAUDE.md"
         self.plugin_cache_path = self.dir / "plugins" / "cache"
 
     def load_config(self):
@@ -282,9 +286,7 @@ class ClaudeConfig:
 
     def load_known_marketplaces(self):
         data = load_json(self.known_marketplaces_path)
-        parsed = {
-            k: KnownMarketplace.model_validate(v) for k, v in data.items()
-        }
+        parsed = {k: KnownMarketplace.model_validate(v) for k, v in data.items()}
         return KnownMarketplaces(parsed)
 
     def load_manifest(self, path):
@@ -296,9 +298,7 @@ class ClaudeConfig:
         known = self.load_known_marketplaces()
         installed = self.load_installed_plugins()
         settings = self.load_settings()
-        enabled_plugins = (
-            settings.get("enabledPlugins", {}) if settings else {}
-        )
+        enabled_plugins = settings.get("enabledPlugins", {}) if settings else {}
 
         state: dict[str, MarketplaceState] = {}
         for name, info in known.items():
@@ -328,9 +328,7 @@ class ClaudeConfig:
         if not install_location:
             return set()
         manifest_path = (
-            pathlib.Path(install_location)
-            / ".claude-plugin"
-            / "marketplace.json"
+            pathlib.Path(install_location) / ".claude-plugin" / "marketplace.json"
         )
         manifest = self.load_manifest(manifest_path)
         return {p.name for p in manifest.plugins}
@@ -364,9 +362,7 @@ class ClaudeConfig:
         if plugin:
             to_remove = [str(PluginRef(plugin, marketplace))]
         else:
-            to_remove = [
-                r for r in enabled_plugins if r.endswith(f"@{marketplace}")
-            ]
+            to_remove = [r for r in enabled_plugins if r.endswith(f"@{marketplace}")]
 
         for ref in to_remove:
             enabled_plugins.pop(ref, None)
@@ -487,9 +483,7 @@ def compute_changes(current_state: dict[str, MarketplaceState], spec: Spec):
                 plugins_to_update.append((marketplace, plugin))
         else:
             # New marketplace
-            marketplaces_to_add.append(
-                (d.source, list(d.enabled), list(d.disabled))
-            )
+            marketplaces_to_add.append((d.source, list(d.enabled), list(d.disabled)))
 
     return (
         marketplaces_to_add,
@@ -672,9 +666,7 @@ async def install_all_plugins(cfg, marketplace, plugins, force=False):
     """Install all plugins sequentially. Returns failure count."""
     failures = 0
     for plugin in plugins:
-        success, error = await install_or_update_plugin(
-            cfg, marketplace, plugin, force
-        )
+        success, error = await install_or_update_plugin(cfg, marketplace, plugin, force)
         if not success:
             print(f"error: {plugin}@{marketplace}: {error}", file=sys.stderr)
             failures += 1
@@ -689,9 +681,7 @@ async def cmd_apply(args, cfg):
         elif not sys.stdin.isatty():
             data = load_yaml(sys.stdin.read())
         else:
-            raise UserError(
-                "spec file required (provide path or pipe to stdin)"
-            )
+            raise UserError("spec file required (provide path or pipe to stdin)")
     except yaml.YAMLError as e:
         print(f"error: invalid YAML: {e}", file=sys.stderr)
         return 1
@@ -710,6 +700,14 @@ async def cmd_apply(args, cfg):
     ) = compute_changes(current, spec)
 
     err_count = 0
+
+    # Apply CLAUDE.md
+    if spec.claude_md is not None:
+        current = (
+            cfg.claude_md_path.read_text() if cfg.claude_md_path.exists() else None
+        )
+        if spec.claude_md != current:
+            safe_write_bytes(cfg.claude_md_path, spec.claude_md.encode())
 
     # Apply config and settings
     apply_spec_dict(spec.config, cfg.load_config, cfg.save_config)
@@ -757,9 +755,7 @@ async def cmd_apply(args, cfg):
         # Enable only the enabled plugins (installed plugins are disabled by default)
         for plugin in enabled:
             try:
-                await ClaudeCLI.plugin_enable(
-                    str(PluginRef(plugin, marketplace_name))
-                )
+                await ClaudeCLI.plugin_enable(str(PluginRef(plugin, marketplace_name)))
             except CLIError as e:
                 print(f"error: {e}", file=sys.stderr)
                 err_count += 1
@@ -776,9 +772,7 @@ async def cmd_apply(args, cfg):
     # Remove plugins from existing marketplaces
     for marketplace, plugin in plugins_to_remove:
         try:
-            await ClaudeCLI.plugin_uninstall(
-                str(PluginRef(plugin, marketplace))
-            )
+            await ClaudeCLI.plugin_uninstall(str(PluginRef(plugin, marketplace)))
         except CLIError as e:
             print(f"error: {e}", file=sys.stderr)
             err_count += 1
@@ -794,9 +788,7 @@ async def cmd_apply(args, cfg):
         for plugin in plugins:
             if plugin in spec_enabled:
                 try:
-                    await ClaudeCLI.plugin_enable(
-                        str(PluginRef(plugin, marketplace))
-                    )
+                    await ClaudeCLI.plugin_enable(str(PluginRef(plugin, marketplace)))
                 except CLIError as e:
                     print(f"error: {e}", file=sys.stderr)
                     err_count += 1
@@ -842,22 +834,18 @@ async def cmd_apply(args, cfg):
 
 async def cmd_show(args, cfg):
     """Handle show subcommand - output spec from current installed state."""
+    claude_md = cfg.claude_md_path.read_text() if cfg.claude_md_path.exists() else None
+
     config_data = cfg.load_config()
-    config_filtered = {
-        k: v for k, v in config_data.items() if k in Config.model_fields
-    }
-    config = (
-        ConfigSpec.model_validate(config_filtered) if config_filtered else None
-    )
+    config_filtered = {k: v for k, v in config_data.items() if k in Config.model_fields}
+    config = ConfigSpec.model_validate(config_filtered) if config_filtered else None
 
     settings_data = cfg.load_settings()
     settings_filtered = {
         k: v for k, v in settings_data.items() if k in Settings.model_fields
     }
     settings = (
-        SettingsSpec.model_validate(settings_filtered)
-        if settings_filtered
-        else None
+        SettingsSpec.model_validate(settings_filtered) if settings_filtered else None
     )
 
     current = cfg.get_current_state()
@@ -885,7 +873,12 @@ async def cmd_show(args, cfg):
             )
         )
 
-    spec = Spec(config=config, settings=settings, marketplaces=marketplaces)
+    spec = Spec(
+        claude_md=claude_md,
+        config=config,
+        settings=settings,
+        marketplaces=marketplaces,
+    )
 
     if args.output:
         write_spec_file(args.output, spec.model_dump())
@@ -904,9 +897,7 @@ async def cmd_validate(args):
         elif not sys.stdin.isatty():
             spec = load_yaml(sys.stdin.read())
         else:
-            raise UserError(
-                "spec file required (provide path or pipe to stdin)"
-            )
+            raise UserError("spec file required (provide path or pipe to stdin)")
     except yaml.YAMLError as e:
         print(f"error: invalid YAML: {e}", file=sys.stderr)
         return 1
@@ -940,9 +931,7 @@ async def cmd_update(cfg):
             print(f"error: {e}", file=sys.stderr)
             err_count += 1
 
-    print(
-        f"{len(known)} marketplaces, {len(plugin_refs)} plugins, {err_count} errors"
-    )
+    print(f"{len(known)} marketplaces, {len(plugin_refs)} plugins, {err_count} errors")
     return 1 if err_count else 0
 
 
