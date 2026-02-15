@@ -1,19 +1,29 @@
 #!/usr/bin/env sh
 set -e
-SOURCE=/storage/Audio/Library
-TARGET=/storage/Audio/Lossy_opus_128
+cd ~/src/github/andrewrabert/harmonize || exit 1
+uv run harmonize --stdin << EOF
+[harmonize]
+source = "/storage/Audio/Library"
+target = "/storage/Audio/Lossy_opus_128"
+source_exclude = [
+    "*.accurip",
+    "*.auCDtect",
+    "*.cue",
+    "*.log",
+    "*.nfo",
+    "*.pdf",
+    "*.txt",
+]
 
-export UV_PROJECT=~/src/github/nvllsvm/harmonize
+[converters.audio]
+command = ["ffmpeg", "-y", "-i", "{input}", "-c:a", "libopus", "-b:a", "128k", "{output}"]
 
-uv run harmonize "$SOURCE" "$TARGET" \
-    --exclude '*.pdf' \
-    --exclude '*.accurip' \
-    --exclude '*.auCDtect' \
-    --exclude '*.cue' \
-    --exclude '*.log' \
-    --exclude '*.nfo' \
-    --exclude '*.pdf' \
-    --exclude '*.txt' \
-    --codec opus \
-    --bitrate 128 \
-    --music
+[converters.image]
+command = ["imgconvert", "-f", "jpeg", "--resize-mode", "shrink", "--width", "1000", "--height", "1000", "--output", "{output}", "{input}"]
+
+[mappings]
+".flac" = { converter = "audio", output_ext = ".opus" }
+".mp3" = { converter = "audio", output_ext = ".opus" }
+".png" = { converter = "image", output_ext = ".jpg" }
+".jpg" = { converter = "image" }
+EOF
