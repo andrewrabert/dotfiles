@@ -830,6 +830,47 @@ async def convert_to_jxl_vips(source, dest):
         raise ProcessError(proc)
 
 
+async def get_image_dimensions(path):
+    proc = await asyncio.create_subprocess_exec(
+        "vipsheader",
+        "-f",
+        "width",
+        "-f",
+        "height",
+        "--",
+        path,
+        stdout=asyncio.subprocess.PIPE,
+    )
+    stdout, _ = await proc.communicate()
+    if proc.returncode != 0:
+        raise ProcessError(proc)
+    w, h = stdout.decode().split()
+    return int(w), int(h)
+
+
+def _needs_resize(img_w, img_h, max_w, max_h, mode):
+    target_w = max_w or img_w
+    target_h = max_h or img_h
+    if mode == "shrink":
+        return img_w > target_w or img_h > target_h
+    elif mode == "grow":
+        return img_w < target_w or img_h < target_h
+    else:  # stretch
+        return img_w != target_w or img_h != target_h
+
+
+async def resize_to_max_dim(source, dest, width, height, mode):
+    args = ["vips", "thumbnail", source, dest, str(width)]
+    if height is not None:
+        args.append(f"--height={height}")
+    vips_size = {"shrink": "down", "grow": "up", "stretch": "force"}[mode]
+    args.append(f"--size={vips_size}")
+    proc = await asyncio.create_subprocess_exec(*args)
+    await proc.wait()
+    if proc.returncode != 0:
+        raise ProcessError(proc)
+
+
 async def convert_from_kra(source, dest):
     args = []
     if shutil.which("systemd-run"):
@@ -925,11 +966,42 @@ async def _process_convert(path, source_mimetype, target_mimetype, **options):
                     path, "heif must contain exactly one frame"
                 )
 
-    dest = path.parent / name
+    original_path = path
+    max_w = options.get("max_w")
+    max_h = options.get("max_h")
+    resize_mode = options.get("resize_mode", "shrink")
+    output_dir = options.get("output_dir")
+    output_name = options.get("output_name")
+
+    dest_dir = output_dir or path.parent
+    dest = dest_dir / (output_name or name)
     with contextlib.ExitStack() as stack:
+        if (max_w or max_h) and source_mimetype not in (
+            "application/x-krita",
+            "image/svg+xml",
+        ):
+            img_w, img_h = await get_image_dimensions(path)
+            if _needs_resize(img_w, img_h, max_w, max_h, resize_mode):
+                resized = stack.enter_context(
+                    TempPath(
+                        dir=dest_dir,
+                        prefix=".imgconvert_resize_",
+                        suffix=".ppm",
+                    )
+                )
+                await resize_to_max_dim(
+                    path,
+                    resized,
+                    width=max_w or max_h,
+                    height=max_h,
+                    mode=resize_mode,
+                )
+                path = resized
+                source_mimetype = "image/x-portable-pixmap"
+
         temp_path = stack.enter_context(
             TempPath(
-                dir=path.parent,
+                dir=dest_dir,
                 prefix=".imgconvert_",
                 suffix=path.name + ".tmp",
             )
@@ -940,7 +1012,7 @@ async def _process_convert(path, source_mimetype, target_mimetype, **options):
                     case "application/x-krita":
                         kra_png = stack.enter_context(
                             TempPath(
-                                dir=path.parent,
+                                dir=dest_dir,
                                 prefix=".imgconvert_",
                                 suffix=".png",
                             )
@@ -955,7 +1027,7 @@ async def _process_convert(path, source_mimetype, target_mimetype, **options):
                     case "application/x-krita":
                         kra_png = stack.enter_context(
                             TempPath(
-                                dir=path.parent,
+                                dir=dest_dir,
                                 prefix=".imgconvert_",
                                 suffix=".png",
                             )
@@ -972,7 +1044,7 @@ async def _process_convert(path, source_mimetype, target_mimetype, **options):
                         max_h = options.get("max_h")
                         png_temp = stack.enter_context(
                             TempPath(
-                                dir=path.parent,
+                                dir=dest_dir,
                                 prefix=".imgconvert_",
                                 suffix=".png",
                             )
@@ -982,7 +1054,7 @@ async def _process_convert(path, source_mimetype, target_mimetype, **options):
                     case "application/x-krita":
                         kra_png = stack.enter_context(
                             TempPath(
-                                dir=path.parent,
+                                dir=dest_dir,
                                 prefix=".imgconvert_",
                                 suffix=".png",
                             )
@@ -1016,7 +1088,7 @@ async def _process_convert(path, source_mimetype, target_mimetype, **options):
                     case "application/x-krita":
                         kra_png = stack.enter_context(
                             TempPath(
-                                dir=path.parent,
+                                dir=dest_dir,
                                 prefix=".imgconvert_",
                                 suffix=".png",
                             )
@@ -1031,7 +1103,7 @@ async def _process_convert(path, source_mimetype, target_mimetype, **options):
                     case "image/heif":
                         temp_path_2 = stack.enter_context(
                             TempPath(
-                                dir=path.parent,
+                                dir=dest_dir,
                                 prefix=".imgconvert_",
                                 suffix=path.name + ".tmp",
                             )
@@ -1060,7 +1132,7 @@ async def _process_convert(path, source_mimetype, target_mimetype, **options):
                     case "application/x-krita":
                         kra_png = stack.enter_context(
                             TempPath(
-                                dir=path.parent,
+                                dir=dest_dir,
                                 prefix=".imgconvert_",
                                 suffix=".png",
                             )
@@ -1075,7 +1147,7 @@ async def _process_convert(path, source_mimetype, target_mimetype, **options):
                     case "image/heif" | "image/webp":
                         temp_path_2 = stack.enter_context(
                             TempPath(
-                                dir=path.parent,
+                                dir=dest_dir,
                                 prefix=".imgconvert_",
                                 suffix=path.name + ".tmp",
                             )
@@ -1085,7 +1157,7 @@ async def _process_convert(path, source_mimetype, target_mimetype, **options):
                     case "image/jxl":
                         temp_path_2 = stack.enter_context(
                             TempPath(
-                                dir=path.parent,
+                                dir=dest_dir,
                                 prefix=".imgconvert_",
                                 suffix=path.name + ".jpg",
                             )
@@ -1095,7 +1167,7 @@ async def _process_convert(path, source_mimetype, target_mimetype, **options):
                     case "application/x-krita":
                         kra_png = stack.enter_context(
                             TempPath(
-                                dir=path.parent,
+                                dir=dest_dir,
                                 prefix=".imgconvert_",
                                 suffix=".png",
                             )
@@ -1107,7 +1179,7 @@ async def _process_convert(path, source_mimetype, target_mimetype, **options):
                 temp_path.replace(dest)
             case _:
                 raise RuntimeError("invalid target_type")
-    return path, dest
+    return original_path, dest
 
 
 class SizeDiffPrinter:
@@ -1282,6 +1354,13 @@ async def main_convert():
     )
     parser.add_argument("--rm", action="store_true")
     parser.add_argument(
+        "-o",
+        "--output",
+        type=pathlib.Path,
+        default=None,
+        help="output directory or file path",
+    )
+    parser.add_argument(
         "-f",
         "--format",
         dest="format",
@@ -1310,23 +1389,46 @@ async def main_convert():
         help="default: %(default)s",
     )
 
-    png_group = parser.add_argument_group("PNG Options (SVG source)")
-    png_group.add_argument(
+    resize_group = parser.add_argument_group("Resize Options")
+    resize_group.add_argument(
         "-W",
         "--width",
         type=_positive_int,
         default=None,
         help="output width in pixels",
     )
-    png_group.add_argument(
+    resize_group.add_argument(
         "-H",
         "--height",
         type=_positive_int,
         default=None,
         help="output height in pixels",
     )
+    resize_group.add_argument(
+        "--resize-mode",
+        choices=("shrink", "grow", "stretch"),
+        default="shrink",
+        help="shrink=only downscale, grow=only upscale, stretch=exact WxH (default: %(default)s)",
+    )
 
     args = parser.parse_args()
+
+    output = args.output
+    if output is not None:
+        if output.is_dir():
+            output_dir = output
+            output_name = None
+        else:
+            output_dir = output.parent
+            output_name = output.name
+            if not output_dir.is_dir():
+                parser.error(
+                    f"output parent directory does not exist: {output_dir}"
+                )
+            if len(args.paths) > 1:
+                parser.error(
+                    "-o as a filename requires exactly one input file"
+                )
 
     CONFIG.jpeg.quality = args.jpeg_quality
 
@@ -1344,14 +1446,18 @@ async def main_convert():
             # broken symlink can cause this
             continue
 
-        executor.submit(
-            _process_convert,
-            path,
+        submit_kwargs = dict(
             source_mimetype=mimetype,
             target_mimetype=_TYPE_TO_MIME[args.format],
             max_w=args.width,
             max_h=args.height,
+            resize_mode=args.resize_mode,
         )
+        if output is not None:
+            submit_kwargs["output_dir"] = output_dir
+            submit_kwargs["output_name"] = output_name
+
+        executor.submit(_process_convert, path, **submit_kwargs)
 
     has_error = False
     async for result in executor:
