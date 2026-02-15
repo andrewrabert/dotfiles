@@ -149,7 +149,7 @@ def default_config(work_dir, claude_dir, home):
         "chdir": work_dir,
         "unshare_pid": True,
         "die_with_parent": True,
-        "command": ["/usr/bin/claude", "--dangerously-skip-permissions"],
+        "command": ["/usr/bin/claude"],
     }
 
 

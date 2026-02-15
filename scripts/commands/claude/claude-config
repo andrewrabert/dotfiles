@@ -33,16 +33,6 @@ class ConfigSpec(Config):
     model_config = pydantic.ConfigDict(extra="forbid")
 
 
-class Settings(pydantic.BaseModel):
-    model_config = pydantic.ConfigDict(extra="ignore")
-    env: dict[str, str] | None = None
-    includeCoAuthoredBy: bool | None = None
-
-
-class SettingsSpec(Settings):
-    model_config = pydantic.ConfigDict(extra="forbid")
-
-
 PluginSet = typing.Annotated[
     set[str],
     pydantic.PlainSerializer(lambda v: sorted(v, key=str.lower), return_type=list[str]),
@@ -183,7 +173,7 @@ MarketplaceList = typing.Annotated[
 class Spec(pydantic.BaseModel):
     model_config = pydantic.ConfigDict(extra="forbid", populate_by_name=True)
     config: ConfigSpec | None = None
-    settings: SettingsSpec | None = None
+    settings: dict[str, typing.Any] | None = None
     marketplaces: MarketplaceList = pydantic.Field(default_factory=list)
     claude_md: str | None = pydantic.Field(None, alias="CLAUDE.md")
 
@@ -273,9 +263,7 @@ class ClaudeConfig:
         save_json(self.config_path, data)
 
     def load_settings(self):
-        data = load_json(self.settings_path)
-        Settings.model_validate(data)
-        return data
+        return load_json(self.settings_path)
 
     def save_settings(self, data):
         save_json(self.settings_path, data)
@@ -378,12 +366,16 @@ class CLIError(Exception):
     pass
 
 
-def apply_spec_dict(spec_model, loader, saver):
+def apply_spec_dict(spec_data, loader, saver):
     """Merge spec into current data and save if changed."""
-    if not spec_model:
+    if not spec_data:
         return
     current = loader()
-    updated = {**current, **spec_model.model_dump(exclude_none=True)}
+    if isinstance(spec_data, dict):
+        updates = spec_data
+    else:
+        updates = spec_data.model_dump(exclude_none=True)
+    updated = {**current, **updates}
     if updated != current:
         saver(updated)
 
@@ -843,12 +835,8 @@ async def cmd_show(args, cfg):
     config = ConfigSpec.model_validate(config_filtered) if config_filtered else None
 
     settings_data = cfg.load_settings()
-    settings_filtered = {
-        k: v for k, v in settings_data.items() if k in Settings.model_fields
-    }
-    settings = (
-        SettingsSpec.model_validate(settings_filtered) if settings_filtered else None
-    )
+    exclude = {"$schema", "enabledPlugins"}
+    settings = {k: v for k, v in settings_data.items() if k not in exclude} or None
 
     current = cfg.get_current_state()
     marketplaces = []
