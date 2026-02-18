@@ -248,7 +248,9 @@ class Flatpak:
             line = line.strip()
             if line.startswith("sockets="):
                 perms = line.split("=", 1)[1]
-                sockets.update(p.strip() for p in perms.split(";") if p.strip())
+                sockets.update(
+                    p.strip() for p in perms.split(";") if p.strip()
+                )
         return sockets
 
     @staticmethod
@@ -290,7 +292,9 @@ class Flatpak:
             line = line.strip()
             if line.startswith("sockets="):
                 perms = line.split("=", 1)[1]
-                sockets.update(p.strip() for p in perms.split(";") if p.strip())
+                sockets.update(
+                    p.strip() for p in perms.split(";") if p.strip()
+                )
         return sockets
 
     @staticmethod
@@ -518,12 +522,12 @@ if HOSTNAME in ("mars", "phobos"):
             "obs-studio",
             "okular",
             "opentoonz",
+            "plasma-login-manager",
             "plasma6-runners-emojirunner",
             "podman",
             "print-manager",
             "qt6-doc",
             "rawtherapee",
-            "sddm",
             "signal-desktop",
             "spectacle",
             "stern",
