@@ -1091,11 +1091,17 @@ class Database:
                 # Check VCS package for new commits
                 new_version = await self._get_vcs_pkgver(pkgbase)
                 if not new_version:
+                    logger.warning(
+                        f"Could not determine VCS version for {pkgbase}, skipping"
+                    )
                     continue
 
-                # Compare versions
-                if pyalpm.vercmp(new_version, current_version) > 0:
-                    # Has update - parse new dependencies
+                # VCS versions (e.g. git commit hashes) don't have
+                # meaningful ordering - any change means an update
+                if new_version != current_version:
+                    logger.info(
+                        f"  {pkgbase}: {current_version} -> {new_version}"
+                    )
                     deps = await self._parse_srcinfo(pkgbase)
                     pkg_updates[pkgbase] = PackageUpdateInfo(
                         name=pkgbase,
@@ -1104,6 +1110,10 @@ class Database:
                         has_update=True,
                         is_vcs=True,
                         deps=deps,
+                    )
+                else:
+                    logger.debug(
+                        f"  {pkgbase}: up to date ({current_version})"
                     )
             else:
                 # Check non-VCS package by fetching PKGBUILD
@@ -1766,9 +1776,9 @@ class Database:
                     )
                     continue
 
-                # Compare versions using pyalpm
-                cmp = pyalpm.vercmp(current_version, sol_version)
-                if cmp > 0:
+                # VCS versions (e.g. git commit hashes) don't have
+                # meaningful ordering - any change means an update
+                if current_version != sol_version:
                     print(f"  {pkg_name}: {sol_version} -> {current_version}")
                     vcs_to_build.append(pkg_name)
                 else:
