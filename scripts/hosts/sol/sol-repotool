@@ -3,7 +3,6 @@
 # /// script
 # dependencies = [
 #     "pyalpm",
-#     "tqdm",
 # ]
 # ///
 """
@@ -22,7 +21,6 @@ import subprocess
 import sys
 
 import pyalpm
-import tqdm
 
 # Use system PATH for subcommands (exclude uv/venv directories)
 os.environ["PATH"] = ":".join(
@@ -1074,7 +1072,10 @@ class Database:
         """
         pkg_updates = {}
 
-        for pkgbase in tqdm.tqdm(pkgbases_to_check):
+        total = len(pkgbases_to_check)
+        for i, pkgbase in enumerate(pkgbases_to_check, 1):
+            logger.info(f"[{i}/{total}] Checking {pkgbase}")
+
             # Find current version from any package with this pkgbase
             current_version = None
             for pkg in self.pkg_db.sol_db.pkgcache:
@@ -1143,7 +1144,11 @@ class Database:
                                 # Past header section, stop parsing
                                 break
                     if pkgver and pkgrel:
-                        new_version = f"{epoch}:{pkgver}-{pkgrel}" if epoch else f"{pkgver}-{pkgrel}"
+                        new_version = (
+                            f"{epoch}:{pkgver}-{pkgrel}"
+                            if epoch
+                            else f"{pkgver}-{pkgrel}"
+                        )
                     else:
                         new_version = None
                 except Exception:
