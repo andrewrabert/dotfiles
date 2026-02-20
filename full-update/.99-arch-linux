@@ -823,6 +823,9 @@ EXPECTED_SERVICES = {
     "systemd-timesyncd.service",
 }
 
+if HOSTNAME in ("mars", "phobos"):
+    EXPECTED_SERVICES.add("plasmalogin.service")
+
 EFI_SHELL_HOSTS = ("mars", "phobos", "lounge-htpc", "sol")
 if HOSTNAME in EFI_SHELL_HOSTS:
     EXPECTED_PACKAGES.add("edk2-shell")
