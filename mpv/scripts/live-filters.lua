@@ -1092,7 +1092,7 @@ function clear_filters()
 	mp.set_property_native("vf", {})
 end
 
-mp.add_key_binding("`", "repl-enable", function()
+mp.add_key_binding("ctrl+`", "repl-enable", function()
 	set_active(true)
 end)
 mp.add_key_binding("ctrl+x", "toggle-filter", toggle)
