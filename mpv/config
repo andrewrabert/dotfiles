@@ -1,4 +1,0 @@
-vo=gpu-next
-gpu-api=vulkan
-gpu-context=waylandvk
-target-colorspace-hint
