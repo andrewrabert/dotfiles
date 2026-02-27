@@ -6,5 +6,5 @@ if command -v uv >/dev/null; then
     uv tool upgrade --all
 
     echo "Updating uv PEP 723 scripts in dotfiles..."
-    uv-update-all "${DOTFILES}/.bin"
+    uv-update-all "${DOTFILES}/.bin" || exit 0
 fi
