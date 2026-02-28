@@ -871,6 +871,7 @@ if HOSTNAME in ("mars", "phobos"):
         {
             "audio",
             "cdemu",
+            "docker",
             "games",  # for proton to automatically set niceness
             #            "realtime",
             "libvirt",
