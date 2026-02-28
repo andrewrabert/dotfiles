@@ -25,6 +25,7 @@ class Config(pydantic.BaseModel):
     autoConnectIde: bool | None = None
     bypassPermissionsModeAccepted: bool | None = None
     editorMode: str | None = None
+    lspRecommendationDisabled: bool | None = None
     theme: str | None = None
     verbose: bool | None = None
 
