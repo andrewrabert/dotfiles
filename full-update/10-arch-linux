@@ -33,6 +33,13 @@ if ! [ -d ~/.config/pacman ] || [ "$(realpath ~/.config/pacman)" != "${DOTFILES}
     ln -sfT "${DOTFILES}/pacman" ~/.config/pacman
 fi
 
+KEY_ID="952DF315E396E06A"
+if ! pacman-key --list-keys "$KEY_ID" > /dev/null 2>&1; then
+    log 'Adding personal GPG key to pacman keyring'
+    sudo pacman-key --add /etc/pacman.d/ar.asc
+    sudo pacman-key --lsign-key "$KEY_ID"
+fi
+
 if ! command -v yay > /dev/null 2>&1; then
     mkdir /tmp/yay-install
     trap 'rm -rf /tmp/yay-install' INT EXIT
@@ -43,13 +50,6 @@ if ! command -v yay > /dev/null 2>&1; then
     makepkg -s --install --noconfirm
     rm -rf /tmp/yay-install
     cd -
-fi
-
-KEY_ID="952DF315E396E06A"
-if ! pacman-key --list-keys "$KEY_ID" > /dev/null 2>&1; then
-    log 'Adding personal GPG key to pacman keyring'
-    sudo pacman-key --add /etc/pacman.d/ar.asc
-    sudo pacman-key --lsign-key "$KEY_ID"
 fi
 
 log 'Updating repository packages'
