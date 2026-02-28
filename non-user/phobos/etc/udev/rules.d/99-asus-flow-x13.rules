@@ -1,8 +1,0 @@
-#nvidia dGPU
-ACTION=="add", SUBSYSTEM=="pci", TEST=="power/control", ATTR{vendor}=="0x10de", ATTR{power/control}="auto"
-
-# keyboard backlight permissions
-ACTION=="add", SUBSYSTEM=="leds", KERNEL=="asus::kbd_backlight", ATTR{brightness}="0", GROUP="video", MODE="0664"
-
-# tablet switch
-SUBSYSTEM=="input", ENV{ID_PATH}=="platform-asus-nb-wmi", GROUP="input", MODE="0664"

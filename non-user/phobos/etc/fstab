@@ -3,12 +3,8 @@
 
 # <file system> <dir> <type> <options> <dump> <pass>
 # /dev/mapper/root
-UUID=b5da17db-934d-4d6d-bacb-490a22aec780	/         	ext4      	rw,relatime	0 1
+UUID=40cd60da-c85c-48b3-b11c-cf9dd51b38e1	/         	ext4      	rw,relatime	0 1
 
 # /dev/nvme0n1p1
-UUID=2640-B55F      	/boot     	vfat      	rw,relatime,fmask=0022,dmask=0022,codepage=437,iocharset=ascii,shortname=mixed,utf8,errors=remount-ro	0 2
+UUID=7683-FF28      	/boot     	vfat      	rw,relatime,fmask=0022,dmask=0022,codepage=437,iocharset=ascii,shortname=mixed,utf8,errors=remount-ro	0 2
 
-sshfs_sol:/storage /storage fuse.sshfs x-systemd.automount,x-systemd.idle-timeout=60,x-systemd.timeout=60,_netdev,users,exec,idmap=user,allow_other,compression=no,dir_cache=no,reconnect,ServerAliveInterval=5,ServerAliveCountMax=3 0 0
-sshfs_mars:/home/ar /mnt/mars fuse.sshfs x-systemd.automount,x-systemd.idle-timeout=60,x-systemd.timeout=60,_netdev,users,exec,idmap=user,allow_other,compression=no,dir_cache=no,reconnect,ServerAliveInterval=5,ServerAliveCountMax=3 0 0
-
-/swapfile none swap defaults 0 0

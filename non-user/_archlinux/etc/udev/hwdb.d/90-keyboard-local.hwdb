@@ -19,3 +19,8 @@ evdev:name:Asus Keyboard:dmi:bvn*:bvr*:bd*:svnASUSTeKCOMPUTERINC.:pnROGFlowX13GV
  KEYBOARD_KEY_70029=capslock    # escape -> capslock
  KEYBOARD_KEY_ff31007c=f20      # mic-mute -> mic-mute
  KEYBOARD_KEY_ff310038=prog1    # rog button -> program1
+
+# hp zbook g1a
+evdev:atkbd:dmi:bvnHP:bv*:bd*:br*:efr*:svnHP:pnHPZBookUltraG1a14inchMobileWorkstationPC:pvr*:rvn*:rn*:rvr*:cvn*:ct*:cvr:*
+ KEYBOARD_KEY_01=capslock       # escape -> capslock
+ KEYBOARD_KEY_3a=esc          	# capslock -> escape
