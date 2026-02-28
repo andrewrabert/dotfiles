@@ -488,6 +488,7 @@ if HOSTNAME in ("mars", "phobos"):
             "audacity",
             "base16-shell-preview",
             "chromium",
+            "desktop-file-utils",
             "discover",
             "docker",
             "docker-compose",
@@ -839,7 +840,7 @@ if HOSTNAME in ("lounge-htpc"):
             "audio",
             "games",
             "nopasswdlogin",
-            "realtime",
+#            "realtime",
             "video",
             "wheel",
         }
@@ -870,7 +871,7 @@ if HOSTNAME in ("mars", "phobos"):
     EXPECTED_GROUPS["ar"].update(
         {
             "games",  # for proton to automatically set niceness
-            "realtime",
+#            "realtime",
             "libvirt",
             "libvirt-qemu",
             "storage",
