@@ -839,7 +839,7 @@ if HOSTNAME in ("lounge-htpc"):
             "audio",
             "games",
             "nopasswdlogin",
-#            "realtime",
+            #            "realtime",
             "video",
             "wheel",
         }
@@ -869,8 +869,10 @@ if HOSTNAME in ("mars", "phobos"):
     EXPECTED_GROUPS.setdefault("ar", set())
     EXPECTED_GROUPS["ar"].update(
         {
+            "audio",
+            "cdemu",
             "games",  # for proton to automatically set niceness
-#            "realtime",
+            #            "realtime",
             "libvirt",
             "libvirt-qemu",
             "storage",
@@ -1163,7 +1165,6 @@ async def main():
     # TODO: always run as root
     match args.mode:
         case "user":
-
             await ensure_packages()
             await ensure_package_dependencies()
             await ensure_flatpaks()
