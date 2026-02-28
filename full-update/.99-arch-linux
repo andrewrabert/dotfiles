@@ -353,6 +353,8 @@ if HOSTNAME in ("sol", "mars", "phobos"):
             "bind",  # dig
             "binmerge",
             "busybox",
+            "cargo",
+            "rust",
             "cabextract",
             "cdemu-client",
             "crun",
