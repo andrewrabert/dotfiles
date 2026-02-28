@@ -108,7 +108,6 @@ class Pacman:
             "sudo",
             "pacman",
             "-S",
-            "--noconfirm",
             "--needed",
             "--overwrite",
             "*",
@@ -567,7 +566,7 @@ EXPECTED_FLATPAK_SOCKETS = {
 }
 
 VHBA_MODULE_PACKAGE = "vhba-module"
-if HOSTNAME in ("phobos", "sol"):
+if HOSTNAME in ("sol"):
     VHBA_MODULE_PACKAGE = "vhba-module-dkms"
 
 EXPECTED_PACKAGE_DEPENDENCIES = {
@@ -879,11 +878,6 @@ if HOSTNAME in ("mars", "phobos"):
             "wheel",
         }
     )
-    EXPECTED_PACKAGES.update(
-        {
-            "python-pytorch-opt-rocm",
-        }
-    )
 
 if HOSTNAME in ("lounge-htpc", "mars"):
     EXPECTED_PACKAGES.update(
@@ -906,16 +900,6 @@ if HOSTNAME == "mars":
         {
             "digikam",
             "litra",
-        }
-    )
-
-if HOSTNAME == "phobos":
-    EXPECTED_PACKAGES.update(
-        {
-            "linux-flowx13",
-            "linux-flowx13-headers",
-            "plasma-keyboard",
-            "rog-control-center",
         }
     )
 
@@ -1179,12 +1163,13 @@ async def main():
     # TODO: always run as root
     match args.mode:
         case "user":
-            await ensure_users_in_expected_groups()
 
             await ensure_packages()
             await ensure_package_dependencies()
             await ensure_flatpaks()
             await dump_installed_packages()
+
+            await ensure_users_in_expected_groups()
 
             # if HOSTNAME in ("mars", "phobos", "sol"):
             if HOSTNAME in ():
