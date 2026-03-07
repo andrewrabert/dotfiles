@@ -1,0 +1,11 @@
+[Desktop Entry]
+Categories=Network;InstantMessaging;Chat;VideoConference;
+Comment=A Matrix-based instant messaging client
+Exec=/usr/bin/flatpak run --branch=stable --arch=x86_64 --command=/app/bin/element --file-forwarding im.riot.Riot @@u %U @@
+Icon=im.riot.Riot
+Keywords=Matrix;matrix.org;chat;irc;communications;talk;riot;vector;
+MimeType=x-scheme-handler/element;x-scheme-handler/io.element.desktop;
+Name=Element
+StartupWMClass=element
+Type=Application
+X-Flatpak=im.riot.Riot
