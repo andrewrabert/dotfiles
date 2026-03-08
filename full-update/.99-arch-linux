@@ -552,10 +552,12 @@ if HOSTNAME in ("mars", "phobos"):
         {
             "com.bitwarden.desktop",
             "com.bitwig.BitwigStudio",
+            "im.riot.Riot",
             "md.obsidian.Obsidian",
             "org.equeim.Tremotesf",
             "org.fooyin.fooyin",
             "org.prismlauncher.PrismLauncher",
+            "org.signal.Signal",
         }
     )
 
