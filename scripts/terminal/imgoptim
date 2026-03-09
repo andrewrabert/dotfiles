@@ -25,6 +25,7 @@ System commands executed by this script:
 # dependencies = [
 #     "async_executor",
 #     "mozjpeg_lossless_optimization",
+#     "pathspec",
 # ]
 # ///
 """
@@ -36,6 +37,7 @@ import hashlib
 import json
 import os
 import pathlib
+import pathspec
 import shutil
 import signal
 import sqlite3
@@ -1505,9 +1507,9 @@ async def main_optim():
     )
     parser.add_argument("-q", "--quiet", action="store_true")
     parser.add_argument(
-        "--cache",
+        "--no-cache",
         action="store_true",
-        help="skip files already processed with same options",
+        help="disable cache (by default, files already processed are skipped)",
     )
     parser.add_argument(
         "--cache-path",
@@ -1515,19 +1517,59 @@ async def main_optim():
         default=pathlib.Path.home() / ".cache" / "imgoptim.db",
         help="path to cache database (default: ~/.cache/imgoptim.db)",
     )
+    parser.add_argument(
+        "-E",
+        "--exclude",
+        dest="excludes",
+        action="append",
+        default=[],
+        metavar="PATTERN",
+        help="exclude paths matching glob pattern (may be repeated)",
+    )
+    parser.add_argument(
+        "-l",
+        "--list",
+        action="store_true",
+        help="list files that would be optimized and exit",
+    )
+    parser.add_argument(
+        "-I",
+        "--no-ignore",
+        action="store_true",
+        help="do not skip files matched by .gitignore rules",
+    )
     parser.add_argument("paths", metavar="path", nargs="+", type=pathlib.Path)
 
     args = parser.parse_args()
 
+    exclude_spec = None
+    if args.excludes:
+        exclude_spec = pathspec.PathSpec.from_lines("gitwildmatch", args.excludes)
+
+    gitignore_spec = None
+    if not args.no_ignore:
+        lines = []
+        for p in args.paths:
+            root = p if p.is_dir() else p.parent
+            for parent in [root, *root.parents]:
+                gi = parent / ".gitignore"
+                if gi.is_file():
+                    lines.extend(gi.read_text().splitlines())
+        gitignore_spec = pathspec.PathSpec.from_lines("gitwildmatch", lines)
+
     mimetypes = set(_TYPE_TO_MIME[t] for t in (args.types or _DEFAULT_TYPES))
 
     cache = None
-    if args.cache:
+    if not args.no_cache:
         cache = ImageOptimCache(args.cache_path)
 
     executor = async_executor.AsyncExecutor(args.num_procs)
     future_to_file = {}
     for file in all_files(*args.paths):
+        if exclude_spec and exclude_spec.match_file(str(file)):
+            continue
+        if gitignore_spec and gitignore_spec.match_file(str(file)):
+            continue
         try:
             mimetype, options = determine_mime(file)
         except (FileNotFoundError, IsADirectoryError):
@@ -1535,6 +1577,10 @@ async def main_optim():
             continue
 
         if mimetype not in mimetypes:
+            continue
+
+        if args.list:
+            print(file)
             continue
 
         if cache:

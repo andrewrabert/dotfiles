@@ -10,6 +10,10 @@ _imgoptim() {
     '--fast[use fast mode]' \
     '-n[number of parallel jobs]:number:' \
     '(-q --quiet)'{-q,--quiet}'[quiet mode]' \
+    '(-l --list)'{-l,--list}'[list files that would be optimized and exit]' \
+    '*'{-E,--exclude}'[exclude paths matching glob pattern]:pattern:' \
+    '(-I --no-ignore)'{-I,--no-ignore}'[do not skip files matched by .gitignore rules]' \
+    '--no-cache[disable cache]' \
     '*:file:_files'
 }
 
