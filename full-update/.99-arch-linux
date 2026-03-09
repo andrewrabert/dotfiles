@@ -345,6 +345,7 @@ if HOSTNAME in ("sol", "mars", "phobos"):
             "7zip",
             "advancecomp",
             "aria2",
+            "aweber-cli",
             "base",
             "base-devel",
             "bat",
