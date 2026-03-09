@@ -352,9 +352,8 @@ if HOSTNAME in ("sol", "mars", "phobos"):
             "bind",  # dig
             "binmerge",
             "busybox",
-            "cargo",
-            "rust",
             "cabextract",
+            "cargo",
             "cdemu-client",
             "crun",
             "cuetools",
@@ -388,6 +387,7 @@ if HOSTNAME in ("sol", "mars", "phobos"):
             "iw",
             "jpegoptim",
             "jq",
+            "just",
             "less",
             "libva-utils",  # vainfo command
             "libvips",
@@ -425,6 +425,7 @@ if HOSTNAME in ("sol", "mars", "phobos"):
             "ripgrep",
             "rsync",
             "ruff",
+            "rust",
             "rust-analyzer",
             "shellcheck",
             "shntool",
