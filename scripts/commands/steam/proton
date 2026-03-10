@@ -73,6 +73,9 @@ def main():
     parser.add_argument("--use", metavar="VERSION", default="system")
     parser.add_argument("--cd", action="store_true")
     parser.add_argument("--wayland", action="store_true", help="force Wayland mode")
+    parser.add_argument("--gamescope", action="store_true", help="run through gamescope")
+    parser.add_argument("--resolution", metavar="WxH", help="gamescope resolution (e.g. 1920x1080)")
+    parser.add_argument("--fullscreen", action="store_true", help="gamescope fullscreen mode")
     parser.add_argument("args", nargs="*")
 
     args = parser.parse_args()
@@ -126,7 +129,18 @@ def main():
     )
     if args.wayland:
         os.environ.pop("DISPLAY", None)
-    os.execl(*proton_bin, *cmd)
+
+    if args.gamescope or args.resolution or args.fullscreen:
+        gamescope_cmd = ["gamescope"]
+        if args.resolution:
+            w, h = args.resolution.split("x")
+            gamescope_cmd += ["-w", w, "-h", h, "-W", w, "-H", h]
+        if args.fullscreen:
+            gamescope_cmd += ["-f"]
+        gamescope_cmd += ["--"] + [proton_bin[0]] + proton_bin[2:] + cmd
+        os.execvp("gamescope", gamescope_cmd)
+    else:
+        os.execl(*proton_bin, *cmd)
 
 
 if __name__ == "__main__":

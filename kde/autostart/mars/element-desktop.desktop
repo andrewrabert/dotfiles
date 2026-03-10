@@ -1,8 +1,0 @@
-[Desktop Entry]
-Type=Application
-Version=1.0
-Name=element-desktop
-Comment=element-desktopstartup script
-Exec=/usr/bin/element-desktop --hidden
-StartupNotify=false
-Terminal=false

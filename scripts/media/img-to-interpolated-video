@@ -95,10 +95,14 @@ def ffmpeg_frames_to_png(path, target, remove_duplicates=True):
         info = ffprobe(path)
         avg_frame_rate = None
         for stream in info:
+            if stream.get("codec_type") != "video":
+                continue
             avg_frame_rate = stream.get("avg_frame_rate")
             if avg_frame_rate:
                 x, y = avg_frame_rate.split("/")
-                avg_frame_rate = int(x) / int(y)
+                if int(y) != 0:
+                    avg_frame_rate = int(x) / int(y)
+                    break
         args.extend(
             [
                 "-vsync",

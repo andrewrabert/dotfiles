@@ -1,0 +1,13 @@
+[Desktop Entry]
+Categories=Network;InstantMessaging;Chat;
+Comment=Private messaging from your desktop
+Exec=/usr/bin/flatpak run --branch=stable --arch=x86_64 --command=signal-desktop --file-forwarding org.signal.Signal @@u %U @@
+Icon=org.signal.Signal
+MimeType=x-scheme-handler/sgnl;x-scheme-handler/signalcaptcha;
+Name=Signal
+StartupWMClass=signal
+Terminal=false
+Type=Application
+X-Desktop-File-Install-Version=0.28
+X-Flatpak=org.signal.Signal
+X-Flatpak-RenamedFrom=signal-desktop.desktop;
