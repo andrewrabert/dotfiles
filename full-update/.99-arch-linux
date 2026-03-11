@@ -519,7 +519,6 @@ if HOSTNAME in ("mars", "phobos"):
             "mkvalidator",
             "mkvtoolnix-gui",
             "mpv-mpris",
-            "ntfydesktop",
             "nvme-cli",
             "obs-studio",
             "okular",
