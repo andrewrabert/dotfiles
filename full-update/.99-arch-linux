@@ -405,7 +405,6 @@ if HOSTNAME in ("sol", "mars", "phobos"):
             "nmap",
             "nsz",
             "ntfs-3g",
-            "ntfysh",
             "openbsd-netcat",
             "openssh",
             "opus-tools",
