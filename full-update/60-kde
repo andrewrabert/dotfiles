@@ -28,24 +28,11 @@ LOCAL_SHARE = HOME / ".local" / "share"
 
 DOTFILES = pathlib.Path(os.environ["DOTFILES"])
 
-if DOTFILES_PRIVATE := os.environ.get("DOTFILES_PRIVATE", None):
-    DOTFILES_PRIVATE = pathlib.Path(DOTFILES_PRIVATE)
-
 LINKS = {
     LOCAL_SHARE / "icons": DOTFILES / "kde" / "icons",
     LOCAL_SHARE / "applications": DOTFILES / "kde" / "applications",
     LOCAL_SHARE / "kwin": DOTFILES / "kde" / "kwin",
 }
-
-if DOTFILES_PRIVATE is not None:
-    LINKS.update(
-        {
-            LOCAL_SHARE / "kf6" / "searchproviders": DOTFILES_PRIVATE
-            / "kde"
-            / "searchproviders",
-        }
-    )
-
 
 match HOSTNAME:
     case "mars":
