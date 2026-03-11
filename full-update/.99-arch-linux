@@ -536,7 +536,6 @@ if HOSTNAME in ("mars", "phobos"):
             "virt-manager",
             "vlc",
             "vulkan-radeon",  # amdgpu
-            "waydroid",
             "wine",
             "xboxdrv",
             "yay",
