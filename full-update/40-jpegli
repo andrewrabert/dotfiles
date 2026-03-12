@@ -1,0 +1,54 @@
+#!/usr/bin/env sh
+set -eu
+
+[ "$(uname -s)" = 'Darwin' ] || exit 0
+
+REPO_URL='https://github.com/google/jpegli.git'
+INSTALL_DIR="${HOME}/.local/share/jpegli"
+BUILD_DIR="${INSTALL_DIR}/build"
+BIN_DIR="${HOME}/.local/bin"
+BUILT_COMMIT_FILE="${BUILD_DIR}/.built-commit"
+
+cpu_count() {
+    if command -v nproc > /dev/null; then
+        nproc
+    elif sysctl -n hw.logicalcpu > /dev/null 2>&1; then
+        sysctl -n hw.logicalcpu
+    else
+        printf '4'
+    fi
+}
+
+if [ ! -d "${INSTALL_DIR}/.git" ]; then
+    printf 'Cloning jpegli...\n'
+    git clone --depth 1 --recurse-submodules --shallow-submodules \
+        "${REPO_URL}" "${INSTALL_DIR}"
+else
+    REMOTE_COMMIT="$(git -C "${INSTALL_DIR}" ls-remote origin main | cut -f1)"
+    if [ -f "${BUILT_COMMIT_FILE}" ] && [ "${REMOTE_COMMIT}" = "$(cat "${BUILT_COMMIT_FILE}")" ]; then
+        printf 'jpegli: already up to date (%s)\n' "${REMOTE_COMMIT}"
+        exit 0
+    fi
+    printf 'Updating jpegli...\n'
+    git -C "${INSTALL_DIR}" fetch --depth 1 origin main
+    git -C "${INSTALL_DIR}" reset --hard origin/main
+    git -C "${INSTALL_DIR}" submodule update --init --recursive --depth 1
+fi
+
+CURRENT_COMMIT="$(git -C "${INSTALL_DIR}" rev-parse HEAD)"
+
+CMAKE_PREFIX_PATH="$(brew --prefix giflib):$(brew --prefix jpeg-turbo):$(brew --prefix libpng):$(brew --prefix zlib)"
+export CMAKE_PREFIX_PATH
+
+printf 'Building jpegli (%s)...\n' "${CURRENT_COMMIT}"
+mkdir -p "${BUILD_DIR}"
+cmake -S "${INSTALL_DIR}" -B "${BUILD_DIR}" \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DBUILD_TESTING=OFF
+cmake --build "${BUILD_DIR}" -j "$(cpu_count)"
+
+mkdir -p "${BIN_DIR}"
+ln -sf "${BUILD_DIR}/tools/cjpegli" "${BIN_DIR}/cjpegli"
+
+printf '%s\n' "${CURRENT_COMMIT}" > "${BUILT_COMMIT_FILE}"
+printf 'jpegli: built and installed cjpegli (%s)\n' "${CURRENT_COMMIT}"
