@@ -356,6 +356,7 @@ if HOSTNAME in ("sol", "mars", "phobos"):
             "cabextract",
             "cargo",
             "cdemu-client",
+            "clang",  # for clang-format
             "crun",
             "cuetools",
             "curlie",
