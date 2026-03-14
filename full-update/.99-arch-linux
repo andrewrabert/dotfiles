@@ -493,6 +493,7 @@ if HOSTNAME in ("mars", "phobos"):
     EXPECTED_PACKAGES.update(
         {
             "86box",
+            "discimagecreator",
             "amd-ucode",
             "android-tools",
             "ark",
