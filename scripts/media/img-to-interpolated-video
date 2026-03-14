@@ -85,12 +85,13 @@ def ffmpeg_merge(path, target, framerate="30", loops=1):
         tmptarget.replace(target)
 
 
-def ffmpeg_frames_to_png(path, target, remove_duplicates=True):
-    args = [
-        "ffmpeg",
-        "-i",
-        path,
-    ]
+def ffmpeg_frames_to_png(path, target, remove_duplicates=True, ss=None, to=None):
+    args = ["ffmpeg"]
+    if ss is not None:
+        args.extend(["-ss", ss])
+    if to is not None:
+        args.extend(["-to", to])
+    args.extend(["-i", path])
     if remove_duplicates:
         info = ffprobe(path)
         avg_frame_rate = None
@@ -180,6 +181,8 @@ def main():
         choices=["bounce", "cycle", "oneshot"],
         default="oneshot",
     )
+    parser.add_argument("--ss", metavar="TIME", help="start time (ffmpeg -ss)")
+    parser.add_argument("--to", metavar="TIME", help="stop time (ffmpeg -to)")
     parser.add_argument("source", type=pathlib.Path)
     parser.add_argument(
         "-f", "--format", default="mp4", choices=["gif", "mp4", "png"]
@@ -200,7 +203,7 @@ def main():
             source = pathlib.Path(
                 exitstack.enter_context(tempfile.TemporaryDirectory())
             )
-            ffmpeg_frames_to_png(args.source, source)
+            ffmpeg_frames_to_png(args.source, source, ss=args.ss, to=args.to)
         elif args.source.is_dir():
             source = args.source
         else:

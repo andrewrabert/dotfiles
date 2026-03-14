@@ -10,6 +10,8 @@ _img-to-interpolated-video() {
     '(-r --rife-iterations)'{-r,--rife-iterations}'[RIFE iterations (default 0)]:number:' \
     '--rife-model[RIFE model]:model:' \
     '--fps[frames per second (default 30)]:fps:' \
+    '--ss[start time (ffmpeg -ss)]:time:' \
+    '--to[stop time (ffmpeg -to)]:time:' \
     '(-m --mode)'{-m,--mode}'[animation mode]:mode:(bounce cycle oneshot)' \
     '(-f --format)'{-f,--format}'[output format]:format:(gif mp4 png)' \
     ':source:_files'
