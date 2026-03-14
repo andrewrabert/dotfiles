@@ -486,6 +486,7 @@ if HOSTNAME in ("mars", "phobos"):
     EXPECTED_PACKAGES.update(
         {
             "86box",
+            "amd-ucode",
             "android-tools",
             "ark",
             "audacity",
@@ -524,10 +525,12 @@ if HOSTNAME in ("mars", "phobos"):
             "obs-studio",
             "okular",
             "opentoonz",
+            "plasma-keyboard",
             "plasma-login-manager",
             "plasma6-runners-emojirunner",
             "plasma6-runners-markdown-bookmarks",
             "podman",
+            "powertop",
             "print-manager",
             "qt6-doc",
             "rawtherapee",
