@@ -482,11 +482,26 @@ if HOSTNAME in ("mars", "phobos", "lounge-htpc"):
         }
     )
 
+if HOSTNAME in ("phobos"):
+    EXPECTED_PACKAGES.update(
+        {
+            "amd-ucode",
+            "fprintd",
+        }
+    )
+
+if HOSTNAME in ("mars"):
+    EXPECTED_PACKAGES.update(
+        {
+            "amd-ucode",
+            "rife-ncnn-vulkan-bin",
+        }
+    )
+
 if HOSTNAME in ("mars", "phobos"):
     EXPECTED_PACKAGES.update(
         {
             "86box",
-            "amd-ucode",
             "android-tools",
             "ark",
             "audacity",
@@ -496,13 +511,13 @@ if HOSTNAME in ("mars", "phobos"):
             "docker",
             "docker-compose",
             "dolphin",
+            "dosbox-staging",
             "dvd+rw-tools",
             "evtest",
             "extra-cmake-modules",
             "flatpak-builder",
             "flatpak-kcm",
             "foot",
-            "fprintd",
             "ghostty",
             "gifski",
             "gimp",
@@ -536,15 +551,18 @@ if HOSTNAME in ("mars", "phobos"):
             "print-manager",
             "qt6-doc",
             "rawtherapee",
+            "redumper",
             "spectacle",
             "stern",
             "talosctl",
+            "thunderbird",
             "typst",
             "udiskie",
             "virt-manager",
             "vlc",
             "vulkan-radeon",  # amdgpu
             "wine",
+            "wireshark-qt",
             "xboxdrv",
             "yay",
         }
