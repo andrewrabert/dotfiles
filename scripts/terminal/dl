@@ -93,6 +93,8 @@ async def download(url, insecure=False):
             "--split=20",
             "--follow-torrent=false",
         ]
+        if insecure:
+            args.append("--check-certificate=false")
         if filename:
             args.append(f"--out={filename}")
         args.extend(
