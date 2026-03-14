@@ -526,6 +526,7 @@ if HOSTNAME in ("mars", "phobos"):
             "opentoonz",
             "plasma-login-manager",
             "plasma6-runners-emojirunner",
+            "plasma6-runners-markdown-bookmarks",
             "podman",
             "print-manager",
             "qt6-doc",
