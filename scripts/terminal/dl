@@ -71,8 +71,8 @@ def prepare_urls(raw_urls, urls=None, add_prefix=False, insecure=True):
     return urls
 
 
-async def get_filename(url):
-    async with httpx.AsyncClient() as client:
+async def get_filename(url, insecure=False):
+    async with httpx.AsyncClient(verify=not insecure) as client:
         response = await client.head(url, follow_redirects=True)
     try:
         content_disposition = response.headers["content-disposition"]
@@ -84,7 +84,7 @@ async def get_filename(url):
 
 
 async def download(url, insecure=False):
-    filename = await get_filename(url)
+    filename = await get_filename(url, insecure=insecure)
     if shutil.which("aria2c"):
         args = [
             "aria2c",
