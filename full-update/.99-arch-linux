@@ -485,16 +485,7 @@ if HOSTNAME in ("mars", "phobos", "lounge-htpc"):
 if HOSTNAME in ("phobos"):
     EXPECTED_PACKAGES.update(
         {
-            "amd-ucode",
             "fprintd",
-        }
-    )
-
-if HOSTNAME in ("mars"):
-    EXPECTED_PACKAGES.update(
-        {
-            "amd-ucode",
-            "rife-ncnn-vulkan-bin",
         }
     )
 
@@ -502,6 +493,7 @@ if HOSTNAME in ("mars", "phobos"):
     EXPECTED_PACKAGES.update(
         {
             "86box",
+            "amd-ucode",
             "android-tools",
             "ark",
             "audacity",
@@ -518,6 +510,7 @@ if HOSTNAME in ("mars", "phobos"):
             "flatpak-builder",
             "flatpak-kcm",
             "foot",
+            "ghidra",
             "ghostty",
             "gifski",
             "gimp",
@@ -532,6 +525,7 @@ if HOSTNAME in ("mars", "phobos"):
             "krfb",
             "krita",
             "kubectl",
+            "litra",
             "lsdvd",
             "makemkv",
             "meson",
@@ -550,8 +544,10 @@ if HOSTNAME in ("mars", "phobos"):
             "powertop",
             "print-manager",
             "qt6-doc",
+            "radeontop",
             "rawtherapee",
             "redumper",
+            "rife-ncnn-vulkan-bin",
             "spectacle",
             "stern",
             "talosctl",
@@ -927,7 +923,6 @@ if HOSTNAME == "mars":
     EXPECTED_PACKAGES.update(
         {
             "digikam",
-            "litra",
         }
     )
 
