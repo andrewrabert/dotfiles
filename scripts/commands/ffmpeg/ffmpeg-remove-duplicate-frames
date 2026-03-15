@@ -61,8 +61,71 @@ class ffmpeg:
         if proc.returncode != 0:
             raise cls.ProcessError
 
+    @classmethod
+    async def frame_hashes(cls, path):
+        proc = await asyncio.create_subprocess_exec(
+            "ffmpeg",
+            "-i",
+            str(path),
+            "-an",
+            "-f",
+            "framemd5",
+            "-",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        stdout, _ = await proc.communicate()
+        if proc.returncode != 0:
+            raise cls.ProcessError
+        hashes = []
+        for line in stdout.decode().splitlines():
+            if line.startswith("#") or not line.strip():
+                continue
+            hashes.append(line.split(",")[-1].strip())
+        return hashes
 
-async def _process_path(path):
+    @classmethod
+    async def remove_duplicates_above(
+        cls, source, target, avg_frame_rate, max_dupes
+    ):
+        hashes = await cls.frame_hashes(source)
+        drop_ranges = _find_drop_ranges(hashes, max_dupes)
+        if not drop_ranges:
+            return False
+        between_exprs = "+".join(
+            f"between(n,{start},{end})" for start, end in drop_ranges
+        )
+        vf = f"select='not({between_exprs})',setpts=N/{round(avg_frame_rate, 3)}/TB"
+        proc = await asyncio.create_subprocess_exec(
+            "ffmpeg",
+            "-i",
+            str(source),
+            "-vf",
+            vf,
+            str(target),
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        await proc.communicate()
+        if proc.returncode != 0:
+            raise cls.ProcessError
+        return True
+
+
+def _find_drop_ranges(hashes, max_dupes):
+    ranges = []
+    i = 0
+    while i < len(hashes):
+        j = i + 1
+        while j < len(hashes) and hashes[j] == hashes[i]:
+            j += 1
+        if j - i > max_dupes:
+            ranges.append((i + max_dupes, j - 1))
+        i = j
+    return ranges
+
+
+async def _process_path(path, max_dupes):
     info = await ffprobe.stream_info(path)
     print(json.dumps(info, indent=2, sort_keys=True))
 
@@ -83,7 +146,15 @@ async def _process_path(path):
     ) as tmpfile:
         tmpfile = pathlib.Path(tmpfile.name)
         tmpfile.unlink()
-        await ffmpeg.remove_duplicates(path, tmpfile, avg_frame_rate)
+        if max_dupes > 0:
+            changed = await ffmpeg.remove_duplicates_above(
+                path, tmpfile, avg_frame_rate, max_dupes
+            )
+            if not changed:
+                tmpfile.touch()
+                return
+        else:
+            await ffmpeg.remove_duplicates(path, tmpfile, avg_frame_rate)
         tmpfile.replace(path)
         tmpfile.touch()
 
@@ -98,12 +169,20 @@ async def main():
         default=1,
         help="number of parallel jobs (default: %(default)s)",
     )
+    parser.add_argument(
+        "-d",
+        "--max-dupes",
+        metavar="NUM",
+        type=int,
+        default=0,
+        help="allow up to NUM consecutive duplicate frames (default: %(default)s, remove all)",
+    )
     parser.add_argument("path", type=pathlib.Path, nargs="+")
     args = parser.parse_args()
 
     executor = async_executor.AsyncExecutor(args.num_procs)
     for path in args.path:
-        executor.submit(_process_path, path)
+        executor.submit(_process_path, path, args.max_dupes)
 
     async for result in executor:
         result.result()
