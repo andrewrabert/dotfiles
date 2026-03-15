@@ -124,30 +124,6 @@ TITLEBAR_CONFIGS = {
             inactive_bg="#ffffff",
         ),
     ),
-    "Jellyfin": TitlebarConfig(
-        classes=[
-            WindowClass(
-                description="Jellyfin",
-                wmclass="jellyfin-desktop",
-            ),
-            WindowClass(
-                description="Jellyfin",
-                wmclass="org.jellyfin.desktop",
-            ),
-        ],
-        dark=ColorScheme(
-            active_bg="#202020",
-            active_fg=DARK_ACTIVE_FG,
-            inactive_bg="#202020",
-            inactive_fg=DARK_INACTIVE_FG,
-        ),
-        light=ColorScheme(
-            active_bg="#202020",
-            active_fg=DARK_ACTIVE_FG,
-            inactive_bg="#202020",
-            inactive_fg=DARK_INACTIVE_FG,
-        ),
-    ),
     "Krita": TitlebarConfig(
         classes=[
             WindowClass(description="Krita", wmclass="krita"),
