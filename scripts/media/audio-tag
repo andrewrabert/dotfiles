@@ -2,6 +2,7 @@
 # /// script
 # dependencies = [
 #   "pytaglib",
+#   "textual",
 # ]
 # ///
 """Dump and restore music tags to/from JSON file."""
@@ -457,6 +458,251 @@ def cmd_set(args):
     )
 
 
+def cmd_tui(root_path):
+    from textual.app import App, ComposeResult
+    from textual.binding import Binding
+    from textual.containers import Horizontal, Vertical
+    from textual.screen import ModalScreen
+    from textual.widgets import DataTable, Footer, Header, Input, Label
+    from textual import on
+
+    root = pathlib.Path(root_path).absolute()
+    if root.is_file():
+        audio_files = [root]
+        root = root.parent
+    else:
+        audio_files = sorted(
+            [f for f in all_files(root) if is_audio_file(f)],
+            key=lambda f: (str(f.parent), f.name),
+        )
+    if not audio_files:
+        print(f"No audio files found in {root}", file=sys.stderr)
+        sys.exit(1)
+
+    file_tags = {f: sort_tags(get_all_tags(f)) for f in audio_files}
+    modified_files = set()
+    rel_paths = {
+        f: str(f.relative_to(root) if f.is_relative_to(root) else f)
+        for f in audio_files
+    }
+
+    def display_val(val):
+        return val if isinstance(val, str) else "; ".join(val)
+
+    class EditScreen(ModalScreen[str | None]):
+        BINDINGS = [Binding("escape", "cancel", "Cancel")]
+
+        def __init__(self, tag_name, current_value):
+            super().__init__()
+            self.tag_name = tag_name
+            self.current_value = current_value
+
+        def compose(self) -> ComposeResult:
+            with Vertical(id="dialog"):
+                yield Label(f"Edit [b]{self.tag_name}[/b]:")
+                yield Input(value=self.current_value, id="edit-input")
+
+        def on_mount(self) -> None:
+            self.query_one("#edit-input").focus()
+
+        @on(Input.Submitted)
+        def on_submit(self, event: Input.Submitted) -> None:
+            self.dismiss(event.value)
+
+        def action_cancel(self) -> None:
+            self.dismiss(None)
+
+    class AddScreen(ModalScreen[tuple | None]):
+        BINDINGS = [Binding("escape", "cancel", "Cancel")]
+
+        def compose(self) -> ComposeResult:
+            with Vertical(id="dialog"):
+                yield Label("Tag name:")
+                yield Input(id="tag-name")
+                yield Label("Value:")
+                yield Input(id="tag-value")
+
+        def on_mount(self) -> None:
+            self.query_one("#tag-name").focus()
+
+        @on(Input.Submitted, "#tag-name")
+        def on_name_submit(self, event: Input.Submitted) -> None:
+            self.query_one("#tag-value").focus()
+
+        @on(Input.Submitted, "#tag-value")
+        def on_value_submit(self, event: Input.Submitted) -> None:
+            name = self.query_one("#tag-name").value.strip()
+            self.dismiss((name, event.value) if name else None)
+
+        def action_cancel(self) -> None:
+            self.dismiss(None)
+
+    class AudioTagApp(App):
+        CSS = """
+        #panels { height: 1fr; }
+        #file-table { width: 2fr; }
+        #tag-table { width: 3fr; }
+        #dialog {
+            width: 60;
+            max-width: 80%;
+            height: auto;
+            padding: 1 2;
+            border: thick $accent;
+            background: $surface;
+        }
+        EditScreen, AddScreen { align: center middle; }
+        """
+
+        BINDINGS = [
+            Binding("q", "quit", "Quit"),
+            Binding("a", "add_tag", "Add"),
+            Binding("x", "delete_tag", "Delete"),
+            Binding("s", "save", "Save"),
+            Binding("S", "save_all", "Save All", key_display="shift+s"),
+        ]
+
+        def __init__(self):
+            super().__init__()
+            self._tag_keys: list[str] = []
+
+        def compose(self) -> ComposeResult:
+            yield Header(show_clock=False)
+            with Horizontal(id="panels"):
+                yield DataTable(id="file-table", cursor_type="row")
+                yield DataTable(id="tag-table", cursor_type="row")
+            yield Footer()
+
+        def on_mount(self) -> None:
+            self.title = "audio-tag"
+            self.sub_title = str(root)
+
+            ft = self.query_one("#file-table", DataTable)
+            ft.add_column("File", key="file")
+            for i, f in enumerate(audio_files):
+                ft.add_row(f"  {rel_paths[f]}", key=str(i))
+
+            tt = self.query_one("#tag-table", DataTable)
+            tt.add_column("Tag", key="tag")
+            tt.add_column("Value", key="value")
+
+            if audio_files:
+                self._refresh_tags(0)
+
+        def _refresh_tags(self, file_idx: int) -> None:
+            tt = self.query_one("#tag-table", DataTable)
+            tt.clear()
+            if 0 <= file_idx < len(audio_files):
+                f = audio_files[file_idx]
+                tags = file_tags[f]
+                self._tag_keys = list(tags.keys())
+                for tag_name in self._tag_keys:
+                    tt.add_row(tag_name, display_val(tags[tag_name]))
+
+        def _file_idx(self) -> int:
+            return self.query_one("#file-table", DataTable).cursor_row
+
+        def _current_file(self):
+            idx = self._file_idx()
+            return audio_files[idx] if 0 <= idx < len(audio_files) else None
+
+        def _current_tag_name(self) -> str | None:
+            row_idx = self.query_one("#tag-table", DataTable).cursor_row
+            if 0 <= row_idx < len(self._tag_keys):
+                return self._tag_keys[row_idx]
+            return None
+
+        def _mark_modified(self, f) -> None:
+            modified_files.add(f)
+            idx = self._file_idx()
+            ft = self.query_one("#file-table", DataTable)
+            ft.update_cell(str(idx), "file", f"* {rel_paths[f]}")
+            self._refresh_tags(idx)
+
+        def _refresh_file_display(self) -> None:
+            ft = self.query_one("#file-table", DataTable)
+            for i, f in enumerate(audio_files):
+                prefix = "* " if f in modified_files else "  "
+                ft.update_cell(str(i), "file", f"{prefix}{rel_paths[f]}")
+
+        @on(DataTable.RowHighlighted, "#file-table")
+        def file_cursor_moved(self, event: DataTable.RowHighlighted) -> None:
+            self._refresh_tags(event.cursor_row)
+
+        @on(DataTable.RowSelected, "#tag-table")
+        def tag_selected(self, event: DataTable.RowSelected) -> None:
+            f = self._current_file()
+            tag_name = self._current_tag_name()
+            if not f or not tag_name:
+                return
+            original = file_tags[f].get(tag_name, "")
+            was_list = isinstance(original, list)
+            edit_val = display_val(original)
+
+            def on_result(new_val):
+                if new_val is not None and new_val != edit_val:
+                    file_tags[f][tag_name] = (
+                        new_val.split("; ") if was_list else new_val
+                    )
+                    self._mark_modified(f)
+
+            self.push_screen(EditScreen(tag_name, edit_val), on_result)
+
+        def action_add_tag(self) -> None:
+            f = self._current_file()
+            if not f:
+                return
+
+            def on_result(result):
+                if result:
+                    name, value = result
+                    file_tags[f][name.lower()] = value
+                    file_tags[f] = sort_tags(file_tags[f])
+                    self._mark_modified(f)
+
+            self.push_screen(AddScreen(), on_result)
+
+        def action_delete_tag(self) -> None:
+            f = self._current_file()
+            tag_name = self._current_tag_name()
+            if not f or not tag_name or tag_name not in file_tags[f]:
+                return
+            del file_tags[f][tag_name]
+            self._mark_modified(f)
+
+        def action_save(self) -> None:
+            f = self._current_file()
+            if f and f in modified_files:
+                set_all_tags(f, file_tags[f])
+                modified_files.discard(f)
+                idx = self._file_idx()
+                ft = self.query_one("#file-table", DataTable)
+                ft.update_cell(str(idx), "file", f"  {rel_paths[f]}")
+                self.notify(f"Saved {f.name}")
+
+        def action_save_all(self) -> None:
+            count = 0
+            for f in list(modified_files):
+                set_all_tags(f, file_tags[f])
+                count += 1
+            modified_files.clear()
+            self._refresh_file_display()
+            self.notify(f"Saved {count} file{'s' if count != 1 else ''}")
+
+        def action_quit(self) -> None:
+            if modified_files and not getattr(self, "_quit_armed", False):
+                self._quit_armed = True
+                self.notify(
+                    f"{len(modified_files)} unsaved file(s). "
+                    "Press q again to discard.",
+                    severity="warning",
+                )
+                self.set_timer(3, lambda: setattr(self, "_quit_armed", False))
+                return
+            self.exit()
+
+    AudioTagApp().run()
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Dump and restore music tags to/from JSON"
@@ -506,10 +752,24 @@ def main():
         help="Delete tag (can be specified multiple times)",
     )
     parser.add_argument(
+        "-T",
+        "--tui",
+        action="store_true",
+        help="Launch interactive TUI for browsing and editing tags",
+    )
+    parser.add_argument(
         "path", nargs="*", help="Music file(s) or directory for dump/set mode"
     )
 
     args = parser.parse_args()
+
+    if args.tui:
+        if not args.path:
+            parser.error("TUI mode requires a path")
+        if len(args.path) > 1:
+            parser.error("TUI mode accepts only one path")
+        cmd_tui(args.path[0])
+        return
 
     if args.set or args.delete:
         if not args.path:
