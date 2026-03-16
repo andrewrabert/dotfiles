@@ -1,6 +1,12 @@
 #!/usr/bin/env sh
 set -e
 
+if [ "$(uname -s)" = "Darwin" ]; then
+    exit
+fi
+
+# mac (arm) seems to have bugs with heredocs occasionally
+# returning empty
 if ! command -v dash > /dev/null; then
     exit
 fi
