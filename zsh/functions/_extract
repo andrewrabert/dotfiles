@@ -20,6 +20,7 @@ _extract() {
     '-f[force overwrite]' \
     '--rm[remove archive after successful extraction]' \
     '--password[prompt for password]' \
+    '--ignore-errors[continue on extraction errors (leaves temp directories)]' \
     '-n=[number of parallel jobs (default 1)]:' \
     '*:: :_files'
 

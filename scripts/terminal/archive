@@ -2906,10 +2906,21 @@ async def process_archive(cls, volumes, path, paths, password, args):
         print("Extracting", path)
     if args.child:
         dest = _build_extract_dest(path, args.parent, args.child)
-        with tempfile.TemporaryDirectory(
-            dir=dest.parent, prefix=".extract_", suffix=dest.name + ".tmp"
-        ) as tmp:
-            tmp = pathlib.Path(tmp)
+        with contextlib.ExitStack() as stack:
+            if args.ignore_errors:
+                tmp = pathlib.Path(tempfile.mkdtemp(
+                    dir=dest.parent,
+                    prefix=".extract_",
+                    suffix=dest.name + ".tmp",
+                ))
+            else:
+                tmp = pathlib.Path(stack.enter_context(
+                    tempfile.TemporaryDirectory(
+                        dir=dest.parent,
+                        prefix=".extract_",
+                        suffix=dest.name + ".tmp",
+                    )
+                ))
 
             await cls.extract(
                 volumes[0],
@@ -3008,6 +3019,11 @@ async def main_extract():
         "-q", "--quiet", action="store_true", help="suppress non-error output"
     )
     parser.add_argument("--verbose", action="store_true")
+    parser.add_argument(
+        "--ignore-errors",
+        action="store_true",
+        help="continue on extraction errors (leaves temp directories)",
+    )
     parser.add_argument("archive", nargs="+", type=pathlib.Path)
     args = parser.parse_args()
 
@@ -3090,7 +3106,8 @@ async def main_extract():
     if error_paths:
         for path in sorted(error_paths):
             LOGGER.error('Error extracting "%s"', path)
-        sys.exit(1)
+        if not args.ignore_errors:
+            sys.exit(1)
 
 
 if __name__ == "__main__":
