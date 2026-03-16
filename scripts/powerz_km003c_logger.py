@@ -145,7 +145,10 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("-n", "--interval", type=int, default=1)
     parser.add_argument(
-        "-o", "--output", type=pathlib.Path, help="write raw values as JSON to a file"
+        "-o",
+        "--output",
+        type=pathlib.Path,
+        help="write raw values as JSON to a file",
     )
     parser.add_argument("-i", "--input", type=pathlib.Path)
     args = parser.parse_args()
