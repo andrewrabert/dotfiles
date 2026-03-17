@@ -7,6 +7,7 @@ _imgconvert() {
     '(-h --help)'{-h,--help}'[show this help message and exit]' \
     '-n[number of parallel jobs]:number:' \
     '--rm[remove original files]' \
+    '--force[overwrite even if destination is the source file]' \
     '(-f --format)'{-f,--format}'[output format]:format:(bmp jpeg jxl png ppm tiff)' \
     '--fast[use fast mode]' \
     '--jpeg-quality[JPEG quality]:quality:(0 10 20 30 40 50 60 70 80 90 100)' \
@@ -14,6 +15,7 @@ _imgconvert() {
     '(-W --width)'{-W,--width}'[output width in pixels]:width:' \
     '(-H --height)'{-H,--height}'[output height in pixels]:height:' \
     '(-S --scale)'{-S,--scale}'[scale factor (e.g. 2, 50%, 1/2)]:scale:' \
+    '(-K --filter)'{-K,--filter}'[resampling filter]:filter:(nearest linear cubic mitchell lanczos2 lanczos3)' \
     '--resize-mode[resize mode]:mode:(shrink grow stretch)' \
     '*:file:_files'
 }

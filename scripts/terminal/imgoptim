@@ -537,6 +537,14 @@ class InvalidSourceImage(Exception):
         return f"{self.message}: {self.path}"
 
 
+class DestinationIsSourceError(Exception):
+    def __init__(self, path):
+        self.path = path
+
+    def __str__(self):
+        return f"destination is source (use --force to overwrite): {self.path}"
+
+
 _MIME_OPTIM = {
     "image/gif": optimize_gif,
     "image/jpeg": optimize_jpeg,
@@ -763,7 +771,19 @@ async def convert_to_png(source, dest, fast=True):
         raise ProcessError(proc)
 
 
-async def convert_svg_to_png(source, dest, max_w, max_h):
+async def convert_svg_to_png(source, dest, max_w, max_h, scale=None):
+    if shutil.which("chromium") or shutil.which("google-chrome-stable"):
+        return await convert_svg_to_png_chromium(
+            source, dest, max_w, max_h, scale=scale
+        )
+    if scale is not None:
+        svg_w, svg_h = await get_image_dimensions(source)
+        max_w = round(svg_w * scale)
+        max_h = round(svg_h * scale)
+    return await convert_svg_to_png_inkscape(source, dest, max_w, max_h)
+
+
+async def convert_svg_to_png_inkscape(source, dest, max_w, max_h):
     args = [
         "inkscape",
         "--export-type=png",
@@ -781,6 +801,93 @@ async def convert_svg_to_png(source, dest, max_w, max_h):
     await proc.wait()
     if proc.returncode != 0:
         raise ProcessError(proc)
+
+
+async def convert_svg_to_png_chromium(source, dest, max_w, max_h, scale=None):
+    chromium = shutil.which("chromium") or shutil.which("google-chrome-stable")
+    source_url = source.absolute().as_uri()
+
+    # probe: get SVG natural dimensions and viewport offset from Chrome
+    probe_html = (
+        "<!DOCTYPE html><html><head><title>pending</title></head><body>"
+        f'<img src="{source_url}" onload="document.title='
+        "this.naturalWidth+','+this.naturalHeight+','"
+        "+innerWidth+','+innerHeight\">"
+        "</body></html>"
+    )
+
+    with TempPath(
+        dir=dest.parent, prefix=".imgconvert_svg_", suffix=".html"
+    ) as probe_path:
+        probe_path.write_text(probe_html)
+        proc = await asyncio.create_subprocess_exec(
+            chromium,
+            "--headless=new",
+            "--disable-gpu",
+            "--dump-dom",
+            "--virtual-time-budget=5000",
+            "--window-size=1000,1000",
+            probe_path.absolute().as_uri(),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        stdout, _ = await proc.communicate()
+        if proc.returncode != 0:
+            raise ProcessError(proc)
+
+    dom = stdout.decode()
+    title_start = dom.find("<title>") + 7
+    title_end = dom.find("</title>")
+    parts = dom[title_start:title_end].split(",")
+    if len(parts) != 4 or parts[0] == "pending":
+        raise RuntimeError(f"failed to probe SVG dimensions via chromium")
+    nat_w, nat_h = int(parts[0]), int(parts[1])
+    offset_w = 1000 - int(parts[2])
+    offset_h = 1000 - int(parts[3])
+
+    if scale is not None:
+        target_w = round(nat_w * scale)
+        target_h = round(nat_h * scale)
+    elif max_w and max_h:
+        target_w, target_h = max_w, max_h
+    elif max_w:
+        target_w = max_w
+        target_h = round(nat_h * max_w / nat_w)
+    elif max_h:
+        target_h = max_h
+        target_w = round(nat_w * max_h / nat_h)
+    else:
+        target_w, target_h = nat_w, nat_h
+
+    render_html = (
+        "<!DOCTYPE html><html><head>"
+        "<style>*{margin:0;padding:0}html,body{overflow:hidden}"
+        "img{display:block}</style></head>"
+        f'<body><img src="{source_url}" '
+        f'width="{target_w}" height="{target_h}">'
+        "</body></html>"
+    )
+
+    with TempPath(
+        dir=dest.parent, prefix=".imgconvert_svg_", suffix=".html"
+    ) as render_path:
+        render_path.write_text(render_html)
+        args = [
+            chromium,
+            "--headless=new",
+            "--disable-gpu",
+            f"--screenshot={dest}",
+            f"--window-size={target_w + offset_w},{target_h + offset_h}",
+            "--default-background-color=00000000",
+            render_path.absolute().as_uri(),
+        ]
+        proc = await asyncio.create_subprocess_exec(
+            *args,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        await proc.wait()
+        if proc.returncode != 0:
+            raise ProcessError(proc)
 
 
 async def convert_to_jxl(source, dest, fast=False):
@@ -861,12 +968,27 @@ def _needs_resize(img_w, img_h, max_w, max_h, mode):
         return img_w != target_w or img_h != target_h
 
 
-async def resize_to_max_dim(source, dest, width, height, mode):
-    args = ["vips", "thumbnail", source, dest, str(width)]
-    if height is not None:
-        args.append(f"--height={height}")
-    vips_size = {"shrink": "down", "grow": "up", "stretch": "force"}[mode]
-    args.append(f"--size={vips_size}")
+async def resize_to_max_dim(
+    source, dest, width, height, mode, kernel=None, scale=None
+):
+    if kernel is not None:
+        if scale is None:
+            img_w, img_h = await get_image_dimensions(source)
+            scale = width / img_w
+        args = [
+            "vips",
+            "resize",
+            source,
+            dest,
+            str(scale),
+            f"--kernel={kernel}",
+        ]
+    else:
+        args = ["vips", "thumbnail", source, dest, str(width)]
+        if height is not None:
+            args.append(f"--height={height}")
+        vips_size = {"shrink": "down", "grow": "up", "stretch": "force"}[mode]
+        args.append(f"--size={vips_size}")
     proc = await asyncio.create_subprocess_exec(*args)
     await proc.wait()
     if proc.returncode != 0:
@@ -974,7 +1096,9 @@ async def _process_convert(path, source_mimetype, target_mimetype, **options):
     scale = options.get("scale")
     resize_mode = options.get("resize_mode", "shrink")
 
-    if scale is not None:
+    kernel = options.get("kernel")
+
+    if scale is not None and source_mimetype != "image/svg+xml":
         img_w, img_h = await get_image_dimensions(path)
         max_w = round(img_w * scale)
         max_h = round(img_h * scale)
@@ -982,8 +1106,13 @@ async def _process_convert(path, source_mimetype, target_mimetype, **options):
     output_dir = options.get("output_dir")
     output_name = options.get("output_name")
 
+    force = options.get("force", False)
     dest_dir = output_dir or path.parent
     dest = dest_dir / (output_name or name)
+
+    if not force and dest.exists() and dest.samefile(path):
+        raise DestinationIsSourceError(path)
+
     with contextlib.ExitStack() as stack:
         if (max_w or max_h) and source_mimetype not in (
             "application/x-krita",
@@ -1004,6 +1133,8 @@ async def _process_convert(path, source_mimetype, target_mimetype, **options):
                     width=max_w or max_h,
                     height=max_h,
                     mode=resize_mode,
+                    kernel=kernel,
+                    scale=scale,
                 )
                 path = resized
                 source_mimetype = "image/x-portable-pixmap"
@@ -1056,7 +1187,9 @@ async def _process_convert(path, source_mimetype, target_mimetype, **options):
                                 suffix=".png",
                             )
                         )
-                        await convert_svg_to_png(path, png_temp, max_w, max_h)
+                        await convert_svg_to_png(
+                            path, png_temp, max_w, max_h, scale=scale
+                        )
                         png_temp.replace(dest)
                     case "application/x-krita":
                         kra_png = stack.enter_context(
@@ -1374,6 +1507,11 @@ async def main_convert():
     )
     parser.add_argument("--rm", action="store_true")
     parser.add_argument(
+        "--force",
+        action="store_true",
+        help="overwrite even if destination is the source file",
+    )
+    parser.add_argument(
         "-o",
         "--output",
         type=pathlib.Path,
@@ -1385,7 +1523,6 @@ async def main_convert():
         "--format",
         dest="format",
         choices=("bmp", "jpeg", "jxl", "png", "ppm", "tiff"),
-        required=True,
     )
     parser.add_argument("--fast", action="store_true")
     parser.add_argument(
@@ -1432,6 +1569,20 @@ async def main_convert():
         help="scale factor (e.g. 2, 50%%, 1/2)",
     )
     resize_group.add_argument(
+        "-K",
+        "--filter",
+        choices=(
+            "nearest",
+            "linear",
+            "cubic",
+            "mitchell",
+            "lanczos2",
+            "lanczos3",
+        ),
+        default=None,
+        help="resampling filter (default: lanczos3)",
+    )
+    resize_group.add_argument(
         "--resize-mode",
         choices=("shrink", "grow", "stretch"),
         default="shrink",
@@ -1440,6 +1591,16 @@ async def main_convert():
 
     args = parser.parse_args()
 
+    has_resize = (
+        args.width is not None
+        or args.height is not None
+        or args.scale is not None
+        or args.filter is not None
+    )
+    if args.format is None and not has_resize:
+        parser.error(
+            "-f/--format is required when no resize options are given"
+        )
     if args.scale is not None and (
         args.width is not None or args.height is not None
     ):
@@ -1478,13 +1639,18 @@ async def main_convert():
             # broken symlink can cause this
             continue
 
+        target_mimetype = (
+            _TYPE_TO_MIME[args.format] if args.format else mimetype
+        )
         submit_kwargs = dict(
             source_mimetype=mimetype,
-            target_mimetype=_TYPE_TO_MIME[args.format],
+            target_mimetype=target_mimetype,
             max_w=args.width,
             max_h=args.height,
             scale=args.scale,
+            kernel=args.filter,
             resize_mode=args.resize_mode,
+            force=args.force,
         )
         if output is not None:
             submit_kwargs["output_dir"] = output_dir
@@ -1501,7 +1667,7 @@ async def main_convert():
             print(f"error: {e}", file=sys.stderr)
             has_error = True
             continue
-        except InvalidSourceImage as e:
+        except (InvalidSourceImage, DestinationIsSourceError) as e:
             print(f"error: {e}", file=sys.stderr)
             has_error = True
             continue
