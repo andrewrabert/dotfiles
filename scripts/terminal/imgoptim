@@ -37,7 +37,6 @@ import hashlib
 import json
 import os
 import pathlib
-import pathspec
 import shutil
 import signal
 import sqlite3
@@ -47,6 +46,7 @@ import types
 
 import async_executor
 import mozjpeg_lossless_optimization
+import pathspec
 
 CONFIG = types.SimpleNamespace(
     jpeg=types.SimpleNamespace(
@@ -971,7 +971,14 @@ async def _process_convert(path, source_mimetype, target_mimetype, **options):
     original_path = path
     max_w = options.get("max_w")
     max_h = options.get("max_h")
+    scale = options.get("scale")
     resize_mode = options.get("resize_mode", "shrink")
+
+    if scale is not None:
+        img_w, img_h = await get_image_dimensions(path)
+        max_w = round(img_w * scale)
+        max_h = round(img_h * scale)
+        resize_mode = "stretch"
     output_dir = options.get("output_dir")
     output_name = options.get("output_name")
 
@@ -1042,8 +1049,6 @@ async def _process_convert(path, source_mimetype, target_mimetype, **options):
             case "image/png":
                 match source_mimetype:
                     case "image/svg+xml":
-                        max_w = options.get("max_w")
-                        max_h = options.get("max_h")
                         png_temp = stack.enter_context(
                             TempPath(
                                 dir=dest_dir,
@@ -1255,6 +1260,19 @@ def _positive_int(value):
     return v
 
 
+def _scale_factor(value):
+    if value.endswith("%"):
+        v = float(value[:-1]) / 100
+    elif "/" in value:
+        num, den = value.split("/", 1)
+        v = float(num) / float(den)
+    else:
+        v = float(value)
+    if v <= 0:
+        raise argparse.ArgumentTypeError("must be positive")
+    return v
+
+
 async def sha256sum(pipe):
     proc = await asyncio.create_subprocess_exec(
         "sha256sum", stdin=pipe, stdout=asyncio.subprocess.PIPE
@@ -1407,6 +1425,13 @@ async def main_convert():
         help="output height in pixels",
     )
     resize_group.add_argument(
+        "-S",
+        "--scale",
+        type=_scale_factor,
+        default=None,
+        help="scale factor (e.g. 2, 50%%, 1/2)",
+    )
+    resize_group.add_argument(
         "--resize-mode",
         choices=("shrink", "grow", "stretch"),
         default="shrink",
@@ -1414,6 +1439,11 @@ async def main_convert():
     )
 
     args = parser.parse_args()
+
+    if args.scale is not None and (
+        args.width is not None or args.height is not None
+    ):
+        parser.error("--scale cannot be used with --width or --height")
 
     output = args.output
     if output is not None:
@@ -1453,6 +1483,7 @@ async def main_convert():
             target_mimetype=_TYPE_TO_MIME[args.format],
             max_w=args.width,
             max_h=args.height,
+            scale=args.scale,
             resize_mode=args.resize_mode,
         )
         if output is not None:
@@ -1544,7 +1575,9 @@ async def main_optim():
 
     exclude_spec = None
     if args.excludes:
-        exclude_spec = pathspec.PathSpec.from_lines("gitwildmatch", args.excludes)
+        exclude_spec = pathspec.PathSpec.from_lines(
+            "gitwildmatch", args.excludes
+        )
 
     gitignore_spec = None
     if not args.no_ignore:

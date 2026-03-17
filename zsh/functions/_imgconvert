@@ -11,6 +11,10 @@ _imgconvert() {
     '--fast[use fast mode]' \
     '--jpeg-quality[JPEG quality]:quality:(0 10 20 30 40 50 60 70 80 90 100)' \
     '--jxl-lossy[use lossy JXL compression]' \
+    '(-W --width)'{-W,--width}'[output width in pixels]:width:' \
+    '(-H --height)'{-H,--height}'[output height in pixels]:height:' \
+    '(-S --scale)'{-S,--scale}'[scale factor (e.g. 2, 50%, 1/2)]:scale:' \
+    '--resize-mode[resize mode]:mode:(shrink grow stretch)' \
     '*:file:_files'
 }
 

@@ -1,0 +1,107 @@
+#!/usr/bin/env python3
+import argparse
+import asyncio
+import os
+import pathlib
+import sys
+
+
+class UserError(Exception):
+    pass
+
+
+class ProcessError(Exception):
+    def __init__(self, process, message=None):
+        self.process = process
+        self.message = message
+
+    def __str__(self):
+        text = f"exit {self.process.returncode}"
+        if self.message:
+            text = f"{text} - {self.message}"
+        return text
+
+
+def abspath(p, expand_tilde=True):
+    s = str(p)
+    if expand_tilde and s.startswith("~"):
+        s = os.path.expanduser(s)
+    p = pathlib.PurePosixPath(s)
+    if not p.is_absolute():
+        p = pathlib.PurePosixPath(os.environ.get("PWD", os.getcwd())) / p
+    # Normalize . and .. without resolving symlinks
+    parts = []
+    for part in p.parts:
+        if part == ".":
+            continue
+        elif part == ".." and len(parts) > 1:
+            parts.pop()
+        else:
+            parts.append(part)
+    result = (
+        pathlib.PurePosixPath(*parts) if parts else pathlib.PurePosixPath("/")
+    )
+    if not pathlib.Path(result).exists():
+        raise UserError(f"no such file or directory: {s}")
+    return str(result)
+
+
+async def cbcopy(text):
+    proc = await asyncio.create_subprocess_exec(
+        "cbcopy",
+        stdin=asyncio.subprocess.PIPE,
+    )
+    await proc.communicate(text.encode())
+    if proc.returncode:
+        raise ProcessError(proc)
+
+
+async def main():
+    parser = argparse.ArgumentParser(
+        description="Output the absolute path of each path without resolving symlinks.",
+    )
+    parser.add_argument("paths", nargs="*", metavar="path")
+    parser.add_argument(
+        "-0",
+        "--null",
+        action="store_true",
+        help="read stdin as null-delimited",
+    )
+    parser.add_argument(
+        "--no-tilde", action="store_true", help="do not expand ~ in paths"
+    )
+    args = parser.parse_args()
+
+    expand_tilde = not args.no_tilde
+    all_paths = list(args.paths)
+
+    if not sys.stdin.isatty():
+        stdin_data = sys.stdin.read()
+        if args.null:
+            entries = stdin_data.split("\0")
+        else:
+            entries = stdin_data.splitlines()
+        all_paths.extend(e for e in entries if e)
+
+    errors = False
+    results = []
+    for p in all_paths:
+        try:
+            results.append(abspath(p, expand_tilde=expand_tilde))
+        except UserError as e:
+            print(f"error: {e}", file=sys.stderr)
+            errors = True
+
+    if results:
+        output = "\n".join(results)
+        print(output)
+        try:
+            await cbcopy(output)
+        except (ProcessError, OSError):
+            pass
+
+    return 1 if errors else 0
+
+
+if __name__ == "__main__":
+    sys.exit(asyncio.run(main()))
