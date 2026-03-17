@@ -807,12 +807,11 @@ async def convert_svg_to_png_chromium(source, dest, max_w, max_h, scale=None):
     chromium = shutil.which("chromium") or shutil.which("google-chrome-stable")
     source_url = source.absolute().as_uri()
 
-    # probe: get SVG natural dimensions and viewport offset from Chrome
+    # probe: get SVG natural dimensions as Chrome sees them
     probe_html = (
         "<!DOCTYPE html><html><head><title>pending</title></head><body>"
         f'<img src="{source_url}" onload="document.title='
-        "this.naturalWidth+','+this.naturalHeight+','"
-        "+innerWidth+','+innerHeight\">"
+        "this.naturalWidth+','+this.naturalHeight\">"
         "</body></html>"
     )
 
@@ -826,7 +825,6 @@ async def convert_svg_to_png_chromium(source, dest, max_w, max_h, scale=None):
             "--disable-gpu",
             "--dump-dom",
             "--virtual-time-budget=5000",
-            "--window-size=1000,1000",
             probe_path.absolute().as_uri(),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
@@ -839,11 +837,9 @@ async def convert_svg_to_png_chromium(source, dest, max_w, max_h, scale=None):
     title_start = dom.find("<title>") + 7
     title_end = dom.find("</title>")
     parts = dom[title_start:title_end].split(",")
-    if len(parts) != 4 or parts[0] == "pending":
-        raise RuntimeError(f"failed to probe SVG dimensions via chromium")
+    if len(parts) != 2 or parts[0] == "pending":
+        raise RuntimeError("failed to probe SVG dimensions via chromium")
     nat_w, nat_h = int(parts[0]), int(parts[1])
-    offset_w = 1000 - int(parts[2])
-    offset_h = 1000 - int(parts[3])
 
     if scale is not None:
         target_w = round(nat_w * scale)
@@ -859,10 +855,13 @@ async def convert_svg_to_png_chromium(source, dest, max_w, max_h, scale=None):
     else:
         target_w, target_h = nat_w, nat_h
 
+    border = 1
+    expected_w = target_w + border * 2
+    expected_h = target_h + border * 2
     render_html = (
         "<!DOCTYPE html><html><head>"
         "<style>*{margin:0;padding:0}html,body{overflow:hidden}"
-        "img{display:block}</style></head>"
+        f"img{{display:block;border:{border}px solid #ff00ff}}</style></head>"
         f'<body><img src="{source_url}" '
         f'width="{target_w}" height="{target_h}">'
         "</body></html>"
@@ -870,20 +869,56 @@ async def convert_svg_to_png_chromium(source, dest, max_w, max_h, scale=None):
 
     with TempPath(
         dir=dest.parent, prefix=".imgconvert_svg_", suffix=".html"
-    ) as render_path:
+    ) as render_path, TempPath(
+        dir=dest.parent, prefix=".imgconvert_svg_", suffix=".png"
+    ) as screenshot:
         render_path.write_text(render_html)
-        args = [
-            chromium,
-            "--headless=new",
-            "--disable-gpu",
-            f"--screenshot={dest}",
-            f"--window-size={target_w + offset_w},{target_h + offset_h}",
-            "--default-background-color=00000000",
-            render_path.absolute().as_uri(),
-        ]
+        win_w = expected_w
+        win_h = expected_h
+
+        for _ in range(2):
+            args = [
+                chromium,
+                "--headless=new",
+                "--disable-gpu",
+                f"--screenshot={screenshot}",
+                f"--window-size={win_w},{win_h}",
+                "--default-background-color=00000000",
+                render_path.absolute().as_uri(),
+            ]
+            proc = await asyncio.create_subprocess_exec(
+                *args,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            await proc.wait()
+            if proc.returncode != 0:
+                raise ProcessError(proc)
+
+            # find the border bounding box in the screenshot
+            proc = await asyncio.create_subprocess_exec(
+                "magick", "identify", "-format", "%@", screenshot,
+                stdout=asyncio.subprocess.PIPE,
+            )
+            stdout, _ = await proc.communicate()
+            if proc.returncode != 0:
+                raise ProcessError(proc)
+            geom = stdout.decode().strip()
+            wh, xy = geom.split("+", 1)
+            box_w, box_h = (int(v) for v in wh.split("x"))
+            box_x, box_y = (int(v) for v in xy.split("+"))
+
+            if box_w >= expected_w and box_h >= expected_h:
+                break
+
+            # border was clipped — compensate by the exact deficit
+            win_w += expected_w - box_w
+            win_h += expected_h - box_h
+
+        # content is inside the border
         proc = await asyncio.create_subprocess_exec(
-            *args,
-            stderr=asyncio.subprocess.DEVNULL,
+            "vips", "crop", screenshot, dest,
+            str(box_x + border), str(box_y + border),
+            str(target_w), str(target_h),
         )
         await proc.wait()
         if proc.returncode != 0:
