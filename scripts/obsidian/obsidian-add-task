@@ -1,0 +1,92 @@
+#!/usr/bin/env python3
+import curses
+import datetime
+import os
+import pathlib
+import re
+import sys
+
+os.environ.setdefault("ESCDELAY", "25")
+
+NOTES_DIR = pathlib.Path(os.environ.get("NOTES_DIR", pathlib.Path.home() / "src" / "notes"))
+
+
+def daily_path(today):
+    return NOTES_DIR / "Daily" / str(today.year) / f"{today.year}-{today.month:02d}" / str(today) / f"{today}.md"
+
+
+def ensure_daily_note(path, today):
+    if path.exists():
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    template = NOTES_DIR / "Templates" / "Daily Note.md"
+    if template.exists():
+        content = re.sub(r"\{\{date:YYYY-MM-DD\}\}", str(today), template.read_text())
+    else:
+        content = f"# {today}\n\n## Journal\n-\n\n## Tasks\n- [ ]\n"
+    path.write_text(content)
+
+
+def add_task(task):
+    today = datetime.date.today()
+    path = daily_path(today)
+    ensure_daily_note(path, today)
+    lines = path.read_text().splitlines()
+    while lines and (not lines[-1].strip() or lines[-1].strip() in ("- [ ]", "- []")):
+        lines.pop()
+    lines.append(f"- [ ] {task}")
+    path.write_text("\n".join(lines) + "\n")
+
+
+def prompt_once(stdscr):
+    curses.curs_set(1)
+    stdscr.addstr(0, 0, "Task: ")
+    stdscr.refresh()
+
+    buf = []
+    while True:
+        ch = stdscr.get_wch()
+        if ch == "\x1b":
+            return
+        if ch in ("\n", "\r"):
+            task = "".join(buf).strip()
+            if task:
+                stdscr.clear()
+                stdscr.addstr(0, 0, "Adding...")
+                stdscr.refresh()
+                add_task(task)
+            return
+        if ch in ("\x7f", "\b", curses.KEY_BACKSPACE):
+            if buf:
+                buf.pop()
+                y, x = stdscr.getyx()
+                stdscr.move(y, x - 1)
+                stdscr.clrtoeol()
+            continue
+        if ch == "\x15":
+            buf.clear()
+            stdscr.move(0, 6)
+            stdscr.clrtoeol()
+            continue
+        if isinstance(ch, str) and ch.isprintable():
+            buf.append(ch)
+            stdscr.addstr(ch)
+            stdscr.refresh()
+
+
+def main():
+    if sys.argv[1:] == ["--prompt"]:
+        curses.wrapper(prompt_once)
+        return
+
+    tasks = [t for arg in sys.argv[1:] if (t := arg.strip())]
+    if not tasks:
+        print("usage: obsidian-add-task [--prompt] <task> [task ...]", file=sys.stderr)
+        sys.exit(1)
+
+    for task in tasks:
+        add_task(task)
+
+
+if __name__ == "__main__":
+    main()
