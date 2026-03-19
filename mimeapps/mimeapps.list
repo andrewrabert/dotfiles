@@ -8,6 +8,10 @@ text/plain=nvim.desktop;
 text/x-cmake=nvim.desktop;
 x-scheme-handler/http=firefox.desktop;chromium.desktop;
 x-scheme-handler/https=firefox.desktop;chromium.desktop;
+x-scheme-handler/mailto=userapp-Thunderbird-U5R3L3.desktop;
+x-scheme-handler/mid=userapp-Thunderbird-U5R3L3.desktop;
+x-scheme-handler/webcal=userapp-Thunderbird-AUY3L3.desktop;
+x-scheme-handler/webcals=userapp-Thunderbird-AUY3L3.desktop;
 
 [Default Applications]
 application/epub+zip=com.github.johnfactotum.Foliate.desktop
@@ -86,3 +90,10 @@ x-scheme-handler/signalcaptcha=signal.desktop
 x-scheme-handler/slack=slack.desktop
 x-scheme-handler/terminal=foot.desktop
 x-scheme-handler/unknown=firefox.desktop
+x-scheme-handler/mailto=userapp-Thunderbird-U5R3L3.desktop
+message/rfc822=userapp-Thunderbird-U5R3L3.desktop
+x-scheme-handler/mid=userapp-Thunderbird-U5R3L3.desktop
+x-scheme-handler/webcal=userapp-Thunderbird-AUY3L3.desktop
+text/calendar=userapp-Thunderbird-AUY3L3.desktop
+application/x-extension-ics=userapp-Thunderbird-AUY3L3.desktop
+x-scheme-handler/webcals=userapp-Thunderbird-AUY3L3.desktop
