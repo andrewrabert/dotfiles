@@ -1,0 +1,9 @@
+#!/usr/bin/env sh
+SCRATCH_DIR=~/.local/share/claude-scratch
+mkdir -p "${CLAUDE_SCRATCH}"
+cd "${CLAUDE_SCRATCH}" || exit 1
+if command -v claude-bwrap > /dev/null; then
+    exec claude-bwrap "$@"
+else
+    exec claude "$@"
+fi
