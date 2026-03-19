@@ -151,7 +151,7 @@ fn build_script(
         }
 
         if do_center {
-            script.push_str("var x=(sw-w)/2,y=(sh-h)/2;");
+            script.push_str("var x=scr.geometry.x+(sw-w)/2,y=scr.geometry.y+(sh-h)/2;");
         } else {
             script.push_str("var x=c.frameGeometry.x,y=c.frameGeometry.y;");
         }
