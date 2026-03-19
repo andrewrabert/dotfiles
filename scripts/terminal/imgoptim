@@ -1403,6 +1403,21 @@ class SizeDiffPrinter:
                 print("Total: -")
 
 
+def find_default_cache_path(paths):
+    resolved = []
+    for p in paths:
+        p = p.absolute()
+        resolved.append(p if p.is_dir() else p.parent)
+
+    common = pathlib.Path(os.path.commonpath(resolved))
+    for parent in [common, *common.parents]:
+        candidate = parent / "imgoptim.db"
+        if candidate.is_file():
+            return candidate
+
+    return pathlib.Path.home() / ".cache" / "imgoptim.db"
+
+
 def _num_procs(value):
     value = int(value)
     if value == 0:
@@ -1752,8 +1767,8 @@ async def main_optim():
     parser.add_argument(
         "--cache-path",
         type=pathlib.Path,
-        default=pathlib.Path.home() / ".cache" / "imgoptim.db",
-        help="path to cache database (default: ~/.cache/imgoptim.db)",
+        default=None,
+        help="path to cache database (default: walk up from input paths looking for imgoptim.db, then ~/.cache/imgoptim.db)",
     )
     parser.add_argument(
         "-E",
@@ -1801,7 +1816,8 @@ async def main_optim():
 
     cache = None
     if not args.no_cache:
-        cache = ImageOptimCache(args.cache_path)
+        cache_path = args.cache_path or find_default_cache_path(args.paths)
+        cache = ImageOptimCache(cache_path)
 
     executor = async_executor.AsyncExecutor(args.num_procs)
     future_to_file = {}
