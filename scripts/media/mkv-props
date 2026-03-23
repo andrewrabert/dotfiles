@@ -2,11 +2,24 @@
 """Edit MKV properties interactively via $EDITOR."""
 
 import asyncio
+import enum
 import json
 import os
 import pathlib
+import re
 import sys
 import tempfile
+
+
+class FieldOrder(enum.IntEnum):
+    """mkvmerge --field-order TID:n"""
+
+    interlaced_progressive = 0
+    interlaced_tff = 1
+    interlaced_undetermined = 2
+    interlaced_bff = 6
+    interlaced_bff_stored_tff = 9
+    interlaced_tff_stored_bff = 14
 
 
 class ProcessError(Exception):
@@ -35,6 +48,30 @@ async def mkvmerge_identify(path):
     return json.loads(stdout)
 
 
+async def mkvinfo_interlaced(path):
+    """Get interlaced flag per track ID from mkvinfo output."""
+    proc = await asyncio.create_subprocess_exec(
+        "mkvinfo",
+        str(path),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await proc.communicate()
+    flags = {}
+    track_id = None
+    for line in stdout.decode().splitlines():
+        m = re.search(
+            r"Track number: \d+ \(track ID for mkvmerge & mkvextract: (\d+)\)",
+            line,
+        )
+        if m:
+            track_id = int(m.group(1))
+        m = re.search(r"Interlaced: (\d+)", line)
+        if m and track_id is not None:
+            flags[track_id] = int(m.group(1))
+    return flags
+
+
 async def mkvpropedit(path, actions):
     args = ["mkvpropedit"]
     for action in actions:
@@ -59,7 +96,7 @@ async def mkvpropedit(path, actions):
         raise ProcessError(proc, msg)
 
 
-def extract_props(info):
+def extract_props(info, interlaced_flags):
     """Extract editable properties from mkvmerge identify output."""
     props = {
         "title": info.get("container", {}).get("properties", {}).get("title")
@@ -75,7 +112,12 @@ def extract_props(info):
             "name": tp.get("track_name"),
         }
         if track["type"] == "video":
-            entry["interlaced"] = tp.get("flag_interlacing")
+            raw = interlaced_flags.get(track["id"])
+            if raw is not None:
+                try:
+                    entry["field_order"] = FieldOrder(raw).name
+                except ValueError:
+                    entry["field_order"] = raw
         props["tracks"].append(entry)
     return props
 
@@ -101,8 +143,12 @@ def build_actions(old, new):
             changed["language"] = new_track.get("language")
         if old_track.get("name") != new_track.get("name"):
             changed["name"] = new_track.get("name")
-        if old_track.get("interlaced") != new_track.get("interlaced"):
-            changed["flag-interlacing"] = new_track.get("interlaced")
+        if old_track.get("field_order") != new_track.get("field_order"):
+            val = new_track.get("field_order")
+            try:
+                changed["interlaced"] = FieldOrder[val].value
+            except KeyError:
+                changed["interlaced"] = val
         if changed:
             actions.append(
                 {"selector": f"track:{tid + 1}", "properties": changed}
@@ -123,8 +169,10 @@ async def main():
 
     all_props = {}
     for path in paths:
-        info = await mkvmerge_identify(path)
-        all_props[str(path)] = extract_props(info)
+        info, interlaced_flags = await asyncio.gather(
+            mkvmerge_identify(path), mkvinfo_interlaced(path)
+        )
+        all_props[str(path)] = extract_props(info, interlaced_flags)
 
     with tempfile.NamedTemporaryFile(
         mode="w",
