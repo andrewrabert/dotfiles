@@ -442,6 +442,7 @@ if HOSTNAME in ("sol", "mars", "phobos"):
             "tmux",
             "traceroute",
             "transmission-cli",
+            "tree-sitter-cli",  # for neovim plugins
             "typescript-language-server",
             "unace",
             "unrar",
