@@ -67,15 +67,16 @@ def extract_props(info):
     props["tracks"] = []
     for track in info.get("tracks", []):
         tp = track.get("properties", {})
-        props["tracks"].append(
-            {
-                "id": track["id"],
-                "type": track["type"],
-                "codec": track.get("codec"),
-                "language": tp.get("language"),
-                "name": tp.get("track_name"),
-            }
-        )
+        entry = {
+            "id": track["id"],
+            "type": track["type"],
+            "codec": track.get("codec"),
+            "language": tp.get("language"),
+            "name": tp.get("track_name"),
+        }
+        if track["type"] == "video":
+            entry["interlaced"] = tp.get("flag_interlacing")
+        props["tracks"].append(entry)
     return props
 
 
@@ -100,6 +101,8 @@ def build_actions(old, new):
             changed["language"] = new_track.get("language")
         if old_track.get("name") != new_track.get("name"):
             changed["name"] = new_track.get("name")
+        if old_track.get("interlaced") != new_track.get("interlaced"):
+            changed["flag-interlacing"] = new_track.get("interlaced")
         if changed:
             actions.append(
                 {"selector": f"track:{tid + 1}", "properties": changed}

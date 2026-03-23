@@ -9,6 +9,7 @@ import argparse
 import asyncio
 import contextlib
 import json
+import logging
 import os
 import pathlib
 import shutil
@@ -18,6 +19,8 @@ import typing
 
 import pydantic
 import yaml
+
+log = logging.getLogger(__name__)
 
 
 class Config(pydantic.BaseModel):
@@ -568,6 +571,13 @@ def parse_args():
     parser = argparse.ArgumentParser(
         description="Manage Claude Code marketplaces and plugins."
     )
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="count",
+        default=0,
+        help="Increase verbosity (-v for info, -vv for debug)",
+    )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     # apply subcommand
@@ -904,10 +914,11 @@ async def cmd_update(cfg):
     # Update all marketplaces
     known = cfg.load_known_marketplaces()
     for name in sorted(known, key=str.lower):
+        log.info("marketplace: %s", name)
         try:
             await ClaudeCLI.marketplace_update(name)
         except CLIError as e:
-            print(f"error: {e}", file=sys.stderr)
+            log.error("%s", e)
             err_count += 1
 
     # Update all installed plugins
@@ -915,11 +926,12 @@ async def cmd_update(cfg):
     plugin_refs = sorted(installed.plugins.keys(), key=str.lower)
     for plugin_ref_str in plugin_refs:
         ref = PluginRef.parse(plugin_ref_str)
+        log.info("plugin: %s", ref)
         try:
             force = cfg.is_local_marketplace(ref.marketplace)
             await update_plugin(cfg, ref.marketplace, ref.plugin, force)
         except CLIError as e:
-            print(f"error: {e}", file=sys.stderr)
+            log.error("%s", e)
             err_count += 1
 
     print(f"{len(known)} marketplaces, {len(plugin_refs)} plugins, {err_count} errors")
@@ -929,6 +941,8 @@ async def cmd_update(cfg):
 async def main():
     """Main entry point."""
     args = parse_args()
+    level = {0: logging.WARNING, 1: logging.INFO}.get(args.verbose, logging.DEBUG)
+    logging.basicConfig(format="%(message)s", level=level)
     config = ClaudeConfig()
 
     match args.command:
