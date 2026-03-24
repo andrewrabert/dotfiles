@@ -3,7 +3,10 @@ if ! command -v flatpak > /dev/null; then
     exit
 fi
 
-flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
-flatpak update --user --assumeyes
-# flatpak repair --user
-flatpak uninstall --unused --user --assumeyes
+for install_type in --user --system; do
+    printf 'flatak: %s\n' "$install_type"
+    flatpak remote-add $install_type --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+    flatpak update $install_type --assumeyes
+    # flatpak repair --user
+    flatpak uninstall --unused $install_type --assumeyes
+done
