@@ -959,8 +959,8 @@ class Database:
             return None
 
         # Parse the version from PKGBUILD
-        # Source the PKGBUILD and extract pkgver and pkgrel
-        bash_cmd = "source PKGBUILD && echo ${pkgver}-${pkgrel}"
+        # Source the PKGBUILD and extract epoch, pkgver and pkgrel
+        bash_cmd = 'source PKGBUILD && if [ -n "$epoch" ]; then echo ${epoch}:${pkgver}-${pkgrel}; else echo ${pkgver}-${pkgrel}; fi'
         version_result = await run_cmd(
             "bash", "-c", bash_cmd, cwd=str(pkg_dir), capture_output=True
         )
