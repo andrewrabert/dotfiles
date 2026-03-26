@@ -1,0 +1,16 @@
+#!/usr/bin/env sh
+set -eu
+
+pane_id="$1"
+title="${2:-}"
+window_id=$(tmux display-message -t "$pane_id" -p '#{window_id}')
+
+if [ -n "$title" ]; then
+    tmux set-option -p -t "$pane_id" @pane_label "$title"
+    tmux set-option -w -t "$window_id" pane-border-status top
+else
+    tmux set-option -up -t "$pane_id" @pane_label
+    if ! tmux list-panes -t "$window_id" -F '#{@pane_label}' | grep -q .; then
+        tmux set-option -w -t "$window_id" pane-border-status off
+    fi
+fi

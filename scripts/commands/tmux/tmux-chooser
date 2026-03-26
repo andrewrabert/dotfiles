@@ -1,0 +1,23 @@
+#!/usr/bin/env sh
+set -eu
+
+selection=$(
+    {
+        tmux list-windows -F '#I#{?@renamed,:#W,}'
+        tmux list-panes -s -F '#{?@pane_label,#I.#P:#{@pane_label},}' | grep . || true
+    } | fzf --reverse
+) || exit 0
+
+case "$selection" in
+    *.*)
+        target="${selection%%:*}"
+        window="${target%%.*}"
+        pane="${target##*.}"
+        tmux select-window -t ":$window"
+        tmux select-pane -t ":.${pane}"
+        ;;
+    *)
+        window="${selection%%:*}"
+        tmux select-window -t ":$window"
+        ;;
+esac
