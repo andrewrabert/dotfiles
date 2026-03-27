@@ -705,14 +705,14 @@ EXPECTED_PACKAGE_DEPENDENCIES = {
         "drkonqi",
     },
     "krita": {
-        "kimageformats5",
+        "kimageformats",
         "krita-plugin-gmic",
         "kseexpr",
         "libheif",
         "libjxl",
         "libmypaint",
-        "poppler-qt5",
-        "python-pyqt5",
+        "poppler-qt6",
+        "python-pyqt6",
     },
     "lutris": {
         "fluidsynth",
