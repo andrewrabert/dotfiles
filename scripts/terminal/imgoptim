@@ -1321,6 +1321,18 @@ async def _process_convert(path, source_mimetype, target_mimetype, **options):
                 temp_path.replace(dest)
             case "image/jpeg":
                 match source_mimetype:
+                    case "image/svg+xml":
+                        svg_png = stack.enter_context(
+                            TempPath(
+                                dir=dest_dir,
+                                prefix=".imgconvert_",
+                                suffix=".png",
+                            )
+                        )
+                        await convert_svg_to_png(
+                            path, svg_png, max_w, max_h, scale=scale
+                        )
+                        await convert_to_jpeg(svg_png, temp_path)
                     case "image/heif" | "image/webp":
                         temp_path_2 = stack.enter_context(
                             TempPath(
