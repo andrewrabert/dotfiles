@@ -1,6 +1,23 @@
 #!/usr/bin/env sh
 SCRATCH_DIR=~/.local/share/claude-scratch
 mkdir -p "${SCRATCH_DIR}"
+
+if [ ! -f "${SCRATCH_DIR}/CLAUDE.md" ]; then
+    cat > "${SCRATCH_DIR}/CLAUDE.md" << 'EOF'
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Purpose
+
+This is a scratch directory for ad-hoc tasks — a general workspace for running Claude Code on things that don't have their own project directory.
+
+## Contents
+
+Contains cloned repositories (e.g., Claude Code plugins) used for reference or local testing. These are external projects — do not modify their source files unless explicitly asked.
+EOF
+fi
+
 cd "${SCRATCH_DIR}" || exit 1
 if command -v claude-bwrap > /dev/null; then
     exec claude-bwrap "$@"
