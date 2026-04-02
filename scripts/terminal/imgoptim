@@ -1363,6 +1363,17 @@ async def _process_convert(path, source_mimetype, target_mimetype, **options):
                         )
                         await convert_from_kra(path, kra_png)
                         await convert_to_jpeg(kra_png, temp_path)
+                    case "image/jpeg":
+                        temp_path_2 = stack.enter_context(
+                            TempPath(
+                                dir=dest_dir,
+                                prefix=".imgconvert_",
+                                suffix=path.name + ".tmp",
+                            )
+                        )
+                        await convert_to_ppm(path, temp_path_2)
+                        await convert_to_jpeg(temp_path_2, temp_path)
+                        await exiv2.copy_metadata(original_path, temp_path)
                     case _:
                         await convert_to_jpeg(path, temp_path)
                 temp_path.replace(dest)

@@ -1,7 +1,6 @@
 #!/usr/bin/env sh
 set -e
-cd ~/src/github/andrewrabert/harmonize || exit 1
-uv run harmonize --stdin << EOF
+exec harmonize --stdin << EOF
 [harmonize]
 source = "/storage/Audio/Library"
 target = "/storage/Audio/Lossy_opus_128"
@@ -19,7 +18,7 @@ source_exclude = [
 command = ["ffmpeg", "-y", "-i", "{input}", "-c:a", "libopus", "-b:a", "128k", "{output}"]
 
 [converters.image]
-command = ["imgconvert", "-f", "jpeg", "--resize-mode", "shrink", "--width", "1000", "--height", "1000", "--output", "{output}", "{input}"]
+command = ["imgconvert", "--force", "-f", "jpeg", "--resize-mode", "shrink", "--width", "2560", "--height", "2560", "--output", "{output}", "{input}"]
 
 [mappings]
 ".flac" = { converter = "audio", output_ext = ".opus" }
