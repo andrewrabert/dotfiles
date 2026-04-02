@@ -687,12 +687,14 @@ class Database:
             self.config.remove_packages(*packages_to_remove)
             self.config.remove_no_update(*packages_to_remove)
 
-            await run_cmd(
+            result = await run_cmd(
                 "repo-remove",
                 "--sign",
                 str(self.db_tar),
                 *sorted(packages_to_remove),
             )
+            if result.returncode != 0:
+                logger.warning("repo-remove failed, continuing with cleanup")
 
             for package in packages_to_remove:
                 pkg = self.pkg_db.get_package(package)
@@ -707,6 +709,15 @@ class Database:
                     shutil.rmtree(self.aurutils_cache / package)
                 except FileNotFoundError:
                     pass
+                except PermissionError:
+                    cache_path = self.aurutils_cache / package
+                    logger.warning(
+                        f"Permission denied removing cache {cache_path}, fixing permissions and retrying"
+                    )
+                    await run_cmd(
+                        "chmod", "-R", "u+rwX", str(cache_path), check=True
+                    )
+                    shutil.rmtree(cache_path)
 
         await self._sign_database()
         await self._pacsync()
