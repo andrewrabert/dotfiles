@@ -384,6 +384,18 @@ def apply_spec_dict(spec_data, loader, saver):
         saver(updated)
 
 
+def apply_settings(spec_settings, loader, saver):
+    """Apply settings declaratively: remove non-protected keys not in spec."""
+    if spec_settings is None:
+        return
+    current = loader()
+    protected = {"$schema", "enabledPlugins"}
+    updated = {k: v for k, v in current.items() if k in protected}
+    updated.update(spec_settings)
+    if updated != current:
+        saver(updated)
+
+
 def load_spec_file(path):
     """Load and parse YAML spec file."""
     if not path.exists():
@@ -716,7 +728,7 @@ async def cmd_apply(args, cfg):
 
     # Apply config and settings
     apply_spec_dict(spec.config, cfg.load_config, cfg.save_config)
-    apply_spec_dict(spec.settings, cfg.load_settings, cfg.save_settings)
+    apply_settings(spec.settings, cfg.load_settings, cfg.save_settings)
 
     # Remove marketplaces (and their plugins)
     for name in marketplaces_to_remove:
