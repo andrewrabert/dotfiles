@@ -114,6 +114,14 @@ def main():
             target.unlink()
         target.symlink_to(path)
 
+    old_bin = dotfiles / ".bin"
+    if old_bin.is_symlink() or old_bin.exists():
+        if old_bin.is_dir() and not old_bin.is_symlink():
+            shutil.rmtree(old_bin)
+        else:
+            old_bin.unlink()
+    old_bin.symlink_to(dest)
+
 
 if __name__ == "__main__":
     main()
