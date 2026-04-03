@@ -10,7 +10,7 @@ log() {
 
 case $# in
     0)
-        SDCARD_DIR="/media/ONION"
+        SDCARD_DIR="/run/media/$(id -un)/ONION"
         ;;
     1)
         SDCARD_DIR="$1"
@@ -49,3 +49,6 @@ log 'Backing up'
 
 log 'Finding missing images'
 ./find_missing_imgs.py "${SDCARD_DIR}"
+
+log 'Checking play activity for bad entries'
+./check_play_activity.py "${SDCARD_DIR}"

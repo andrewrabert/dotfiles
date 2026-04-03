@@ -10,7 +10,7 @@ log() {
 
 case $# in
     0)
-        SDCARD_DIR="/media/N2DSXL"
+        SDCARD_DIR="/run/media/$(id -un)/N2DSXL"
         ;;
     1)
         SDCARD_DIR="$1"
