@@ -1,0 +1,104 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# dependencies = [
+#   "httpx",
+# ]
+# ///
+
+import os
+import pathlib
+import platform
+import shutil
+import sys
+import tarfile
+import tempfile
+
+import httpx
+
+REPO = "andrewrabert/zoekt-simple"
+API_URL = f"https://api.github.com/repos/{REPO}/releases/latest"
+DOTFILES = pathlib.Path(os.environ["DOTFILES"])
+INSTALL_DIR = DOTFILES / ".local/zoekt-simple"
+BIN_DIR = INSTALL_DIR / "bin"
+VERSION_FILE = INSTALL_DIR / ".installed-version"
+
+ARCH_MAP = {
+    "x86_64": "amd64",
+    "aarch64": "arm64",
+    "arm64": "arm64",
+}
+
+
+class UserError(Exception):
+    pass
+
+
+def detect_platform():
+    os_name = platform.system().lower()
+    if os_name not in ("linux", "darwin"):
+        raise UserError(f"unsupported OS: {os_name}")
+
+    machine = platform.machine()
+    arch = ARCH_MAP.get(machine)
+    if not arch:
+        raise UserError(f"unsupported architecture: {machine}")
+
+    return os_name, arch
+
+
+def main():
+    release = httpx.get(API_URL, follow_redirects=True).json()
+    tag = release["tag_name"]
+
+    os_name, arch = detect_platform()
+    asset_name = f"zoekt-{os_name}-{arch}.tar.gz"
+
+    if VERSION_FILE.exists() and VERSION_FILE.read_text().strip() == tag:
+        print(f"zoekt-simple: already up to date ({tag}, {os_name}-{arch})")
+        return
+
+    asset_url = None
+    for asset in release["assets"]:
+        if asset["name"] == asset_name:
+            asset_url = asset["browser_download_url"]
+            break
+
+    if not asset_url:
+        raise UserError(f"no release asset found for {asset_name}")
+
+    print(f"zoekt-simple: downloading {tag} ({asset_name})...")
+    INSTALL_DIR.mkdir(parents=True, exist_ok=True)
+
+    with tempfile.NamedTemporaryFile(suffix=".tar.gz", delete=False) as tmp:
+        tmp_path = pathlib.Path(tmp.name)
+        try:
+            with httpx.stream(
+                "GET", asset_url, follow_redirects=True
+            ) as response:
+                for chunk in response.iter_bytes():
+                    tmp.write(chunk)
+            tmp.flush()
+
+            if BIN_DIR.exists():
+                shutil.rmtree(BIN_DIR)
+            BIN_DIR.mkdir(parents=True)
+
+            with tarfile.open(tmp_path) as tar:
+                for member in tar.getmembers():
+                    if member.isfile():
+                        member.name = pathlib.PurePosixPath(member.name).name
+                        tar.extract(member, path=BIN_DIR)
+                        (BIN_DIR / member.name).chmod(0o755)
+        finally:
+            tmp_path.unlink(missing_ok=True)
+
+    VERSION_FILE.write_text(tag)
+    print(f"zoekt-simple: installed {tag} ({os_name}-{arch})")
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except UserError as e:
+        print(f"error: {e}", file=sys.stderr)
+        sys.exit(1)

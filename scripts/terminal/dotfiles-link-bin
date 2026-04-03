@@ -24,7 +24,7 @@ def main():
         if k.startswith("DOTFILES_")
     ]
 
-    dest = dotfiles / ".bin"
+    dest = dotfiles / ".local/bin"
     dest.mkdir(exist_ok=True)
 
     all_commands = set()
@@ -56,12 +56,17 @@ def main():
     for d in other_dotfiles:
         sources.append(d / "scripts/terminal")
 
+    zoekt_simple_bin = dotfiles / ".local/zoekt-simple/bin"
+
     match hostname:
+        case "aweber":
+            sources.extend([zoekt_simple_bin])
         case "mars":
             sources.extend(
                 [
                     dotfiles / "scripts/media",
                     dotfiles / "rust-tools/ww-rs/target/release/ww-rs",
+                    zoekt_simple_bin,
                 ]
             )
         case "phobos":
@@ -69,10 +74,16 @@ def main():
                 [
                     dotfiles / "scripts/media",
                     dotfiles / "rust-tools/ww-rs/target/release/ww-rs",
+                    zoekt_simple_bin,
                 ]
             )
         case "sol":
-            sources.extend([dotfiles / "scripts/media"])
+            sources.extend(
+                [
+                    dotfiles / "scripts/media",
+                    zoekt_simple_bin,
+                ]
+            )
 
     links = {}
     for source in sources:
