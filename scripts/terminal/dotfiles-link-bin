@@ -25,7 +25,7 @@ def main():
     ]
 
     dest = dotfiles / ".local/bin"
-    dest.mkdir(exist_ok=True)
+    dest.mkdir(exist_ok=True, parents=True)
 
     all_commands = set()
     for path in os.environ["PATH"].split(":"):
