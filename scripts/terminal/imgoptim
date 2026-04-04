@@ -1161,7 +1161,7 @@ async def _process_convert(path, source_mimetype, target_mimetype, **options):
                     TempPath(
                         dir=dest_dir,
                         prefix=".imgconvert_resize_",
-                        suffix=".ppm",
+                        suffix=".png",
                     )
                 )
                 await resize_to_max_dim(
@@ -1174,7 +1174,7 @@ async def _process_convert(path, source_mimetype, target_mimetype, **options):
                     scale=scale,
                 )
                 path = resized
-                source_mimetype = "image/x-portable-pixmap"
+                source_mimetype = "image/png"
 
         temp_path = stack.enter_context(
             TempPath(
