@@ -486,7 +486,10 @@ if HOSTNAME in ("mars", "phobos", "lounge-htpc"):
 if HOSTNAME in ("phobos"):
     EXPECTED_PACKAGES.update(
         {
+            "amdxdna-dkms",
+            "fastflowlm",
             "fprintd",
+            "lemonade-server",
         }
     )
 
