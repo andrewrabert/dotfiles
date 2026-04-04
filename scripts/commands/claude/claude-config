@@ -389,7 +389,7 @@ def apply_settings(spec_settings, loader, saver):
     if spec_settings is None:
         return
     current = loader()
-    protected = {"$schema", "enabledPlugins"}
+    protected = {"$schema", "enabledPlugins", "extraKnownMarketplaces"}
     updated = {k: v for k, v in current.items() if k in protected}
     updated.update(spec_settings)
     if updated != current:
@@ -858,7 +858,7 @@ async def cmd_show(args, cfg):
     config = ConfigSpec.model_validate(config_filtered) if config_filtered else None
 
     settings_data = cfg.load_settings()
-    exclude = {"$schema", "enabledPlugins"}
+    exclude = {"$schema", "enabledPlugins", "extraKnownMarketplaces"}
     settings = {k: v for k, v in settings_data.items() if k not in exclude} or None
 
     current = cfg.get_current_state()
