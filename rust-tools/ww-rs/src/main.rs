@@ -205,22 +205,6 @@ fn kwin_support_information(conn: &Connection) -> Result<String, String> {
     .map_err(|e| e.to_string())
 }
 
-fn kwin_get_window_info(conn: &Connection, window_id: &str) -> Result<String, String> {
-    let reply = conn
-        .call_method(
-            Some("org.kde.KWin"),
-            "/KWin",
-            Some("org.kde.KWin"),
-            "getWindowInfo",
-            &window_id,
-        )
-        .map_err(|e| e.to_string())?;
-
-    // getWindowInfo returns a vardict, format it nicely
-    let body = reply.body();
-    let value: Value = body.deserialize().map_err(|e| e.to_string())?;
-    Ok(format!("{:#?}", value))
-}
 
 fn kwin_load_script(conn: &Connection, path: &str, name: &str) -> Result<i32, String> {
     conn.call_method(
@@ -229,20 +213,6 @@ fn kwin_load_script(conn: &Connection, path: &str, name: &str) -> Result<i32, St
         Some("org.kde.kwin.Scripting"),
         "loadScript",
         &(path, name),
-    )
-    .map_err(|e| e.to_string())?
-    .body()
-    .deserialize::<i32>()
-    .map_err(|e| e.to_string())
-}
-
-fn kwin_load_script_no_name(conn: &Connection, path: &str) -> Result<i32, String> {
-    conn.call_method(
-        Some("org.kde.KWin"),
-        "/Scripting",
-        Some("org.kde.kwin.Scripting"),
-        "loadScript",
-        &(path,),
     )
     .map_err(|e| e.to_string())?
     .body()
@@ -308,57 +278,76 @@ fn ver_lt(a: &str, b: &str) -> bool {
     ver_cmp(a, b) == std::cmp::Ordering::Less
 }
 
-fn info_active(conn: &Connection) -> Result<(), String> {
-    let kwin_version = get_kwin_version(conn)?;
-    let major: u32 = kwin_version
-        .split('.')
-        .next()
-        .and_then(|s| s.parse().ok())
-        .ok_or("Invalid version")?;
+fn format_value(value: &Value) -> String {
+    match value {
+        Value::Str(s) => s.to_string(),
+        Value::Bool(b) => b.to_string(),
+        Value::I32(n) => n.to_string(),
+        Value::F64(n) => n.to_string(),
+        Value::Array(arr) => {
+            let items: Vec<String> = arr.iter().map(|v| format_value(v)).collect();
+            items.join(", ")
+        }
+        other => format!("{:?}", other),
+    }
+}
 
-    if major < 6 {
-        eprintln!("ERROR: This feature needs KWin 6 or later.");
-        std::process::exit(1);
+fn get_active_window_uuid(conn: &Connection) -> Result<String, String> {
+    let marker = format!("ww_rs_{}", rand::random::<u32>() % 100000);
+    let js_file = tempfile::NamedTempFile::new().map_err(|e| e.to_string())?;
+    let script = format!(
+        "var aw = workspace.activeWindow; if (aw) print('{}:' + aw.internalId);",
+        marker
+    );
+    fs::write(js_file.path(), script).map_err(|e| e.to_string())?;
+
+    let js_path = js_file.path().to_str().ok_or("Invalid temp path")?;
+    let random_name = format!("ww_info{}", rand::random::<u32>() % 10000);
+    let script_id = kwin_load_script(conn, js_path, &random_name)?;
+    let script_path = format!("/Scripting/Script{}", script_id);
+    let _ = kwin_script_run(conn, &script_path, "org.kde.kwin.Script");
+    let _ = kwin_script_stop(conn, &script_path, "org.kde.kwin.Script");
+
+    // Read the script's print() output from journal
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    let output = std::process::Command::new("journalctl")
+        .args(["--user", "-t", "kwin_wayland", "--since", "5 seconds ago",
+               "--no-pager", "-o", "cat", "--grep", &marker])
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for line in stdout.lines() {
+        if let Some(uuid) = line.strip_prefix(&format!("{}:", marker)) {
+            return Ok(uuid.trim().to_string());
+        }
     }
 
-    let js_file = tempfile::NamedTempFile::new()
+    Err("Could not get active window UUID from KWin script output".to_string())
+}
+
+fn info_active(conn: &Connection) -> Result<(), String> {
+    let uuid = get_active_window_uuid(conn)?;
+
+    let reply = conn
+        .call_method(
+            Some("org.kde.KWin"),
+            "/KWin",
+            Some("org.kde.KWin"),
+            "getWindowInfo",
+            &uuid.as_str(),
+        )
         .map_err(|e| e.to_string())?;
-    let js_path = js_file.path().to_str().ok_or("Invalid temp path")?.to_string();
 
-    let output_file = tempfile::NamedTempFile::new()
-        .map_err(|e| e.to_string())?;
-    let output_path = output_file.path().to_str().ok_or("Invalid temp path")?.to_string();
+    let body = reply.body();
+    let props: std::collections::HashMap<String, Value> =
+        body.deserialize().map_err(|e| e.to_string())?;
 
-    // KWin script that writes window ID to a file
-    let script_content = format!(
-        r#"
-        var file = new QFile("{}");
-        file.open(QIODevice.WriteOnly);
-        var stream = new QTextStream(file);
-        stream.writeString(String(workspace.activeWindow.internalId));
-        file.close();
-        "#,
-        output_path
-    );
-
-    fs::write(&js_file, script_content).map_err(|e| e.to_string())?;
-
-    let script_id = kwin_load_script_no_name(conn, &js_path)?;
-
-    let script_path = format!("/Scripting/Script{}", script_id);
-    kwin_script_run(conn, &script_path, "org.kde.kwin.Script")?;
-
-    // Small delay to let script execute
-    std::thread::sleep(std::time::Duration::from_millis(50));
-
-    let window_id = fs::read_to_string(&output_path)
-        .map_err(|e| format!("Could not read output file: {}", e))?;
-    let window_id = window_id.trim();
-
-    kwin_script_stop(conn, &script_path, "org.kde.kwin.Script")?;
-
-    let output = kwin_get_window_info(conn, window_id)?;
-    print!("{}", output);
+    let mut keys: Vec<&String> = props.keys().collect();
+    keys.sort();
+    for key in keys {
+        println!("{}: {}", key, format_value(&props[key]));
+    }
 
     Ok(())
 }
