@@ -82,6 +82,10 @@ struct Args {
     #[arg(short = 'p', long = "process")]
     process: Option<String>,
 
+    /// Regex to match against raw /proc/PID/cmdline (null-separated argv)
+    #[arg(long = "process-regex")]
+    process_regex: Option<String>,
+
     /// Only search processes of the current user (requires loginctl)
     #[arg(short = 'u', long = "current-user")]
     current_user: bool,
@@ -449,6 +453,58 @@ fn is_process_running(process: &str, user_filter: Option<&str>) -> bool {
     false
 }
 
+fn is_process_running_regex(re: &regex::Regex, user_filter: Option<&str>) -> bool {
+    let ancestors = get_ancestors();
+    let Ok(entries) = fs::read_dir("/proc") else {
+        return false;
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+
+        let Ok(pid) = name.parse::<u32>() else {
+            continue;
+        };
+
+        if ancestors.contains(&pid) {
+            continue;
+        }
+
+        if let Some(uid) = user_filter {
+            let status_path = path.join("status");
+            if let Ok(status) = fs::read_to_string(&status_path) {
+                let mut matches_uid = false;
+                for line in status.lines() {
+                    if line.starts_with("Uid:") {
+                        let parts: Vec<&str> = line.split_whitespace().collect();
+                        if parts.len() > 1 && parts[1] == uid {
+                            matches_uid = true;
+                        }
+                        break;
+                    }
+                }
+                if !matches_uid {
+                    continue;
+                }
+            } else {
+                continue;
+            }
+        }
+
+        let cmdline_path = path.join("cmdline");
+        if let Ok(cmdline) = fs::read_to_string(&cmdline_path) {
+            if re.is_match(&cmdline) {
+                return true;
+            }
+        }
+    }
+
+    false
+}
+
 fn create_script(
     filter: &str,
     filter_alt: &str,
@@ -505,7 +561,10 @@ fn main() -> Result<(), String> {
         None
     };
 
-    let is_running = if process.is_empty() {
+    let is_running = if let Some(ref re) = args.process_regex {
+        let re = regex::Regex::new(re).map_err(|e| e.to_string())?;
+        is_process_running_regex(&re, user_filter.as_deref())
+    } else if process.is_empty() {
         false
     } else {
         is_process_running(process, user_filter.as_deref())
