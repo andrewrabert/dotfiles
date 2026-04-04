@@ -2,7 +2,7 @@
 APP_ID='dotfiles.andrewrabert.tmux-scratchpad'
 TITLE='tmux'
 
-ww-rs \
+exec ww-rs \
     --toggle \
     --center=initial \
     --filter "${APP_ID}" \

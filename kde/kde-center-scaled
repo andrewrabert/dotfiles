@@ -1,5 +1,5 @@
 #!/usr/bin/env sh
-ww-rs \
+exec ww-rs \
     --filter-focused \
     --center \
     --scale-factor 0.8 \

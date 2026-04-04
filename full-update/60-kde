@@ -293,6 +293,11 @@ async def configure_kde():
                         ),
                         shortcut="Meta+Return",
                     ),
+                    GlobalShortcut(
+                        name="Toggle Obsidian",
+                        exec=str(DOTFILES / "kde" / "kde-toggle-obsidian"),
+                        shortcut="Meta+n",
+                    ),
                 ]
             )
 
