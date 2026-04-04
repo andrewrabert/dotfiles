@@ -178,6 +178,9 @@ class Spec(pydantic.BaseModel):
     model_config = pydantic.ConfigDict(extra="forbid", populate_by_name=True)
     config: ConfigSpec | None = None
     settings: dict[str, typing.Any] | None = None
+    mcp_servers: dict[str, typing.Any] | None = pydantic.Field(
+        None, alias="mcpServers"
+    )
     marketplaces: MarketplaceList = pydantic.Field(default_factory=list)
     claude_md: str | None = pydantic.Field(None, alias="CLAUDE.md")
 
@@ -394,6 +397,16 @@ def apply_settings(spec_settings, loader, saver):
     updated.update(spec_settings)
     if updated != current:
         saver(updated)
+
+
+def apply_mcp_servers(spec_mcp_servers, loader, saver):
+    """Apply mcpServers declaratively to config."""
+    if spec_mcp_servers is None:
+        return
+    current = loader()
+    if current.get("mcpServers") != spec_mcp_servers:
+        current["mcpServers"] = spec_mcp_servers
+        saver(current)
 
 
 def load_spec_file(path):
@@ -729,6 +742,7 @@ async def cmd_apply(args, cfg):
     # Apply config and settings
     apply_spec_dict(spec.config, cfg.load_config, cfg.save_config)
     apply_settings(spec.settings, cfg.load_settings, cfg.save_settings)
+    apply_mcp_servers(spec.mcp_servers, cfg.load_config, cfg.save_config)
 
     # Remove marketplaces (and their plugins)
     for name in marketplaces_to_remove:
@@ -861,6 +875,8 @@ async def cmd_show(args, cfg):
     exclude = {"$schema", "enabledPlugins", "extraKnownMarketplaces"}
     settings = {k: v for k, v in settings_data.items() if k not in exclude} or None
 
+    mcp_servers = config_data.get("mcpServers") or None
+
     current = cfg.get_current_state()
     marketplaces = []
 
@@ -890,6 +906,7 @@ async def cmd_show(args, cfg):
         claude_md=claude_md,
         config=config,
         settings=settings,
+        mcp_servers=mcp_servers,
         marketplaces=marketplaces,
     )
 
