@@ -2,15 +2,29 @@
 set -eu
 
 SOURCE="${DOTFILES}/ghostty"
-TARGET=~/.config/ghostty
 
-if ! command -v ghostty > /dev/null; then
-    rm -rf "${TARGET}"
-    exit
-fi
+case "$(uname -s)" in
+    Darwin) TARGET=~/Library/Application\ Support/com.mitchellh.ghostty ;;
+    *)      TARGET=~/.config/ghostty ;;
+esac
+
+case "$(uname -s)" in
+    Darwin)
+        if ! [ -d /Applications/Ghostty.app ]; then
+            rm -rf "${TARGET}"
+            exit
+        fi
+        ;;
+    *)
+        if ! command -v ghostty > /dev/null; then
+            rm -rf "${TARGET}"
+            exit
+        fi
+        ;;
+esac
 
 if [ "$(realpath "${TARGET}")" != "${SOURCE}" ]; then
     echo 'Linking configuration ...'
     rm -rf "${TARGET}"
-    ln -sT "${SOURCE}" "${TARGET}"
+    ln -sfn "${SOURCE}" "${TARGET}"
 fi
