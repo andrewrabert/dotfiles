@@ -11,4 +11,4 @@ if [ "$(realpath ~/.config/nvim)" != "$DOTFILES/nvim" ]; then
     ln -sT "${DOTFILES}/nvim" ~/.config/nvim
 fi
 
-nvim --headless -c 'lua vim.pack.update(nil, { force = true })' +qa
+nvim --headless -c PackSync +qa

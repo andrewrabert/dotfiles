@@ -27,8 +27,6 @@ vim.opt.titlestring = 'nvim %{&buftype == "" ? expand("%:p") : expand("#:p")}'
 -- show diagnostic popups faster (default 4000)
 vim.o.updatetime = 500
 
-vim.g.markdown_enable_spell_checking = 0
-
 vim.g.clipboard = {
 	copy = {
 		["*"] = "cbcopy",

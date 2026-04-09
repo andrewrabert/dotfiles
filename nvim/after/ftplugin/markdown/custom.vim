@@ -6,22 +6,13 @@ autocmd FocusGained,BufEnter * :checktime
 " talbe_mode_always_active breaks highlighting
 TableModeEnable
 
-let g:vim_markdown_auto_insert_bullets=1
-let g:vim_markdown_new_list_item_indent=0
-setlocal formatlistpat=^\\s*\\d\\+[.\)]\\s\\+\\\|^\\s*[*+~-]\\s\\+\\\|^\\(\\\|[*#]\\)\\[^[^\\]]\\+\\]:\\s 
+setlocal formatlistpat=^\\s*\\d\\+[.\)]\\s\\+\\\|^\\s*[*+~-]\\s\\+\\\|^\\(\\\|[*#]\\)\\[^[^\\]]\\+\\]:\\s
 setlocal comments=n:>
 setlocal formatoptions+=cn
 nnoremap <leader>m 0:TableModeRealign<Cr>
 set linebreak
 set list& listchars&
 highlight Title cterm=bold
-
-let g:vim_markdown_conceal_code_blocks = 0
-
-let g:vim_markdown_folding_style_pythonic = 1
-let g:vim_markdown_folding_level = 6
-let g:vim_markdown_folding_disabled = 1
-
 
 " r Automatically insert the current comment leader after hitting
 "   <Enter> in Insert mode.
@@ -35,7 +26,7 @@ set nofoldenable
 
 function! SortByDataviewDate(date_type) range
     let date_types = empty(a:date_type) ? ['due', 'scheduled', 'start'] : [a:date_type]
-    
+
     let line_dates = []
     for line in getline(a:firstline, a:lastline)
         let date = '9999-99-99'
@@ -47,7 +38,7 @@ function! SortByDataviewDate(date_type) range
         endfor
         call add(line_dates, [line, date])
     endfor
-    
+
     call sort(line_dates, {a, b -> a[1] > b[1] ? 1 : a[1] < b[1] ? -1 : 0})
     call setline(a:firstline, map(line_dates, 'v:val[0]'))
 endfunction

@@ -1,7 +1,17 @@
-vim.opt.completeopt = "menu,menuone,noselect,popup"
-
-vim.api.nvim_create_autocmd("LspAttach", {
-	callback = function(ev)
-		vim.lsp.completion.enable(true, ev.data.client_id, ev.buf, { autotrigger = true })
-	end,
+require("blink.cmp").setup({
+	keymap = {
+		preset = "default",
+		["<Tab>"] = { "accept", "fallback" },
+	},
+	completion = {
+		list = {
+			selection = { preselect = false, auto_insert = true },
+		},
+		documentation = {
+			auto_show = true,
+		},
+	},
+	sources = {
+		default = { "lsp", "path", "buffer" },
+	},
 })
