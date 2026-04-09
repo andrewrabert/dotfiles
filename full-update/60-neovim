@@ -11,9 +11,4 @@ if [ "$(realpath ~/.config/nvim)" != "$DOTFILES/nvim" ]; then
     ln -sT "${DOTFILES}/nvim" ~/.config/nvim
 fi
 
-# skip plugin sync if lazy is disabled
-if ! [ -e ~/.config/nvim/lazy.disable ]; then
-    nvim --headless "+Lazy! sync" "+Lazy build nvim-treesitter" +qa
-    # workaround lazy.nvim output not ending with a new line
-    echo
-fi
+nvim --headless -c 'lua vim.pack.update(nil, { force = true })' +qa
