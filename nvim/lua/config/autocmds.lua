@@ -42,6 +42,15 @@ vim.api.nvim_create_autocmd({ "BufRead", "BufNewFile" }, {
 	end,
 })
 
+-- Disable treesitter highlighting for markdown (using legacy syntax instead)
+vim.api.nvim_create_autocmd("FileType", {
+	group = augroup,
+	pattern = "markdown",
+	callback = function(args)
+		vim.treesitter.stop(args.buf)
+	end,
+})
+
 vim.api.nvim_create_user_command("UvSyncScript", function()
 	local filepath = vim.fn.expand("%:p")
 	vim.fn.system({ "uv-update-all", filepath })
