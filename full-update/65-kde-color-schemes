@@ -41,6 +41,28 @@ class WindowClass:
     wmclasscomplete: bool = False
 
 
+def adjust_color_brightness(hex_color: str, factor: float) -> str:
+    """Brighten or dim a hex RGB color by a float factor.
+
+    Args:
+        hex_color: Hex color string (e.g., "#RRGGBB" or "RRGGBB")
+        factor: Brightness factor (>1.0 to brighten, <1.0 to dim)
+
+    Returns:
+        Adjusted hex color string with "#" prefix
+    """
+    hex_color = hex_color.lstrip("#")
+    r = int(hex_color[0:2], 16)
+    g = int(hex_color[2:4], 16)
+    b = int(hex_color[4:6], 16)
+
+    r = max(0, min(255, int(r * factor)))
+    g = max(0, min(255, int(g * factor)))
+    b = max(0, min(255, int(b * factor)))
+
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+
 @dataclasses.dataclass
 class ColorScheme:
     active_bg: str | None = None
@@ -74,11 +96,12 @@ TITLEBAR_CONFIGS = {
     "Element": TitlebarConfig(
         classes=[
             WindowClass(description="Element", wmclass="element"),
-            WindowClass(description="Element", wmclass="Element"),
+            WindowClass(description="Element", wmclass="im.riot.Riot"),
         ],
         dark=ColorScheme(
-            active_bg="#101317",
-            inactive_bg="#101317",
+            active_bg="#181a1d",
+            inactive_fg=adjust_color_brightness(DARK_INACTIVE_FG, 0.8),
+            inactive_bg="#181a1d",
         ),
         light=ColorScheme(
             active_bg="#ffffff",
@@ -124,32 +147,38 @@ TITLEBAR_CONFIGS = {
             inactive_bg="#ffffff",
         ),
     ),
-    "Krita": TitlebarConfig(
-        classes=[
-            WindowClass(description="Krita", wmclass="krita"),
-        ],
-        dark=ColorScheme(
-            active_bg="#202326",
-            inactive_bg="#202326",
-        ),
-    ),
     "Obsidian": TitlebarConfig(
         classes=[
             WindowClass(description="Obsidian", wmclass="obsidian"),
         ],
         dark=ColorScheme(
-            active_bg="#363636",
-            inactive_bg="#262626",
+            active_bg="#393939",
+            inactive_fg=adjust_color_brightness(DARK_INACTIVE_FG, 0.8),
+            inactive_bg="#2a2a2a",
         ),
     ),
     "Signal": TitlebarConfig(
         classes=[
             WindowClass(description="Signal", wmclass="signal"),
-            WindowClass(description="Signal", wmclass="Signal"),
+            WindowClass(description="Signal", wmclass="org.signal.Signal"),
         ],
         dark=ColorScheme(
-            active_bg="#2e2e2e",
-            inactive_bg="#2e2e2e",
+            active_bg="#191919",
+            inactive_fg=adjust_color_brightness(DARK_INACTIVE_FG, 0.8),
+            inactive_bg="#191919",
+        ),
+    ),
+    "Signal": TitlebarConfig(
+        classes=[
+            WindowClass(
+                description="Lemonade App",
+                wmclass="chrome-localhost__lemonade-Default",
+            ),
+        ],
+        dark=ColorScheme(
+            active_bg="#000000",
+            inactive_fg=adjust_color_brightness(DARK_INACTIVE_FG, 0.8),
+            inactive_bg="#000000",
         ),
     ),
 }

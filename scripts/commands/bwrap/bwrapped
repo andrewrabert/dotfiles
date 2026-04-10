@@ -1,0 +1,220 @@
+#!/usr/bin/env python3
+"""Run a program inside a bubblewrap sandbox with filesystem isolation."""
+
+import argparse
+import os
+import pathlib
+import shutil
+
+
+class Bubblewrap:
+    _BIN = "bwrap"
+
+    def __init__(self, *args):
+        self._args = [self._BIN, *args]
+
+    def _add(self, *args):
+        self._args.extend(a for a in args if a is not None)
+        return self
+
+    def ro_bind(self, src, dest=None):
+        return self._add("--ro-bind", str(src), str(dest or src))
+
+    def bind(self, src, dest=None):
+        return self._add("--bind", str(src), str(dest or src))
+
+    def symlink(self, target, link):
+        return self._add("--symlink", str(target), str(link))
+
+    def tmpfs(self, path):
+        return self._add("--tmpfs", path)
+
+    def proc(self, path):
+        return self._add("--proc", path)
+
+    def dev(self, path):
+        return self._add("--dev", path)
+
+    def dir(self, path):
+        return self._add("--dir", str(path))
+
+    def setenv(self, name, value=None):
+        if value is None:
+            value = os.environ.get(name, "")
+        return self._add("--setenv", name, str(value))
+
+    def chdir(self, path):
+        return self._add("--chdir", str(path))
+
+    def arg(self, *args):
+        return self._add(*args)
+
+    def unshare_pid(self, enable=True):
+        return self._add("--unshare-pid") if enable else self
+
+    def unshare_net(self, enable=True):
+        return self._add("--unshare-net") if enable else self
+
+    def die_with_parent(self, enable=True):
+        return self._add("--die-with-parent") if enable else self
+
+    def __iter__(self):
+        return iter(self._args)
+
+
+HOME = pathlib.Path.home()
+WORK_DIR = pathlib.Path.cwd().resolve()
+GIT_CONFIG = HOME / ".config/git"
+CLAUDE_CONFIG_DIR = os.environ.get("CLAUDE_CONFIG_DIR", "")
+OPENCODE_DIR = HOME / ".config/opencode"
+
+DEFAULT_CONFIG = {
+    "proc": ["/proc"],
+    "dev": ["/dev"],
+    "tmpfs": ["/tmp", "/run"],
+    "dir": [f"/run/user/{os.getuid()}"],
+    "bind": {
+        "rw": [WORK_DIR],
+        "ro": [
+            "/bin",
+            "/etc",
+            "/lib",
+            "/lib64",
+            "/opt",
+            "/usr",
+            "/run/systemd/resolve",
+            HOME / ".local/bin",
+            GIT_CONFIG,
+            GIT_CONFIG.resolve(),
+        ],
+    },
+    "env": {
+        "inherit": ["PATH", "TERM", "USER"],
+        "set": {
+            "HOME": HOME,
+            "TMPDIR": "/tmp",
+        },
+    },
+    "chdir": WORK_DIR,
+    "unshare_pid": True,
+    "die_with_parent": True,
+}
+
+PROGRAM_CONFIG = {
+    "claude": {
+        "bind": {
+            "rw": [CLAUDE_CONFIG_DIR],
+        },
+        "env": {
+            "inherit": ["CLAUDE_CONFIG_DIR"],
+        },
+    },
+    "opencode": {"bind": {"rw": [OPENCODE_DIR, OPENCODE_DIR.resolve()]}},
+}
+
+
+def build_command(args, program_args):
+    program = shutil.which(args.program)
+    if not program:
+        raise FileNotFoundError(f"{args.program} not found")
+
+    config = DEFAULT_CONFIG
+    extra = PROGRAM_CONFIG.get(pathlib.Path(program).name, {})
+
+    bwrap = Bubblewrap()
+    for p in config["proc"]:
+        bwrap.proc(p)
+    for p in config["dev"]:
+        bwrap.dev(p)
+    for p in config["tmpfs"]:
+        bwrap.tmpfs(p)
+    for p in config["dir"]:
+        bwrap.dir(p)
+    for p in config["bind"]["ro"] + extra.get("bind", {}).get("ro", []):
+        if pathlib.Path(p).exists():
+            bwrap.ro_bind(p)
+    for p in config["bind"]["rw"] + extra.get("bind", {}).get("rw", []):
+        if pathlib.Path(p).exists():
+            bwrap.bind(p)
+
+    for src, dest in args.bind:
+        src = pathlib.Path(src).resolve()
+        dest = src if dest == "" else pathlib.Path(dest)
+        if src.exists():
+            bwrap.bind(src, dest)
+    for src, dest in args.ro_bind:
+        src = pathlib.Path(src).resolve()
+        dest = src if dest == "" else pathlib.Path(dest)
+        if src.exists():
+            bwrap.ro_bind(src, dest)
+
+    for name in config["env"]["inherit"] + extra.get("env", {}).get(
+        "inherit", []
+    ):
+        bwrap.setenv(name)
+    for name, value in {
+        **config["env"]["set"],
+        **extra.get("env", {}).get("set", {}),
+    }.items():
+        bwrap.setenv(name, value)
+    for env in args.setenv:
+        if "=" in env:
+            name, value = env.split("=", 1)
+            bwrap.setenv(name, value)
+        else:
+            bwrap.setenv(env)
+
+    bwrap.chdir(config["chdir"])
+    bwrap.unshare_pid(config["unshare_pid"])
+    bwrap.die_with_parent(config["die_with_parent"])
+    bwrap.arg(program)
+    bwrap.arg(*program_args)
+
+    return list(bwrap)
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Run a program inside a bubblewrap sandbox with filesystem isolation.",
+        add_help=False,
+    )
+    parser.add_argument("program", help="Program to run inside the sandbox")
+    parser.add_argument(
+        "-h", "--help", action="store_true", help="Show this help"
+    )
+    parser.add_argument(
+        "--bind",
+        action="append",
+        nargs=2,
+        default=[],
+        metavar=("SRC", "DEST"),
+        help="Additional read-write bind mount; use '' for DEST to bind to same path",
+    )
+    parser.add_argument(
+        "--ro-bind",
+        action="append",
+        nargs=2,
+        default=[],
+        dest="ro_bind",
+        metavar=("SRC", "DEST"),
+        help="Additional read-only bind mount; use '' for DEST to bind to same path",
+    )
+    parser.add_argument(
+        "--setenv",
+        action="append",
+        default=[],
+        metavar="NAME[=VALUE]",
+        help="Set environment variable (inherits from env if no value)",
+    )
+    args, program_args = parser.parse_known_args()
+
+    if args.help:
+        parser.print_help()
+        return
+
+    cmd = build_command(args, program_args)
+    os.execvp(cmd[0], cmd)
+
+
+if __name__ == "__main__":
+    main()

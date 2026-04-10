@@ -5,10 +5,13 @@ require("blink.cmp").setup({
 	},
 	completion = {
 		list = {
-			selection = { preselect = false, auto_insert = true },
+			selection = { preselect = true, auto_insert = true },
 		},
 		documentation = {
 			auto_show = true,
+		},
+		accept = {
+			auto_brackets = { enabled = false },
 		},
 	},
 	sources = {
