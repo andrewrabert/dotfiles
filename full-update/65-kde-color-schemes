@@ -86,7 +86,7 @@ class TitlebarConfig:
 
 
 DARK_ACTIVE_FG = "#fcfcfc"
-DARK_INACTIVE_FG = "#7e7e7e"
+DARK_INACTIVE_FG = adjust_color_brightness(DARK_ACTIVE_FG, 0.4)
 
 LIGHT_ACTIVE_FG = "#232629"
 LIGHT_INACTIVE_FG = "#232629"
@@ -100,7 +100,7 @@ TITLEBAR_CONFIGS = {
         ],
         dark=ColorScheme(
             active_bg="#181a1d",
-            inactive_fg=adjust_color_brightness(DARK_INACTIVE_FG, 0.8),
+            inactive_fg=DARK_INACTIVE_FG,
             inactive_bg="#181a1d",
         ),
         light=ColorScheme(
@@ -153,7 +153,7 @@ TITLEBAR_CONFIGS = {
         ],
         dark=ColorScheme(
             active_bg="#393939",
-            inactive_fg=adjust_color_brightness(DARK_INACTIVE_FG, 0.8),
+            inactive_fg=DARK_INACTIVE_FG,
             inactive_bg="#2a2a2a",
         ),
     ),
@@ -164,7 +164,7 @@ TITLEBAR_CONFIGS = {
         ],
         dark=ColorScheme(
             active_bg="#191919",
-            inactive_fg=adjust_color_brightness(DARK_INACTIVE_FG, 0.8),
+            inactive_fg=DARK_INACTIVE_FG,
             inactive_bg="#191919",
         ),
     ),
@@ -177,7 +177,7 @@ TITLEBAR_CONFIGS = {
         ],
         dark=ColorScheme(
             active_bg="#000000",
-            inactive_fg=adjust_color_brightness(DARK_INACTIVE_FG, 0.8),
+            inactive_fg=DARK_INACTIVE_FG,
             inactive_bg="#000000",
         ),
     ),
@@ -190,7 +190,7 @@ TITLEBAR_CONFIGS = {
         ],
         dark=ColorScheme(
             active_bg="#2e2e32",
-            inactive_fg=adjust_color_brightness(DARK_INACTIVE_FG, 0.8),
+            inactive_fg=DARK_INACTIVE_FG,
             inactive_bg="#222226",
         ),
     ),
