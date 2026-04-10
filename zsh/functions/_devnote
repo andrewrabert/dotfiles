@@ -1,0 +1,33 @@
+#compdef devnote
+
+_devnote() {
+    local -a subcmds
+    subcmds=(
+        'list:list notes for this repo'
+        'add:add a note from text or files'
+        'todo:add a todo (written to the todo/ subdir)'
+        'read:print note contents'
+        'rm:delete a note'
+        'edit:edit a note in $EDITOR'
+        'rg:ripgrep across notes for this repo'
+    )
+
+    if (( CURRENT == 2 )); then
+        _describe 'subcommand' subcmds
+        return
+    fi
+
+    case "${words[2]}" in
+        read|rm|edit)
+            local -a notes
+            notes=("${(@f)$(devnote list 2>/dev/null)}")
+            notes=(${notes:#})
+            compadd -a notes
+            ;;
+        add|todo|rg)
+            _files
+            ;;
+    esac
+}
+
+_devnote "$@"

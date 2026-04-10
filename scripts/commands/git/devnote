@@ -1,0 +1,359 @@
+#!/usr/bin/env python3
+import argparse
+import asyncio
+import datetime
+import os
+import pathlib
+import shlex
+import shutil
+import sys
+
+NOTES_DIR = pathlib.Path(
+    os.environ.get("NOTES_DIR", pathlib.Path.home() / "src" / "notes")
+)
+CODE_ROOT_DIR = pathlib.Path.home() / "src"
+
+
+class UserError(Exception):
+    pass
+
+
+class git:
+    @staticmethod
+    async def toplevel(cwd):
+        proc = await asyncio.create_subprocess_exec(
+            "git",
+            "rev-parse",
+            "--show-toplevel",
+            cwd=cwd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        stdout, _ = await proc.communicate()
+        if proc.returncode != 0:
+            raise UserError("not inside a git repository")
+        return pathlib.Path(stdout.decode().strip())
+
+    @staticmethod
+    async def origin_url(cwd):
+        proc = await asyncio.create_subprocess_exec(
+            "git",
+            "remote",
+            "get-url",
+            "origin",
+            cwd=cwd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        stdout, _ = await proc.communicate()
+        if proc.returncode != 0:
+            return None
+        return stdout.decode().strip()
+
+
+class git_sync:
+    @staticmethod
+    async def parse_url(url):
+        proc = await asyncio.create_subprocess_exec(
+            "git-sync",
+            "--parse-url",
+            url,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            raise UserError(
+                f"git-sync failed to parse {url!r}: {stderr.decode().strip()}"
+            )
+        return stdout.decode().strip()
+
+
+async def normalized_repo_path(cwd):
+    toplevel = await git.toplevel(cwd=cwd)
+    try:
+        return toplevel.relative_to(CODE_ROOT_DIR)
+    except ValueError:
+        pass
+    url = await git.origin_url(cwd=toplevel)
+    if not url:
+        raise UserError(
+            f"{toplevel} has no origin remote and is not under {CODE_ROOT_DIR}"
+        )
+    host_path = await git_sync.parse_url(url)
+    host, sep, path = host_path.partition(":")
+    if not sep:
+        raise UserError(f"unexpected git-sync output: {host_path!r}")
+    return pathlib.Path(host) / path
+
+
+def unique_dest(dest_dir, timestamp, stem, suffix):
+    base = f"{timestamp}_{stem}{suffix}" if stem else f"{timestamp}{suffix}"
+    dest = dest_dir / base
+    n = 1
+    while dest.exists():
+        name = (
+            f"{timestamp}_{stem}_{n}{suffix}"
+            if stem
+            else f"{timestamp}_{n}{suffix}"
+        )
+        dest = dest_dir / name
+        n += 1
+    return dest
+
+
+def cmd_list(dest_dir, subdir):
+    root = resolve_within(dest_dir, subdir) if subdir else dest_dir
+    if not root.is_dir():
+        return
+    names = []
+    stack = [root]
+    while stack:
+        for path in stack.pop().iterdir():
+            if path.is_dir():
+                stack.append(path)
+            elif path.is_file():
+                names.append(str(path.relative_to(dest_dir)))
+    for name in sorted(names, key=str.lower):
+        print(name)
+
+
+def resolve_within(dest_dir, name):
+    root = dest_dir.resolve()
+    target = (root / (name or "")).resolve()
+    try:
+        target.relative_to(root)
+    except ValueError:
+        raise UserError(f"path escapes notes dir: {name}") from None
+    return target
+
+
+def resolve_name(dest_dir, name):
+    target = resolve_within(dest_dir, name)
+    if target == dest_dir.resolve():
+        raise UserError(f"not a file: {name}")
+    return target
+
+
+def cmd_read(dest_dir, name):
+    path = resolve_name(dest_dir, name)
+    if not path.is_file():
+        raise UserError(f"not a file: {name}")
+    sys.stdout.write(path.read_text())
+
+
+def cmd_rm(dest_dir, name):
+    path = resolve_name(dest_dir, name)
+    if not path.is_file():
+        raise UserError(f"not a file: {name}")
+    path.unlink()
+
+
+def cmd_edit(dest_dir, name):
+    path = resolve_name(dest_dir, name)
+    if not path.is_file():
+        raise UserError(f"not a file: {name}")
+    editor = shlex.split(os.environ.get("EDITOR") or "vi")
+    os.execvp(editor[0], [*editor, str(path)])
+
+
+def cmd_rg(dest_dir, rg_args):
+    if not dest_dir.is_dir():
+        sys.exit(1)
+    os.chdir(dest_dir)
+    os.execvp("rg", ["rg", *rg_args])
+
+
+def cmd_add(dest_dir, items):
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    if not items and not sys.stdin.isatty():
+        text = sys.stdin.read()
+        if not text.strip():
+            raise UserError("empty input")
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest = unique_dest(dest_dir, timestamp, "", ".md")
+        dest.write_text(text if text.endswith("\n") else text + "\n")
+        print(dest)
+        return
+
+    if not items:
+        raise UserError("no input")
+
+    if items[0].startswith(("/", "./", "../")):
+        sources = [pathlib.Path(item) for item in items]
+        for src in sources:
+            if not src.is_file():
+                raise UserError(f"not a file: {src}")
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        for src in sources:
+            dest = unique_dest(dest_dir, timestamp, src.stem, src.suffix)
+            shutil.move(src, dest)
+            print(dest)
+        return
+
+    text = " ".join(items)
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = unique_dest(dest_dir, timestamp, "", ".md")
+    dest.write_text(text + "\n")
+    print(dest)
+
+
+MAIN_DESCRIPTION = """\
+Per-repo developer notes. Stores markdown/text notes under
+${NOTES_DIR:-~/src/notes}/git/<host>/<path>/ so that notes stay
+attached to the git repository you took them in, regardless of cwd.
+
+The <host>/<path> portion is derived from the current repo by:
+  1. Taking the git toplevel and making it relative to ~/src (fast path),
+     e.g. ~/src/github/jellyfin/jellyfin-desktop -> github/jellyfin/jellyfin-desktop
+  2. Otherwise parsing `git remote get-url origin` via `git-sync --parse-url`
+     (same normalization gs/git-sync use to choose clone destinations).
+
+Notes are named <YYYYMMDD>_<HHMMSS>[_subject].<ext> with collision suffixes
+(_1, _2, ...). Files created from free-text input have no subject and use .md.
+Todos live in a `todo/` subdirectory under the same per-repo path."""
+
+EPILOG = """\
+examples:
+  devnote add                     # read note body from stdin, save as <ts>.md
+  devnote add my quick thought    # joins args into a text note
+  devnote add ./draft.md /tmp/x   # MOVES files into the notes dir (renamed)
+  devnote todo fix the login bug  # same semantics, stored under todo/
+  devnote list                    # recursive list, paths relative to dest_dir
+  devnote read todo/<name>        # subdir prefix is how you address todos
+  devnote rm <name>               # delete (path traversal blocked)
+  devnote edit <name>             # open in $EDITOR (fallback: vi)
+  devnote rg -i pattern           # ripgrep, cwd=dest_dir, flags pass through
+
+add/todo input modes:
+  * stdin (when piped and no args)  -> written verbatim to a new .md file
+  * args starting with / ./ ../      -> treated as files, MOVED into the dest
+  * any other args                   -> joined with spaces, saved as text
+  files that don't exist produce an error; text input is never validated.
+
+Requires being inside a git repository. Reads $NOTES_DIR (default ~/src/notes)
+and $EDITOR (for `edit`). Depends on `git-sync` being in PATH for the URL
+fallback and on `rg` for the `rg` subcommand."""
+
+
+async def main():
+    parser = argparse.ArgumentParser(
+        description=MAIN_DESCRIPTION,
+        epilog=EPILOG,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    subparsers = parser.add_subparsers(dest="command", required=True)
+    list_parser = subparsers.add_parser(
+        "list",
+        help="list notes for this repo",
+        description=(
+            "Recursively list all files under the repo's notes dir, "
+            "printing paths relative to it (so todos show as todo/<name>). "
+            "Sorted case-insensitively. Pass an optional subdir to scope "
+            "the walk (e.g. `devnote list todo/`)."
+        ),
+    )
+    list_parser.add_argument(
+        "subdir",
+        nargs="?",
+        help="subdir relative to the notes dir (e.g. 'todo')",
+    )
+    add_parser = subparsers.add_parser(
+        "add",
+        help="add a note from text or files",
+        description=(
+            "Create a note. With no args and piped stdin, the stdin body is "
+            "written verbatim to a new .md file. With args starting with "
+            "'/', './', or '../' each arg is treated as a source file and "
+            "MOVED into the notes dir (errors if missing). Any other args are "
+            "joined with spaces and saved as a text note. Filenames embed a "
+            "YYYYMMDD_HHMMSS timestamp; collisions append _1, _2, etc."
+        ),
+    )
+    add_parser.add_argument(
+        "items",
+        nargs="*",
+        help="text words or file paths (see description)",
+    )
+    todo_parser = subparsers.add_parser(
+        "todo",
+        help="add a todo (stored under the todo/ subdir)",
+        description=(
+            "Identical to `add` but writes into the repo's todo/ subdir. "
+            "Address afterwards with subcommand + 'todo/<name>'."
+        ),
+    )
+    todo_parser.add_argument("items", nargs="*", help="same as `add`")
+    read_parser = subparsers.add_parser(
+        "read",
+        help="print note contents to stdout",
+        description=(
+            "Print the contents of a note. `name` is a path relative to the "
+            "repo's notes dir (e.g. '20260410_024538.md' or "
+            "'todo/20260410_024538.md'). Paths escaping the notes dir are "
+            "rejected."
+        ),
+    )
+    read_parser.add_argument("name", help="note path relative to notes dir")
+    rm_parser = subparsers.add_parser(
+        "rm",
+        help="delete a note",
+        description=(
+            "Delete a note. `name` is a path relative to the repo's notes "
+            "dir. Paths escaping the notes dir are rejected. No confirmation."
+        ),
+    )
+    rm_parser.add_argument("name", help="note path relative to notes dir")
+    edit_parser = subparsers.add_parser(
+        "edit",
+        help="open a note in $EDITOR",
+        description=(
+            "Open an existing note in $EDITOR (fallback: vi). $EDITOR is "
+            "shell-split so 'code -w' works. Paths escaping the notes dir "
+            "are rejected."
+        ),
+    )
+    edit_parser.add_argument("name", help="note path relative to notes dir")
+    rg_parser = subparsers.add_parser(
+        "rg",
+        help="ripgrep across this repo's notes",
+        description=(
+            "Exec-passthrough to `rg` with cwd set to the repo's notes dir. "
+            "All arguments after `rg` are forwarded verbatim, so flags and "
+            "path args work as with rg directly."
+        ),
+    )
+    rg_parser.add_argument(
+        "rg_args",
+        nargs=argparse.REMAINDER,
+        help="arguments forwarded to rg",
+    )
+    args = parser.parse_args()
+
+    repo_path = await normalized_repo_path(pathlib.Path.cwd())
+    dest_dir = NOTES_DIR / "git" / repo_path
+
+    match args.command:
+        case "list":
+            cmd_list(dest_dir, args.subdir)
+        case "add":
+            cmd_add(dest_dir, args.items)
+        case "todo":
+            cmd_add(dest_dir / "todo", args.items)
+        case "read":
+            cmd_read(dest_dir, args.name)
+        case "rm":
+            cmd_rm(dest_dir, args.name)
+        case "edit":
+            cmd_edit(dest_dir, args.name)
+        case "rg":
+            cmd_rg(dest_dir, args.rg_args)
+
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except UserError as e:
+        print(f"error: {e}", file=sys.stderr)
+        sys.exit(1)
