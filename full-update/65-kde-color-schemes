@@ -168,7 +168,7 @@ TITLEBAR_CONFIGS = {
             inactive_bg="#191919",
         ),
     ),
-    "Signal": TitlebarConfig(
+    "Lemonade": TitlebarConfig(
         classes=[
             WindowClass(
                 description="Lemonade App",
@@ -179,6 +179,19 @@ TITLEBAR_CONFIGS = {
             active_bg="#000000",
             inactive_fg=adjust_color_brightness(DARK_INACTIVE_FG, 0.8),
             inactive_bg="#000000",
+        ),
+    ),
+    "Firefox": TitlebarConfig(
+        classes=[
+            WindowClass(
+                description="Mozilla Firefox",
+                wmclass="firefox",
+            ),
+        ],
+        dark=ColorScheme(
+            active_bg="#2e2e32",
+            inactive_fg=adjust_color_brightness(DARK_INACTIVE_FG, 0.8),
+            inactive_bg="#222226",
         ),
     ),
 }
