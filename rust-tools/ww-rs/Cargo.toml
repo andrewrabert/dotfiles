@@ -6,7 +6,7 @@ edition = "2021"
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 tempfile = "3"
-rand = "0.8"
+rand = "0.9"
 zbus = { version = "5", features = ["blocking"] }
 regex = "1"
 
