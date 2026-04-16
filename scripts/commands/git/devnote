@@ -9,7 +9,9 @@ import shutil
 import sys
 
 NOTES_DIR = pathlib.Path(
-    os.environ.get("NOTES_DIR", pathlib.Path.home() / "src" / "notes")
+    os.environ.get(
+        "NOTES_DIR", pathlib.Path.home() / "syncthing" / "default" / "notes"
+    )
 )
 CODE_ROOT_DIR = pathlib.Path.home() / "src"
 
@@ -201,7 +203,7 @@ def cmd_add(dest_dir, items):
 
 MAIN_DESCRIPTION = """\
 Per-repo developer notes. Stores markdown/text notes under
-${NOTES_DIR:-~/src/notes}/git/<host>/<path>/ so that notes stay
+${NOTES_DIR:-~/syncthing/default/notes}/git/<host>/<path>/ so that notes stay
 attached to the git repository you took them in, regardless of cwd.
 
 The <host>/<path> portion is derived from the current repo by:
@@ -232,7 +234,7 @@ add/todo input modes:
   * any other args                   -> joined with spaces, saved as text
   files that don't exist produce an error; text input is never validated.
 
-Requires being inside a git repository. Reads $NOTES_DIR (default ~/src/notes)
+Requires being inside a git repository. Reads $NOTES_DIR (default ~/Sync/notes)
 and $EDITOR (for `edit`). Depends on `git-sync` being in PATH for the URL
 fallback and on `rg` for the `rg` subcommand."""
 
@@ -332,7 +334,7 @@ async def main():
     args = parser.parse_args()
 
     repo_path = await normalized_repo_path(pathlib.Path.cwd())
-    dest_dir = NOTES_DIR / "git" / repo_path
+    dest_dir = NOTES_DIR / "dev" / repo_path
 
     match args.command:
         case "list":
