@@ -1,0 +1,186 @@
+#!/usr/bin/env python3
+"""Find what's holding a mount open without touching the mount itself.
+
+Safe for hung NFS: reads only /proc symlinks and text files, never stat()s
+the mountpoint. Run with sudo to see all processes.
+"""
+
+import argparse
+import asyncio
+import os
+import pathlib
+
+PROC = pathlib.Path("/proc")
+
+
+def iter_pids():
+    for entry in PROC.iterdir():
+        if entry.name.isdigit():
+            yield entry.name
+
+
+def read_symlink(path):
+    try:
+        return os.readlink(path)
+    except OSError:
+        return None
+
+
+def read_text(path):
+    try:
+        return path.read_text(errors="replace")
+    except OSError:
+        return None
+
+
+def proc_comm(pid):
+    text = read_text(PROC / pid / "comm")
+    return text.strip() if text else "?"
+
+
+def matches(link, target):
+    return link is not None and (
+        link == target or link.startswith(target + "/")
+    )
+
+
+def check_symlinks(target):
+    hits = []
+    for pid in iter_pids():
+        base = PROC / pid
+        for name in ("cwd", "root", "exe"):
+            link = read_symlink(base / name)
+            if matches(link, target):
+                hits.append((pid, name, link))
+    return hits
+
+
+def check_fds(target):
+    hits = []
+    for pid in iter_pids():
+        fd_dir = PROC / pid / "fd"
+        try:
+            fds = os.listdir(fd_dir)
+        except OSError:
+            continue
+        for fd in fds:
+            link = read_symlink(fd_dir / fd)
+            if matches(link, target):
+                hits.append((pid, fd, link))
+    return hits
+
+
+def check_maps(target):
+    hits = []
+    for pid in iter_pids():
+        text = read_text(PROC / pid / "maps")
+        if not text:
+            continue
+        seen = set()
+        for line in text.splitlines():
+            parts = line.split(maxsplit=5)
+            if len(parts) < 6:
+                continue
+            path = parts[5]
+            if matches(path, target) and path not in seen:
+                hits.append((pid, path))
+                seen.add(path)
+    return hits
+
+
+def check_mountinfo(target):
+    text = read_text(PROC / "self" / "mountinfo")
+    if not text:
+        return []
+    return [line for line in text.splitlines() if target in line]
+
+
+async def run_cmd(*args, timeout=5):
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+    except FileNotFoundError:
+        return None
+    try:
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+    except asyncio.TimeoutError:
+        proc.kill()
+        return "[timed out]"
+    return stdout.decode(errors="replace").rstrip()
+
+
+async def d_state_procs():
+    out = await run_cmd(
+        "ps", "-eo", "pid,stat,wchan:30,comm,args", "--no-headers"
+    )
+    if not out:
+        return ""
+    lines = []
+    for line in out.splitlines():
+        parts = line.split(None, 4)
+        if len(parts) >= 2 and "D" in parts[1]:
+            lines.append(line)
+    return "\n".join(lines)
+
+
+def section(title):
+    print()
+    print(f"=== {title} ===")
+
+
+async def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("mountpoint", type=pathlib.Path)
+    args = parser.parse_args()
+
+    target = str(args.mountpoint).rstrip("/") or "/"
+
+    if os.geteuid() != 0:
+        print("warning: not running as root; results will be incomplete\n")
+
+    section(f"mountinfo entries referencing {target}")
+    entries = check_mountinfo(target)
+    if entries:
+        for line in entries:
+            print(line)
+    else:
+        print("(none - is it actually mounted?)")
+
+    section(f"findmnt -R {target}")
+    out = await run_cmd("findmnt", "-R", target)
+    print(out if out else "(no output)")
+
+    section("/proc/*/{cwd,root,exe} pointing into mount")
+    hits = check_symlinks(target)
+    if hits:
+        for pid, kind, link in hits:
+            print(f"  pid={pid:<7} {kind:<4} {proc_comm(pid):<20} -> {link}")
+    else:
+        print("(none)")
+
+    section("/proc/*/fd/* pointing into mount")
+    hits = check_fds(target)
+    if hits:
+        for pid, fd, link in hits:
+            print(f"  pid={pid:<7} fd={fd:<4} {proc_comm(pid):<20} -> {link}")
+    else:
+        print("(none)")
+
+    section("/proc/*/maps referencing mount")
+    hits = check_maps(target)
+    if hits:
+        for pid, path in hits:
+            print(f"  pid={pid:<7} {proc_comm(pid):<20} {path}")
+    else:
+        print("(none)")
+
+    section("processes in uninterruptible sleep (D state)")
+    out = await d_state_procs()
+    print(out if out else "(none)")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
