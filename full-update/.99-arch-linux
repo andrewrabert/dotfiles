@@ -529,7 +529,6 @@ if HOSTNAME in ("mars", "phobos"):
             "kid3",
             "krdc",
             "krfb",
-            "krita",
             "kubectl",
             "litra",
             "losslesscut-bin",
