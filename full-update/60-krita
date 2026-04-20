@@ -2,65 +2,82 @@
 import asyncio
 import pathlib
 import shutil
+import subprocess
+
+HOME = pathlib.Path.home()
+FLATPAK_EXPORTS = [
+    HOME.joinpath(".local/share/flatpak/exports/share/applications"),
+    pathlib.Path("/var/lib/flatpak/exports/share/applications"),
+]
+USER_APPS = HOME / ".local/share/applications"
+WMCLASS = "org.kde.krita"
+
+
+def inject_nosplash(content):
+    lines = []
+    modified = False
+    for line in content.splitlines():
+        if line.startswith("Exec=") and "--nosplash" not in line:
+            newline = line.replace(f"{WMCLASS} ", f"{WMCLASS} --nosplash ", 1)
+            if newline == line:
+                raise RuntimeError("fail to add --nosplash")
+            else:
+                modified = True
+                line = newline
+        lines.append(line)
+    if not modified:
+        raise RuntimeError("could not find Exec line")
+    return "\n".join(lines)
+
+
+async def update_desktop_database():
+    proc = await asyncio.create_subprocess_exec("update-desktop-database")
+    await proc.wait()
+    if proc.returncode != 0:
+        raise subprocess.CalledProcessError(
+            proc.returncode, "update-desktop-database"
+        )
 
 
 async def main():
-    if not shutil.which("krita"):
-        return
+    sources = []
+    if shutil.which("flatpak"):
+        for exports in FLATPAK_EXPORTS:
+            main_desktop = exports / f"{WMCLASS}.desktop"
+            if not main_desktop.is_file():
+                continue
+            sources.extend(
+                [main_desktop, *exports.glob(f"{WMCLASS}.*.desktop")]
+            )
 
-    # Get krita package files
-    proc = await asyncio.create_subprocess_exec(
-        "pacman",
-        "-Ql",
-        "krita",
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    stdout, _ = await proc.communicate()
+    changed = 0
 
-    if proc.returncode != 0:
-        raise Exception(f"pacman -Ql krita failed: {proc.returncode}")
+    if sources:
+        USER_APPS.mkdir(parents=True, exist_ok=True)
+        for src in sources:
+            new_content = inject_nosplash(src.read_text())
+            dst = USER_APPS / src.name
+            try:
+                if dst.read_text() == new_content:
+                    continue
+            except FileNotFoundError:
+                pass
+            dst.write_text(new_content)
+            changed += 1
 
-    # Filter for .desktop files in /usr/share/applications/
-    desktop_files = [
-        line.split()[1]
-        for line in stdout.decode().splitlines()
-        if "/usr/share/applications/" in line and line.endswith(".desktop")
-    ]
+    if USER_APPS.is_dir():
+        source_names = set(src.name for src in sources)
+        for dst in [
+            USER_APPS / f"{WMCLASS}.desktop",
+            *USER_APPS.glob("org.kde.krita.*.desktop"),
+        ]:
+            if dst.name not in source_names:
+                dst.unlink()
+                changed += 1
 
-    # Check which files need modification
-    files_to_modify = []
-    for desktop_path in desktop_files:
-        src = pathlib.Path(desktop_path)
-        if not src.exists():
-            continue
-
-        content = src.read_text()
-        if "\nNoDisplay=true" in content or content.startswith(
-            "NoDisplay=true"
-        ):
-            files_to_modify.append(src)
-
-    if not files_to_modify:
-        return
-
-    # Modify all files in single sed call
-    file_paths = [str(f) for f in files_to_modify]
-    proc = await asyncio.create_subprocess_exec(
-        "sudo",
-        "sed",
-        "-i",
-        "s/^NoDisplay=true/NoDisplay=false/",
-        *file_paths,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    await proc.communicate()
-
-    if proc.returncode != 0:
-        raise Exception(f"sed failed: {proc.returncode}")
-
-    print(f"modified {len(files_to_modify)} files")
+    if changed:
+        print(f"updated {changed} krita desktop files")
+        await update_desktop_database()
 
 
 if __name__ == "__main__":
