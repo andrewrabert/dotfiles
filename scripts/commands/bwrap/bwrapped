@@ -66,6 +66,7 @@ HOME = pathlib.Path.home()
 WORK_DIR = pathlib.Path.cwd().resolve()
 GIT_CONFIG = HOME / ".config/git"
 CLAUDE_CONFIG_DIR = os.environ.get("CLAUDE_CONFIG_DIR", "")
+CODEX_HOME = os.environ.get("CODEX_HOME") or HOME / ".codex"
 OPENCODE_DIR = HOME / ".config/opencode"
 
 DEFAULT_CONFIG = {
@@ -107,6 +108,14 @@ PROGRAM_CONFIG = {
         },
         "env": {
             "inherit": ["CLAUDE_CONFIG_DIR"],
+        },
+    },
+    "codex": {
+        "bind": {
+            "rw": [CODEX_HOME],
+        },
+        "env": {
+            "inherit": ["CODEX_HOME"],
         },
     },
     "opencode": {"bind": {"rw": [OPENCODE_DIR, OPENCODE_DIR.resolve()]}},
