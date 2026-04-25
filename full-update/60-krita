@@ -72,8 +72,11 @@ async def main():
             *USER_APPS.glob("org.kde.krita.*.desktop"),
         ]:
             if dst.name not in source_names:
-                dst.unlink()
-                changed += 1
+                try:
+                    dst.unlink()
+                    changed += 1
+                except FileNotFoundError:
+                    pass
 
     if changed:
         print(f"updated {changed} krita desktop files")
