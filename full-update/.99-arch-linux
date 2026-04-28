@@ -354,7 +354,6 @@ if HOSTNAME in ("sol", "mars", "phobos"):
             "binmerge",
             "busybox",
             "cabextract",
-            "cargo",
             "cdemu-client",
             "clang",  # for clang-format
             "crun",
@@ -428,7 +427,6 @@ if HOSTNAME in ("sol", "mars", "phobos"):
             "rsync",
             "ruff",
             "rustup",
-            "rust-analyzer",
             "shellcheck",
             "shntool",
             "speedtest-go",

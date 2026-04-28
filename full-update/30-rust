@@ -5,15 +5,21 @@ show_help() {
     cat << EOF
 usage:
     -f, --force     force installation
+    --rustup-sh     install rustup via sh.rustup.rs even if pacman is present
     --help          show help and exit
 EOF
 }
 
 FORCE=
+RUSTUP_SH=
 while [ $# -gt 0 ]; do
     case "$1" in
         -f|--force)
             FORCE=1
+            shift
+            ;;
+        --rustup-sh)
+            RUSTUP_SH=1
             shift
             ;;
         --help)
@@ -31,18 +37,35 @@ if [ -z "$FORCE" ] && ! command -v rustup > /dev/null; then
 fi
 
 if ! command -v rustup > /dev/null; then
-    cleanup() {
-        rm -f "${TEMP_FILE}"
-    }
+    if [ -z "$RUSTUP_SH" ] && command -v pacman > /dev/null; then
+        echo 'Installing rustup via pacman'
+        sudo pacman -S --needed --noconfirm rustup
+    else
+        export CARGO_HOME="${HOME}/.cargo"
 
-    trap cleanup EXIT
-    TEMP_FILE="$(mktemp)"
-    curl https://sh.rustup.rs > "${TEMP_FILE}"
-    chmod +x "${TEMP_FILE}"
-    RUSTUP_INIT_SKIP_PATH_CHECK=yes "${TEMP_FILE}" -y --profile complete --no-modify-path
+        cleanup() {
+            rm -f "${TEMP_FILE}"
+        }
+        trap cleanup EXIT
+        TEMP_FILE="$(mktemp)"
+
+        URL='https://sh.rustup.rs'
+        printf 'Installing rustup from %s\n' "${URL}"
+        curl "${URL}" > "${TEMP_FILE}"
+        chmod +x "${TEMP_FILE}"
+        RUSTUP_INIT_SKIP_PATH_CHECK=yes "${TEMP_FILE}" -y --no-modify-path
+
+        echo 'Successfully installed rustup'
+        export PATH="${CARGO_HOME}/bin:${PATH}"
+    fi
 fi
 
-if ! rustup toolchain list | grep -q '^stable'; then
+if ! rustup toolchain list | grep -q '^stable-'; then
+    echo 'Installing toolchain: stable'
     rustup toolchain install stable
+fi
+if ! rustup component list --installed | grep -q '^rust-analyzer-'; then
+    echo 'Installing component: rust-analyzer'
+    rustup component add rust-analyzer
 fi
 rustup update

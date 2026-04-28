@@ -588,6 +588,16 @@ _DEFAULT_TYPES = {
     "png",
 }
 
+# source mimetypes whose metadata should be copied into a JPEG target
+_JPEG_METADATA_SOURCES = {
+    "image/heif",
+    "image/jpeg",
+    "image/jxl",
+    "image/png",
+    "image/tiff",
+    "image/webp",
+}
+
 
 def determine_mime(path):
     # roughly 2.5x faster than using libmagic
@@ -1373,9 +1383,10 @@ async def _process_convert(path, source_mimetype, target_mimetype, **options):
                         )
                         await convert_to_ppm(path, temp_path_2)
                         await convert_to_jpeg(temp_path_2, temp_path)
-                        await exiv2.copy_metadata(original_path, temp_path)
                     case _:
                         await convert_to_jpeg(path, temp_path)
+                if source_mimetype in _JPEG_METADATA_SOURCES:
+                    await exiv2.copy_metadata(original_path, temp_path)
                 temp_path.replace(dest)
             case _:
                 raise RuntimeError("invalid target_type")
