@@ -7,10 +7,17 @@ shell-integration-features = no-cursor
 confirm-close-surface = false
 
 font-family = Hack
+font-thicken = true
+font-thicken-strength = 70
+font-size = 14
 
 app-notifications = no-clipboard-copy
 clipboard-read = allow
 link-previews = osc8
+
+macos-titlebar-proxy-icon = hidden
+
+keybind = global:cmd+enter=toggle_visibility
 
 #ewline in claude code
 keybind = shift+enter=text:\x1b\r
