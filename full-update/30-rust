@@ -40,6 +40,9 @@ if ! command -v rustup > /dev/null; then
     curl https://sh.rustup.rs > "${TEMP_FILE}"
     chmod +x "${TEMP_FILE}"
     RUSTUP_INIT_SKIP_PATH_CHECK=yes "${TEMP_FILE}" -y --profile complete --no-modify-path
-else
-    rustup update
 fi
+
+if ! rustup toolchain list | grep -q '^stable'; then
+    rustup toolchain install stable
+fi
+rustup update
