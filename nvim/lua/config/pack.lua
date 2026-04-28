@@ -13,16 +13,11 @@ vim.api.nvim_create_user_command("PackCleanup", pack_cleanup, {})
 vim.api.nvim_create_user_command("PackSync", function()
 	pack_cleanup()
 	vim.pack.update(nil, { force = true })
+	if not require('blink.cmp').library_available() then
+		print('Building blink.cmp native library...')
+		require('blink.cmp').build():wait(math.huge)
+	end
 end, {})
-
-vim.api.nvim_create_autocmd('PackChanged', {
-	callback = function(ev)
-		local name, kind = ev.data.spec.name, ev.data.kind
-		if name == 'blink.cmp' and (kind == 'install' or kind == 'update') then
-			vim.system({ 'cargo', 'build', '--release' }, { cwd = ev.data.path }):wait()
-		end
-	end,
-})
 
 vim.pack.add({
 	'https://github.com/tinted-theming/tinted-vim',

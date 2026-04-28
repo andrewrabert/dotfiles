@@ -2034,6 +2034,23 @@ async def main_fixcolorspace():
         print(f"{done} / {total}")
 
 
+async def main_metadata():
+    parser = argparse.ArgumentParser()
+    subparsers = parser.add_subparsers(dest="subcommand", required=True)
+
+    copy_parser = subparsers.add_parser(
+        "copy", help="copy all metadata from <source> to <target>"
+    )
+    copy_parser.add_argument("source", type=_parser_path_file)
+    copy_parser.add_argument("target", type=_parser_path_file)
+
+    args = parser.parse_args()
+
+    match args.subcommand:
+        case "copy":
+            await exiv2.copy_metadata(args.source, args.target)
+
+
 if __name__ == "__main__":
     signal.signal(signal.SIGINT, _sigint_handler)
     match pathlib.Path(sys.argv[0]).name:
@@ -2043,5 +2060,7 @@ if __name__ == "__main__":
             asyncio.run(main_convert())
         case "imgfixcolorspace":
             asyncio.run(main_fixcolorspace())
+        case "imgmetadata":
+            asyncio.run(main_metadata())
         case "imgoptim" | _:
             asyncio.run(main_optim())

@@ -1,8 +1,45 @@
 #!/usr/bin/env sh
-set -e
+set -eu
+
+show_help() {
+    cat << EOF
+usage:
+    --rebase        rebase to newest Fedora version if available
+    --help          show help and exit
+EOF
+}
+
+REBASE=
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --rebase)
+            REBASE=1
+            shift
+            ;;
+        --help)
+            show_help
+            exit
+            ;;
+        *)
+            echo 'error: unknown argument(s)' >&2
+            exit 1
+    esac
+done
 
 if ! command -v rpm-ostree > /dev/null; then
     exit
 fi
 
-rpm-ostree upgrade
+current=$(. /etc/os-release && printf '%s\n' "$VERSION_ID")
+latest=$(ostree --repo=/ostree/repo remote refs fedora | awk -F'[:/]' '$5 == "kinoite" && $3 ~ /^[0-9]+$/ {print $3}' | sort -n | tail -1)
+
+if [ "$current" -lt "$latest" ]; then
+    if [ -n "$REBASE" ]; then
+        printf 'Rebasing from Fedora %s to %s\n' "$current" "$latest"
+        sudo rpm-ostree rebase "fedora:fedora/$latest/x86_64/kinoite"
+        exit
+    fi
+    printf 'WARNING: Fedora %s is available (currently on %s); pass --rebase to upgrade\n' "$latest" "$current" >&2
+fi
+
+sudo rpm-ostree upgrade
