@@ -1,0 +1,7 @@
+font-thicken = true
+font-thicken-strength = 70
+font-size = 14
+
+macos-titlebar-proxy-icon = hidden
+
+keybind = global:cmd+enter=toggle_visibility

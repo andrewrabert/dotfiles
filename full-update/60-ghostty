@@ -28,3 +28,13 @@ if [ "$(realpath "${TARGET}")" != "${SOURCE}" ]; then
     rm -rf "${TARGET}"
     ln -sfn "${SOURCE}" "${TARGET}"
 fi
+
+CONFIG_LOCAL="${SOURCE}/config-local"
+case "$(uname -s)" in
+    Darwin)
+        printf 'config-file = config-macos\n' > "${CONFIG_LOCAL}"
+        ;;
+    *)
+        rm -f "${CONFIG_LOCAL}"
+        ;;
+esac
