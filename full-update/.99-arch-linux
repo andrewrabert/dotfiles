@@ -1039,7 +1039,7 @@ async def ensure_flatpak_permissions():
             ]
         case "phobos":
             flatpak_permissions["org.fooyin.fooyin"] = [
-                "/home/ar/Audio/Lossy_opus_128/:ro",
+                "/home/ar/Audio/Library/:ro",
             ]
 
     installed_flatpaks = await Flatpak.list_installed()
