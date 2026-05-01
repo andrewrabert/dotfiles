@@ -178,7 +178,7 @@ class AURCLI:
         force: bool = False,
     ):
         """Build a package in the given directory. Returns True on success."""
-        args = ["build", f"--database={database}", "--sign"]
+        args = ["build", f"--database={database}", "--sign", "--syncdeps"]
         if force:
             args.append("--force")
         if makepkg_args:
