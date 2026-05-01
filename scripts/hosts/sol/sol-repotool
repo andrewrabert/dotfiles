@@ -176,11 +176,14 @@ class AURCLI:
         cwd: pathlib.Path,
         makepkg_args: list[str] = None,
         force: bool = False,
+        clean_build: bool = False,
     ):
         """Build a package in the given directory. Returns True on success."""
         args = ["build", f"--database={database}", "--sign", "--syncdeps"]
         if force:
             args.append("--force")
+        if clean_build:
+            args.append("--cleanbuild")
         if makepkg_args:
             args.extend(["--margs", *makepkg_args])
         returncode, _, _ = await AURCLI._run(
@@ -2266,6 +2269,7 @@ async def db_rebuild(packages=None, makepkg_flags=None, depends_on=None):
             cwd=pkg_dir,
             makepkg_args=makepkg_args,
             force=True,
+            clean_build=True,
         )
         if success:
             await database._sign_database()
