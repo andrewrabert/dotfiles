@@ -1,0 +1,14 @@
+#!/usr/bin/env sh
+set -e
+
+# zeditor - Arch Linux package
+# zed     - "Install CLI" from Zed on macos
+if ! command -v zeditor > /dev/null && ! command -v zed > /dev/null; then
+    rm -rf ~/.config/zed
+    exit
+fi
+
+if [ "$(realpath ~/.config/zed)" != "$DOTFILES/zed" ]; then
+    rm -rf ~/.config/zed
+    ln -sT "${DOTFILES}/zed" ~/.config/zed
+fi
