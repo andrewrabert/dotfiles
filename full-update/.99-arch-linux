@@ -356,6 +356,8 @@ if HOSTNAME in ("sol", "mars", "phobos"):
             "cabextract",
             "cdemu-client",
             "clang",  # for clang-format
+            "claude-agent-acp",
+            "claude-code",
             "crun",
             "cuetools",
             "curlie",
@@ -406,6 +408,7 @@ if HOSTNAME in ("sol", "mars", "phobos"):
             "nsz",
             "ntfs-3g",
             "openbsd-netcat",
+            "opencode",
             "openssh",
             "opus-tools",
             "oxipng",
