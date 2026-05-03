@@ -27,7 +27,7 @@ def all_paths(*paths, include_files=True, include_dirs=False):
                 stack.append(path)
             elif include_files:
                 results.add(path)
-    return sorted(results)
+    return list(results)
 
 
 def main():
@@ -131,6 +131,9 @@ def main():
             for p in all_paths_list
             if (p.is_file() and include_files) or (p.is_dir() and include_dirs)
         ]
+
+    # Process deepest paths first so children are renamed before their parents.
+    paths.sort(key=lambda p: (-len(p.parts), str(p)))
 
     for path in paths:
         match (args.lower, args.upper):
