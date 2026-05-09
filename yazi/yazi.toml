@@ -17,8 +17,8 @@ wrap = "no"
 # too slow - especially on network mounts
 # this can also result in processes lingering after exit
 fetchers = [
-	{ id = "mime", url = "*/", run = "mime.dir", prio = "high" },
-	{ id = "mime", url = "*", run = "dummy-mime", prio = "high" },
+	{ group = "mime", url = "*/", run = "mime.dir", prio = "high" },
+	{ group = "mime", url = "*", run = "dummy-mime", prio = "high" },
 ]
 preloaders = []
 previewers = [
