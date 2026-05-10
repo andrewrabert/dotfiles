@@ -13,6 +13,9 @@ source_exclude = [
     "*.pdf",
     "*.txt",
 ]
+target_exclude = [
+    "/.stfolder",
+]
 
 [converters.audio]
 command = ["ffmpeg", "-y", "-i", "{input}", "-c:a", "libopus", "-b:a", "128k", "{output}"]

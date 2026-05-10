@@ -16,9 +16,7 @@ import sys
 import tabulate
 
 COMPOSE_PROJECT_NAME = "sol-docker"
-SOL_DOCKER_PATH = pathlib.Path(
-    "~/src/git.nullsum.net/nvllsvm/sol-docker"
-).expanduser()
+SOL_DOCKER_PATH = pathlib.Path.home() / "src/nullsum/ar/sol-docker"
 
 
 KILLABLE = [

@@ -5,12 +5,12 @@ update_server() {
     cd "$1"
     server="$(basename "$1")"
     echo "$server - syncing certs"
-    ./bin/copy_certs_to_remote.sh > /dev/null 2>&1
+    just copy-certs-to-remote > /dev/null 2>&1
     echo "$server - updating and reloading Docker containers"
-    ./bin/reload_remote.sh > /dev/null 2>&1
+    just reload-remote > /dev/null 2>&1
     cd - > /dev/null
 }
 
-~/src/git.nullsum.net/nvllsvm/certs-nullsum.net/bin/renew_all.sh
+~/src/nullsum/ar/certs-nullsum.net/bin/renew_all.sh
 
-update_server ~/src/github/nvllsvm/nullsum.net
+update_server ~/src/nullsum/ar/www.nullsum.net
