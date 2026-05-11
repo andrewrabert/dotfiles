@@ -9,7 +9,7 @@ if ! [ -d ~/.config/systemd ] || [ "$(realpath ~/.config/systemd)" != "${DOTFILE
     ln -sT "${DOTFILES}/systemd" ~/.config/systemd
 fi
 
-git-auto-update ~/src/git.nullsum.net/nvllsvm/sol-docker
+git-auto-update ~/src/nullsum/ar/sol-docker
 sol-docker pull
 sol-repotool update
 
