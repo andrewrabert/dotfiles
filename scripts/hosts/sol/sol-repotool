@@ -38,6 +38,8 @@ LOCK_FILE = (
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
+HAD_ERROR = False
+
 
 @dataclasses.dataclass
 class DependencyInfo:
@@ -142,6 +144,9 @@ class AURCLI:
             args.append("--reset")
         args.extend(["--", pkgbase])
         returncode, _, _ = await AURCLI._run(*args, cwd=cwd)
+        if returncode != 0:
+            global HAD_ERROR
+            HAD_ERROR = True
         return returncode == 0
 
     @staticmethod
@@ -168,6 +173,9 @@ class AURCLI:
         returncode, _, _ = await AURCLI._run(
             *args, cwd=cwd, capture_output=False
         )
+        if returncode != 0:
+            global HAD_ERROR
+            HAD_ERROR = True
         return returncode == 0
 
     @staticmethod
@@ -189,6 +197,9 @@ class AURCLI:
         returncode, _, _ = await AURCLI._run(
             *args, cwd=cwd, capture_output=False
         )
+        if returncode != 0:
+            global HAD_ERROR
+            HAD_ERROR = True
         return returncode == 0
 
     @staticmethod
@@ -2540,6 +2551,9 @@ def main():
             asyncio.run(db_sync())
         case _:
             raise ValueError
+
+    if _error_tracker.had_error:
+        sys.exit(1)
 
 
 if __name__ == "__main__":
