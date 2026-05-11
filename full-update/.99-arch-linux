@@ -530,6 +530,7 @@ if HOSTNAME in ("mars", "phobos"):
             "krdc",
             "krfb",
             "kubectl",
+            "kwinctrl",
             "litra",
             "losslesscut-bin",
             "lsdvd",
