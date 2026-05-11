@@ -1,5 +1,5 @@
 #!/usr/bin/env sh
-exec ww-rs \
+exec kwinctrl \
     --filter-focused \
     --center \
     --scale-factor 0.8 \
