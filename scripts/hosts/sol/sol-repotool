@@ -2552,7 +2552,7 @@ def main():
         case _:
             raise ValueError
 
-    if _error_tracker.had_error:
+    if HAD_ERROR:
         sys.exit(1)
 
 
