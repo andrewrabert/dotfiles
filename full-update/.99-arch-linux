@@ -339,6 +339,9 @@ EXPECTED_PACKAGES = {
     "logrotate",
 }
 
+if HOSTNAME in ("phobos", "sol"):
+    EXPECTED_PACKAGES.update({"matrix-archiver"})
+
 if HOSTNAME in ("sol", "mars", "phobos"):
     EXPECTED_PACKAGES.update(
         {
