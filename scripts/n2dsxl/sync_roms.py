@@ -10,6 +10,7 @@ import asyncio
 import json
 import os
 import pathlib
+import shlex
 import shutil
 import signal
 import sys
@@ -21,6 +22,8 @@ import async_executor
 signal.signal(signal.SIGPIPE, signal.SIG_DFL)
 
 MTIME_THRESHOLD = 2  # seconds (FAT32 has 2-second resolution)
+
+SSH_HOST = "sol"
 
 # (sdcard_subdir, nas_path, rom_extension)
 ROM_TYPES = [
@@ -45,12 +48,15 @@ def get_subdir(name):
     return "_other"
 
 
+def ssh_cmd(*args):
+    """Build ssh argv that safely quotes remote args (ssh joins with spaces)."""
+    return ("ssh", SSH_HOST, " ".join(shlex.quote(a) for a in args))
+
+
 async def get_nas_index(nas_path):
-    """Get cached file index from NAS via file-hash-recorder."""
+    """Get cached file index from NAS via file-hash-recorder over ssh."""
     proc = await asyncio.create_subprocess_exec(
-        "file-hash-recorder",
-        "--list",
-        str(nas_path),
+        *ssh_cmd("file-hash-recorder", "--list", str(nas_path)),
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
@@ -86,18 +92,34 @@ async def extract_7z(archive_path, dest_dir):
         raise UserError(f"7z extraction failed: {stderr.decode()}")
 
 
+async def rsync_fetch(remote_path, local_path):
+    """Fetch a single file from SSH_HOST via rsync."""
+    proc = await asyncio.create_subprocess_exec(
+        "rsync",
+        "-a",
+        f"{SSH_HOST}:{shlex.quote(str(remote_path))}",
+        str(local_path),
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    _, stderr = await proc.communicate()
+    if proc.returncode != 0:
+        raise UserError(f"rsync failed: {stderr.decode()}")
+
+
 async def sync_single_rom(item):
-    """Sync a single ROM from NAS to microSD."""
+    """Sync a single ROM from NAS (remote) to microSD."""
     archive_path = item["nas_path"] / item["archive_name"]
     target_path = item["target_path"]
 
     # Ensure target directory exists
     target_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Extract to temp dir, copy to temp file, then rename
     with tempfile.TemporaryDirectory() as tmp:
         tmp_path = pathlib.Path(tmp)
-        await extract_7z(archive_path, tmp_path)
+        local_archive = tmp_path / item["archive_name"]
+        await rsync_fetch(archive_path, local_archive)
+        await extract_7z(local_archive, tmp_path)
 
         extracted_file = tmp_path / item["rom_name"]
         if not extracted_file.exists():
