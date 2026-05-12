@@ -150,5 +150,3 @@ bang-bang() {
 }
 zle -N bang-bang
 bindkey '^p' bang-bang
-export PATH=/Users/andrewr/.local/bin:$PATH
-
