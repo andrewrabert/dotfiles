@@ -69,3 +69,13 @@ if ! rustup component list --installed | grep -q '^rust-analyzer-'; then
     rustup component add rust-analyzer
 fi
 rustup update
+
+CARGO_HOME="${CARGO_HOME:-${HOME}/.cargo}"
+CARGO_CONFIG="${CARGO_HOME}/config.toml"
+CARGO_CONFIG_SOURCE="${DOTFILES}/cargo/config.toml"
+mkdir -p "${CARGO_HOME}"
+if [ "$(realpath "${CARGO_CONFIG}" 2>/dev/null)" != "${CARGO_CONFIG_SOURCE}" ]; then
+    echo "Linking cargo config ..."
+    rm -f "${CARGO_CONFIG}"
+    ln -sT "${CARGO_CONFIG_SOURCE}" "${CARGO_CONFIG}"
+fi
