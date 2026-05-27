@@ -30,6 +30,10 @@ def TempPath(**kwargs):
 
 
 def gifski(path, target, framerate="30", loops=1):
+    frames = sorted(path.iterdir())
+    # gifski defaults to capping anims at ~800x600; pass explicit --width
+    # so frame dimensions are preserved.
+    width = vips_width(frames[0])
     with TempPath(
         dir=target.parent,
         prefix=".img-to-interpolated-video",
@@ -40,12 +44,14 @@ def gifski(path, target, framerate="30", loops=1):
                 "gifski",
                 "--quiet",
                 "--extra",
+                "--width",
+                str(width),
                 "--fps",
                 framerate,
                 "--output",
                 tmptarget,
                 "--",
-                *list(path.iterdir()),
+                *frames,
             ],
             stdout=subprocess.DEVNULL,
             check=True,
@@ -53,7 +59,27 @@ def gifski(path, target, framerate="30", loops=1):
         tmptarget.replace(target)
 
 
-def ffmpeg_merge(path, target, framerate="30", loops=1):
+# -an drops audio so players (e.g. Signal) treat output as a looping animation.
+CODEC_ARGS = {
+    "mp4": [
+        "-an",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "slow",
+        "-crf",
+        "16",
+        "-movflags",
+        "+faststart",
+    ],
+    "webm": ["-an", "-c:v", "libvpx-vp9", "-crf", "30", "-b:v", "0"],
+    "webp": ["-an", "-c:v", "libwebp_anim", "-loop", "0", "-quality", "90"],
+}
+
+
+def ffmpeg_merge(path, target, framerate="30", loops=1, codec_args=None):
+    if codec_args is None:
+        codec_args = CODEC_ARGS["mp4"]
     with TempPath(
         dir=target.parent,
         prefix=".img-to-interpolated-video",
@@ -71,18 +97,43 @@ def ffmpeg_merge(path, target, framerate="30", loops=1):
                 "glob",
                 "-i",
                 f"{path}/*.png",
-                "-c:v",
-                "libx264",
-                "-preset",
-                "slow",
-                "-crf",
-                "16",
+                *codec_args,
                 tmptarget,
             ],
             stdout=subprocess.DEVNULL,
             check=True,
         )
         tmptarget.replace(target)
+
+
+def vips_width(path):
+    proc = subprocess.run(
+        ["vipsheader", "-f", "width", "--", path],
+        stdout=subprocess.PIPE,
+        check=True,
+    )
+    return int(proc.stdout)
+
+
+def vips_scale_frames(path, target, scale):
+    for src in sorted(path.iterdir()):
+        subprocess.run(
+            ["vips", "resize", src, target / src.name, str(scale)],
+            check=True,
+        )
+
+
+def blend_frames(path, target, n):
+    # Average each non-overlapping group of n frames into one (motion blur).
+    # Done per-group with ImageMagick rather than ffmpeg temporal filters,
+    # which miscount frames when the source PNGs carry identical timestamps.
+    frames = sorted(path.iterdir())
+    for i in range(0, len(frames), n):
+        group = frames[i : i + n]
+        subprocess.run(
+            ["magick", *group, "-evaluate-sequence", "Mean", target / f"{i:08d}.png"],
+            check=True,
+        )
 
 
 def ffmpeg_frames_to_png(path, target, remove_duplicates=True, ss=None, to=None):
@@ -173,7 +224,19 @@ def main():
     )
     parser.add_argument("--rife-model")
     parser.add_argument(
+        "--blend",
+        type=int,
+        metavar="NUM",
+        help="average each NUM consecutive frames into one (motion blur)",
+    )
+    parser.add_argument(
         "--fps", default="30", metavar="FPS", help="(default %(default)s)"
+    )
+    parser.add_argument(
+        "--scale",
+        type=float,
+        metavar="FACTOR",
+        help="resize output by factor (e.g. 0.5 = half size)",
     )
     parser.add_argument(
         "-m",
@@ -185,17 +248,15 @@ def main():
     parser.add_argument("--to", metavar="TIME", help="stop time (ffmpeg -to)")
     parser.add_argument("source", type=pathlib.Path)
     parser.add_argument(
-        "-f", "--format", default="mp4", choices=["gif", "mp4", "png"]
+        "-f", "--format", default="mp4", choices=["gif", "mp4", "webm", "webp", "png"]
     )
     args = parser.parse_args()
 
     output = args.output
     if output is None:
         name = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        if args.format == "mp4":
-            name += ".mp4"
-        elif args.format == "gif":
-            name += ".gif"
+        if args.format in ("mp4", "webm", "webp", "gif"):
+            name += f".{args.format}"
         output = pathlib.Path(name)
 
     with contextlib.ExitStack() as exitstack:
@@ -223,6 +284,16 @@ def main():
         for i, p in enumerate(new):
             shutil.copy(p, tmpdir / f"{i:032d}.png")
 
+        if args.scale is not None and args.scale != 1.0:
+            print("Scaling frames")
+            tmpdir2 = exitstack.enter_context(
+                tempfile.TemporaryDirectory(dir=source.parent)
+            )
+            tmpdir2 = pathlib.Path(tmpdir2)
+            vips_scale_frames(tmpdir, tmpdir2, args.scale)
+            shutil.rmtree(tmpdir)
+            shutil.move(tmpdir2, tmpdir)
+
         if args.rife_iterations:
             print("Running rife")
             tmpdir2 = exitstack.enter_context(
@@ -235,6 +306,16 @@ def main():
                 model=args.rife_model,
                 num_passes=args.rife_iterations,
             )
+            shutil.rmtree(tmpdir)
+            shutil.move(tmpdir2, tmpdir)
+
+        if args.blend is not None and args.blend > 1:
+            print("Blending frames")
+            tmpdir2 = exitstack.enter_context(
+                tempfile.TemporaryDirectory(dir=source.parent)
+            )
+            tmpdir2 = pathlib.Path(tmpdir2)
+            blend_frames(tmpdir, tmpdir2, args.blend)
             shutil.rmtree(tmpdir)
             shutil.move(tmpdir2, tmpdir)
 
@@ -257,13 +338,17 @@ def main():
                 sources[-1].unlink()
 
         match args.format:
-            case "mp4":
+            case "mp4" | "webm" | "webp":
                 print("Rendering video")
+                # webp loops infinitely via -loop 0; duplicating frames with
+                # -stream_loop only bloats the file.
+                loops = 0 if args.format == "webp" else args.loops
                 ffmpeg_merge(
                     tmpdir,
                     output,
                     framerate=args.fps,
-                    loops=args.loops,
+                    loops=loops,
+                    codec_args=CODEC_ARGS[args.format],
                 )
             case "gif":
                 print("Rendering gif")
