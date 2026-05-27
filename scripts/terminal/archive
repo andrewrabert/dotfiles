@@ -60,15 +60,17 @@ LOGGER = logging.getLogger("archive-extract")
 
 
 @contextlib.contextmanager
-def TempPath(**kwargs):
-    """Wrapper around tempfile.NamedTemporaryFile which returns a path object
+def TempPath(target_dir, name, prefix=".archive_"):
+    """Create a NamedTemporaryFile in `target_dir`, yielding its path.
 
     Unlike tempfile.NamedTemporaryFile, the FileNotFoundError exception is not
     raised if the file is deleted before the context closes.
 
     :rtype: pathlib.Path
     """
-    with tempfile.NamedTemporaryFile(**kwargs, delete=False) as tmp:
+    with tempfile.NamedTemporaryFile(
+        dir=target_dir, prefix=prefix, suffix=name + ".tmp", delete=False
+    ) as tmp:
         temp_path = pathlib.Path(tmp.name)
         try:
             yield temp_path
@@ -77,6 +79,28 @@ def TempPath(**kwargs):
                 temp_path.unlink()
             except FileNotFoundError:
                 pass
+
+
+@contextlib.contextmanager
+def TempDir(target_dir, name, prefix=".archive_"):
+    """Create a TemporaryDirectory in `target_dir`, yielding its path.
+
+    :rtype: pathlib.Path
+    """
+    with tempfile.TemporaryDirectory(
+        dir=target_dir, prefix=prefix, suffix=name + ".tmp"
+    ) as tmp:
+        yield pathlib.Path(tmp)
+
+
+def make_temp_dir(target_dir, name, prefix=".archive_"):
+    """Like TempDir but not a context manager: caller owns cleanup.
+
+    :rtype: pathlib.Path
+    """
+    return pathlib.Path(
+        tempfile.mkdtemp(dir=target_dir, prefix=prefix, suffix=name + ".tmp")
+    )
 
 
 def _all_paths(root):
@@ -292,9 +316,7 @@ async def create_rvz(path, dest, fast=False, password=None):
     level = "1" if fast else "22"
 
     # need tempdir to allow for concurrent processes
-    with tempfile.TemporaryDirectory(
-        dir=dest.parent, prefix=".archive_", suffix=dest.name + ".tmp"
-    ) as tmp:
+    with TempDir(dest.parent, dest.name) as tmp:
         proc = await asyncio.create_subprocess_exec(
             "dolphin-tool",
             "convert",
@@ -339,9 +361,7 @@ async def create_nsz(path, dest, fast=False, password=None):
     level = "1" if fast else "22"
 
     # need tempdir to allow for concurrent processes
-    with tempfile.TemporaryDirectory(
-        dir=dest.parent, prefix=".archive_", suffix=dest.name + ".tmp"
-    ) as tmp:
+    with TempDir(dest.parent, dest.name) as tmp:
         proc = await asyncio.create_subprocess_exec(
             "nsz",
             "-C",  # compress
@@ -354,11 +374,8 @@ async def create_nsz(path, dest, fast=False, password=None):
         )
         await proc.communicate()
         assert proc.returncode == 0
-        tmp_files = list(pathlib.Path(tmp).iterdir())
-        assert len(tmp_files) == 1
-        tmp_file = tmp_files[0]
-        assert tmp_file.is_file()
-        tmp_file.replace(dest)
+        files = list(pathlib.Path(tmp).iterdir())
+        files[0].replace(dest)
 
 
 async def create_tar(path, dest, fast=False, password=None):
@@ -632,9 +649,7 @@ async def process(
         dest = build_dest(source, suffix, parent=parent)
 
     before = sum(path.lstat().st_size for path in _all_paths(source))
-    with TempPath(
-        dir=dest.parent, prefix=".archive_", suffix=source.name + ".tmp"
-    ) as tmp:
+    with TempPath(dest.parent, source.name) as tmp:
         await formats["func"](source, tmp, fast, password=password)
         tmp.replace(dest)
     after = dest.lstat().st_size
@@ -830,9 +845,7 @@ class nsz:
         target = (dest / path.name).with_suffix(".nsp")
         if target.exists():
             raise RuntimeError
-        with tempfile.TemporaryDirectory(
-            dir=dest, prefix=".extract_", suffix=dest.name + ".tmp"
-        ) as tmp:
+        with TempDir(dest, dest.name, ".extract_") as tmp:
             proc = await asyncio.create_subprocess_exec(
                 "nsz",
                 "-D",  # decompress
@@ -849,13 +862,10 @@ class nsz:
             if proc.returncode != 0:
                 raise ProcessError(proc, stdout.decode())
 
-            tmp_files = list(pathlib.Path(tmp).iterdir())
-            assert len(tmp_files) == 1
-            tmp_file = tmp_files[0]
-            assert tmp_file.is_file()
+            files = list(pathlib.Path(tmp).iterdir())
             if target.exists():
                 raise RuntimeError
-            tmp_file.replace(target)
+            files[0].replace(target)
 
     @classmethod
     async def volumes(cls, path, password=""):
@@ -1784,9 +1794,7 @@ class cuefile:
         volumes = await cls.volumes(path)
         unique_files = set([filename for filename, _ in cls._parse_cue(path)])
         name = cls._content_name(path)
-        with tempfile.TemporaryDirectory(
-            dir=dest, prefix=".extract_", suffix=dest.name + ".tmp"
-        ) as tmp:
+        with TempDir(dest, dest.name, ".extract_") as tmp:
             if len(unique_files) > 1:
                 proc = await asyncio.create_subprocess_exec(
                     "binmerge",
@@ -2908,19 +2916,11 @@ async def process_archive(cls, volumes, path, paths, password, args):
         dest = _build_extract_dest(path, args.parent, args.child)
         with contextlib.ExitStack() as stack:
             if args.ignore_errors:
-                tmp = pathlib.Path(tempfile.mkdtemp(
-                    dir=dest.parent,
-                    prefix=".extract_",
-                    suffix=dest.name + ".tmp",
-                ))
+                tmp = make_temp_dir(dest.parent, dest.name, ".extract_")
             else:
-                tmp = pathlib.Path(stack.enter_context(
-                    tempfile.TemporaryDirectory(
-                        dir=dest.parent,
-                        prefix=".extract_",
-                        suffix=dest.name + ".tmp",
-                    )
-                ))
+                tmp = stack.enter_context(
+                    TempDir(dest.parent, dest.name, ".extract_")
+                )
 
             await cls.extract(
                 volumes[0],
