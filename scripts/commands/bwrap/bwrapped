@@ -68,7 +68,7 @@ GIT_CONFIG = HOME / ".config/git"
 CLAUDE_CONFIG_DIR = os.environ.get("CLAUDE_CONFIG_DIR", "")
 CODEX_HOME = os.environ.get("CODEX_HOME") or HOME / ".codex"
 OPENCODE_DIR = HOME / ".config/opencode"
-PI_CODING_AGENT_DIR = HOME / ".pi/agent"
+PI_CODING_AGENT_DIR = HOME / ".pi"
 PI_BIND = [PI_CODING_AGENT_DIR, PI_CODING_AGENT_DIR.resolve()]
 PI_BIND.extend(
     pathlib.Path(p)
