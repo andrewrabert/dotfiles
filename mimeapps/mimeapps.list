@@ -97,3 +97,4 @@ x-scheme-handler/webcal=userapp-Thunderbird-AUY3L3.desktop
 text/calendar=userapp-Thunderbird-AUY3L3.desktop
 application/x-extension-ics=userapp-Thunderbird-AUY3L3.desktop
 x-scheme-handler/webcals=userapp-Thunderbird-AUY3L3.desktop
+x-scheme-handler/readest=readest-handler.desktop
