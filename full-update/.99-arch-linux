@@ -419,6 +419,7 @@ if HOSTNAME in ("sol", "mars", "phobos"):
             "pandoc-cli",
             "pbzip2",
             "perl-image-exiftool",
+            "pi-coding-agent",
             "pigz",
             "pixz",
             "pkgfile",
