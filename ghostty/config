@@ -12,7 +12,4 @@ app-notifications = no-clipboard-copy
 clipboard-read = allow
 link-previews = osc8
 
-#ewline in claude code
-keybind = shift+enter=text:\x1b\r
-
 config-file = ?config-local
