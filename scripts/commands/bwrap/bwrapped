@@ -91,6 +91,7 @@ DEFAULT_CONFIG = {
             "/run/systemd/resolve",
             HOME / ".local/bin",
             HOME / ".cargo",
+            HOME / ".rustup",
             GIT_CONFIG,
             GIT_CONFIG.resolve(),
         ],
