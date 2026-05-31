@@ -68,6 +68,17 @@ GIT_CONFIG = HOME / ".config/git"
 CLAUDE_CONFIG_DIR = os.environ.get("CLAUDE_CONFIG_DIR", "")
 CODEX_HOME = os.environ.get("CODEX_HOME") or HOME / ".codex"
 OPENCODE_DIR = HOME / ".config/opencode"
+PI_CODING_AGENT_DIR = HOME / ".pi/agent"
+PI_BIND = [PI_CODING_AGENT_DIR, PI_CODING_AGENT_DIR.resolve()]
+PI_BIND.extend(
+    pathlib.Path(p)
+    for p in [
+        os.environ.get("PI_CODING_AGENT_SESSION_DIR"),
+        os.environ.get("PI_PACKAGE_DIR"),
+    ]
+    if p
+)
+PI_BIND = list(dict.fromkeys(PI_BIND))
 
 DEFAULT_CONFIG = {
     "proc": ["/proc"],
@@ -119,6 +130,27 @@ PROGRAM_CONFIG = {
         },
     },
     "opencode": {"bind": {"rw": [OPENCODE_DIR, OPENCODE_DIR.resolve()]}},
+    "pi": {
+        "bind": {
+            "rw": PI_BIND,
+        },
+        "env": {
+            "inherit": [
+                "PI_CODING_AGENT_DIR",
+                "PI_CODING_AGENT_SESSION_DIR",
+                "PI_PACKAGE_DIR",
+                "PI_OFFLINE",
+                "PI_SKIP_VERSION_CHECK",
+                "PI_TELEMETRY",
+                "PI_CACHE_RETENTION",
+                "ANTHROPIC_API_KEY",
+                "OPENAI_API_KEY",
+                "GOOGLE_GENERATIVE_AI_API_KEY",
+                "GEMINI_API_KEY",
+                "OPENROUTER_API_KEY",
+            ],
+        },
+    },
 }
 
 
