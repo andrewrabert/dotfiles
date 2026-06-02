@@ -12,11 +12,23 @@ update_gui_env() {
     fi
 }
 
+PROMPT=
+NO_DETACH=
+for arg in "$@"; do
+    case "$arg" in
+        --prompt) PROMPT=1 ;;
+        --no-detach) NO_DETACH=1 ;;
+    esac
+done
+
 SESSIONS="$(tmux list-sessions 2> /dev/null | head -n 1)"
 if [ -n "$SESSIONS" ]; then
     case "$SESSIONS" in
         *"(attached)")
-            if [ "$1" = '--prompt' ]; then
+            if [ -n "$NO_DETACH" ]; then
+                exit 1
+            fi
+            if [ -n "$PROMPT" ]; then
                 echo 'Press enter to attach to tmux session ...'
                 head -n 1 > /dev/null
             fi
