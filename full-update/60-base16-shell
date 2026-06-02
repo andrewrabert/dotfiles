@@ -12,6 +12,7 @@ for repo in tinted-shell; do
     else
         cd "${repo_dir}"
         git clean -xdff
+        git reset --hard -q
         git pull -q
     fi
 done
