@@ -1,0 +1,139 @@
+#!/usr/bin/env python3
+"""Run just against a personal per-repo justfile stored outside the repo."""
+
+import argparse
+import asyncio
+import os
+import pathlib
+import sys
+import urllib.parse
+
+
+class UserError(Exception):
+    pass
+
+
+class git:
+    @staticmethod
+    async def run(*args):
+        proc = await asyncio.create_subprocess_exec(
+            "git",
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, _ = await proc.communicate()
+        if proc.returncode != 0:
+            raise UserError("not inside a git repository")
+        return stdout.decode().strip()
+
+    @staticmethod
+    async def toplevel():
+        return pathlib.Path(await git.run("rev-parse", "--show-toplevel"))
+
+    @staticmethod
+    async def remote_url():
+        for remote in ("upstream", "origin"):
+            proc = await asyncio.create_subprocess_exec(
+                "git",
+                "remote",
+                "get-url",
+                remote,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            stdout, _ = await proc.communicate()
+            if proc.returncode == 0:
+                return stdout.decode().strip()
+        raise UserError("no git remote found")
+
+
+async def justfile_path():
+    raw_url = await git.remote_url()
+    encoded = urllib.parse.quote(raw_url, safe="")
+    return (
+        pathlib.Path.home()
+        / "syncthing"
+        / "default"
+        / "just"
+        / encoded
+        / "justfile"
+    )
+
+
+def just_env(justfile, git_root):
+    env = os.environ.copy()
+    env["JUST_JUSTFILE"] = str(justfile)
+    env["JUST_WORKING_DIRECTORY"] = str(git_root)
+    return env
+
+
+async def main():
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--local", action="store_true")
+    parser.add_argument("--agent", metavar="AGENT")
+    args, remaining = parser.parse_known_args()
+
+    justfile = await justfile_path()
+
+    if args.local:
+        print(justfile)
+        return
+
+    if args.agent:
+        git_root = await git.toplevel()
+        user_prompt = " ".join(remaining) if remaining else ""
+        instruction = "Create or update the justfile for this repo. Use `justlo` to run just, not `just` directly. Run `justlo --local` to find the justfile path."
+        full_prompt = (
+            f"{instruction} {user_prompt}" if user_prompt else instruction
+        )
+        dotfiles = os.environ["DOTFILES"]
+        justfile.parent.mkdir(parents=True, exist_ok=True)
+        proc = await asyncio.create_subprocess_exec(
+            "bwrapped",
+            "--bind",
+            str(git_root),
+            str(git_root),
+            "--bind",
+            str(justfile.parent),
+            str(justfile.parent),
+            "--bind",
+            dotfiles,
+            dotfiles,
+            args.agent,
+            full_prompt,
+            cwd=git_root,
+            env=just_env(justfile, git_root),
+        )
+        await proc.wait()
+        return
+
+    if not justfile.exists():
+        if not remaining:
+            raise UserError(
+                f"no justfile found, run `justlo --agent <agent>` to create one"
+            )
+        justfile.parent.mkdir(parents=True, exist_ok=True)
+        justfile.write_text("")
+        print(f"Created {justfile}", file=sys.stderr)
+
+    git_root = await git.toplevel()
+    proc = await asyncio.create_subprocess_exec(
+        "just",
+        "--justfile",
+        str(justfile),
+        "--working-directory",
+        str(git_root),
+        *remaining,
+        env=just_env(justfile, git_root),
+    )
+    await proc.wait()
+    sys.exit(proc.returncode)
+
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except UserError as e:
+        print(f"error: {e}", file=sys.stderr)
+        sys.exit(1)

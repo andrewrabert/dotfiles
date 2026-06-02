@@ -1,0 +1,5 @@
+#compdef justlo
+source <(JUST_COMPLETE=zsh just)
+if [ "$funcstack[1]" = "_justlo" ]; then
+  JUST_JUSTFILE="$(justlo --local)" _clap_dynamic_completer_just "$@"
+fi
