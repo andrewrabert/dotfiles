@@ -83,7 +83,7 @@ async def main():
     if args.agent:
         git_root = await git.toplevel()
         user_prompt = " ".join(remaining) if remaining else ""
-        instruction = "Create or update the justfile for this repo. Use `justlo` to run just, not `just` directly. Run `justlo --local` to find the justfile path."
+        instruction = "Create or update the justfile for this repo. Use `lust` to run just, not `just` directly. Run `lust --local` to find the justfile path."
         full_prompt = (
             f"{instruction} {user_prompt}" if user_prompt else instruction
         )
@@ -111,7 +111,7 @@ async def main():
     if not justfile.exists():
         if not remaining:
             raise UserError(
-                f"no justfile found, run `justlo --agent <agent>` to create one"
+                f"no justfile found, run `lust --agent <agent>` to create one"
             )
         justfile.parent.mkdir(parents=True, exist_ok=True)
         justfile.write_text("")
