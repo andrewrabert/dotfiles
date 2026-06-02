@@ -32,15 +32,18 @@ else
     printf 'Updating jpegli...\n'
     git -C "${INSTALL_DIR}" fetch --depth 1 origin main
     git -C "${INSTALL_DIR}" reset --hard origin/main
-    git -C "${INSTALL_DIR}" submodule update --init --recursive --depth 1
+    git -C "${INSTALL_DIR}" submodule update --init --recursive --depth 1 --force
 fi
 
 CURRENT_COMMIT="$(git -C "${INSTALL_DIR}" rev-parse HEAD)"
+
+brew install giflib jpeg-turbo libpng openexr zlib
 
 CMAKE_PREFIX_PATH="$(brew --prefix giflib):$(brew --prefix jpeg-turbo):$(brew --prefix libpng):$(brew --prefix zlib)"
 export CMAKE_PREFIX_PATH
 
 printf 'Building jpegli (%s)...\n' "${CURRENT_COMMIT}"
+rm -rf "${BUILD_DIR}"
 mkdir -p "${BUILD_DIR}"
 cmake -S "${INSTALL_DIR}" -B "${BUILD_DIR}" \
     -DCMAKE_BUILD_TYPE=Release \

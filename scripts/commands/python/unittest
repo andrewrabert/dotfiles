@@ -1,3 +1,0 @@
-#!/usr/bin/env sh
-# invoking unittest.__main__ caused package lookup issues
-exec python -m unittest "$@"
