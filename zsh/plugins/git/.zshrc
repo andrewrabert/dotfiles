@@ -113,4 +113,13 @@ if command -v git > /dev/null; then
             cd "$repo_dir"
         fi
     }
+    gsb() {
+        local target
+        target="$(git-sync --show-backup-cache | sed 's|^backup/||' | fzf --tac --exact --no-sort)"
+        if [[ -z "$target" ]]; then
+            return 130
+        fi
+        print -s -- gs "$target"
+        gs "$target"
+    }
 fi
