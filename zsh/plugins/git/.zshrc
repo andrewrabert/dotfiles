@@ -1,4 +1,8 @@
 if command -v git > /dev/null; then
+    gl() {
+        git log --oneline "$@"
+    }
+
     gs() {
         local -a opt_u opt_b opt_c opt_r opt_create
         zparseopts -D -E -K -- \

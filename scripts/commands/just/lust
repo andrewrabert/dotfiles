@@ -61,6 +61,16 @@ async def justfile_path():
     )
 
 
+def link_justfile(justfile, git_root):
+    link = git_root / ".justfile.lust"
+    if link.is_symlink() or link.exists():
+        if link.resolve() != justfile.resolve():
+            raise UserError(f"{link} exists but does not point to {justfile}")
+        return
+    if justfile.exists():
+        link.symlink_to(justfile)
+
+
 def just_env(justfile, git_root):
     env = os.environ.copy()
     env["JUST_JUSTFILE"] = str(justfile)
@@ -106,6 +116,7 @@ async def main():
             env=just_env(justfile, git_root),
         )
         await proc.wait()
+        link_justfile(justfile, git_root)
         return
 
     if not justfile.exists():
@@ -118,6 +129,7 @@ async def main():
         print(f"Created {justfile}", file=sys.stderr)
 
     git_root = await git.toplevel()
+    link_justfile(justfile, git_root)
     proc = await asyncio.create_subprocess_exec(
         "just",
         "--justfile",
