@@ -1,0 +1,107 @@
+#!/usr/bin/env python3
+"""Create a local-only workspace repo from a bundled template."""
+
+import argparse
+import asyncio
+import datetime
+import pathlib
+import shutil
+import string
+import sys
+
+TEMPLATE = pathlib.Path(__file__).resolve().parent / "template"
+
+
+class UserError(Exception):
+    pass
+
+
+class ProcessError(Exception):
+    def __init__(self, process, message=None):
+        self.process = process
+        self.message = message
+
+    def __str__(self):
+        text = f"exit {self.process.returncode}"
+        if self.message:
+            text = f"{text} - {self.message}"
+        return text
+
+
+class git:
+    @staticmethod
+    async def run(*args, cwd, stdin=None):
+        proc = await asyncio.create_subprocess_exec(
+            "git",
+            *args,
+            cwd=cwd,
+            stdin=asyncio.subprocess.PIPE if stdin is not None else None,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await proc.communicate(stdin)
+        if proc.returncode != 0:
+            raise ProcessError(proc, stderr.decode().strip() or None)
+
+    @classmethod
+    async def init(cls, cwd):
+        await cls.run("init", "-q", cwd=cwd)
+
+    @classmethod
+    async def add_all(cls, cwd):
+        await cls.run("add", "-A", cwd=cwd)
+
+    @classmethod
+    async def commit(cls, message, cwd):
+        await cls.run(
+            "commit", "-q", "-F", "-", cwd=cwd, stdin=message.encode()
+        )
+
+
+async def main():
+    parser = argparse.ArgumentParser(
+        description="Create a local-only workspace repo."
+    )
+    parser.add_argument(
+        "--parent",
+        type=pathlib.Path,
+        default=pathlib.Path("."),
+        help="parent directory to create the workspace in (default: current dir)",
+    )
+    parser.add_argument(
+        "--no-commit",
+        action="store_true",
+        help="initialize git but skip the initial commit",
+    )
+    parser.add_argument("name", help="workspace directory name")
+    args = parser.parse_args()
+
+    name = args.name
+    dest = args.parent / name
+    if dest.parent != args.parent:
+        raise UserError(f"name must be a single path component: {name!r}")
+    if dest.exists():
+        raise UserError(f"already exists: {dest}")
+
+    date = datetime.date.today().strftime("%Y%m%d")
+    shutil.copytree(TEMPLATE, dest)
+    fields = {"name": name, "date": date}
+    for path in dest.rglob("*.md"):
+        path.write_text(
+            string.Template(path.read_text()).safe_substitute(fields)
+        )
+
+    await git.init(dest)
+    if not args.no_commit:
+        await git.add_all(dest)
+        await git.commit(f"Initialize workspace {name}", dest)
+
+    print(dest)
+
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except UserError as e:
+        print(f"error: {e}", file=sys.stderr)
+        sys.exit(1)

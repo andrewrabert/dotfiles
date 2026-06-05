@@ -1,0 +1,3 @@
+.env
+external/*
+!external/.gitkeep

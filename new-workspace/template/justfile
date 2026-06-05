@@ -1,0 +1,14 @@
+set dotenv-load := true
+
+[private]
+list:
+    @just --list
+
+# Clone a repo into external/ (pass dir to rename if the name is taken)
+[group('git')]
+clone url dir="":
+    git -C "{{justfile_directory()}}/external" clone {{url}} {{dir}}
+
+# Run a command with .env loaded
+run *args:
+    @{{args}}
