@@ -573,6 +573,7 @@ if HOSTNAME in ("mars", "phobos"):
             "virt-manager",
             "vlc",
             "vulkan-radeon",  # amdgpu
+            "vulkan-virtio",
             "wine",
             "wireshark-qt",
             "xboxdrv",

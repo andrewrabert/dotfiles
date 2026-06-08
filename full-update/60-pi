@@ -1,0 +1,35 @@
+#!/usr/bin/env sh
+set -e
+
+PACKAGE='@earendil-works/pi-coding-agent'
+
+show_help() {
+    cat << EOF
+usage:
+    -f, --force     install/update pi coding agent with npm
+    --help          show help and exit
+EOF
+}
+
+FORCE=
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -f|--force)
+            FORCE=1
+            shift
+            ;;
+        --help)
+            show_help
+            exit
+            ;;
+        *)
+            echo 'error: unknown argument(s)' >&2
+            exit 1
+            ;;
+    esac
+done
+
+if [ -n "${FORCE}" ]; then
+    echo 'Updating pi coding agent...'
+    npm install -g --ignore-scripts "${PACKAGE}"
+fi
