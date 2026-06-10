@@ -29,6 +29,7 @@ vim.pack.add({
 	'https://github.com/Saghen/blink.cmp',
 	'https://github.com/nvim-lua/plenary.nvim',
 	'https://github.com/mikavilpas/yazi.nvim',
+	'https://github.com/esmuellert/codediff.nvim',
 })
 
 -- Plugin configurations
@@ -37,3 +38,4 @@ require("plugins.fuzzy")
 require("plugins.formatting")
 require("plugins.completion")
 require("plugins.yazi")
+require("plugins.codediff")
