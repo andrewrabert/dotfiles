@@ -30,6 +30,7 @@ vim.pack.add({
 	'https://github.com/nvim-lua/plenary.nvim',
 	'https://github.com/mikavilpas/yazi.nvim',
 	'https://github.com/esmuellert/codediff.nvim',
+	'https://github.com/obsidian-nvim/obsidian.nvim',
 })
 
 -- Plugin configurations
@@ -39,3 +40,4 @@ require("plugins.formatting")
 require("plugins.completion")
 require("plugins.yazi")
 require("plugins.codediff")
+require("plugins.obsidian")
