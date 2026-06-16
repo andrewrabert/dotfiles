@@ -7,3 +7,5 @@ require("obsidian").setup({
 		},
 	},
 })
+
+vim.keymap.set("n", "<leader>o", "<cmd>Obsidian<cr>", { desc = "Obsidian command palette" })

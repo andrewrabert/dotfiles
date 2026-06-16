@@ -18,6 +18,8 @@ require("fzf-lua").setup({
 	},
 })
 
+require("fzf-lua").register_ui_select()
+
 vim.keymap.set("n", "<leader>z", "<cmd>FzfLua files<cr>", { desc = "Find files" })
 vim.keymap.set("n", "<leader>Z", function()
 	require("fzf-lua").files({ cwd = vim.fn.expand("%:p:h") })
