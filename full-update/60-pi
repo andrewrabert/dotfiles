@@ -33,3 +33,7 @@ if [ -n "${FORCE}" ]; then
     echo 'Updating pi coding agent...'
     npm install -g --ignore-scripts "${PACKAGE}"
 fi
+
+if command -v pi > /dev/null; then
+    pi update --extensions
+fi
