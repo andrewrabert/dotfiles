@@ -7,7 +7,25 @@ import pathlib
 import sys
 import urllib.parse
 
-DEFAULT_JUSTFILE = "import '~/.config/just/lust/lust.just'\n"
+XDG_CONFIG_HOME = pathlib.Path(
+    os.environ.get("XDG_CONFIG_HOME") or pathlib.Path.home() / ".config"
+)
+LUST_DIR = XDG_CONFIG_HOME / "just" / "lust"
+LUST_MODULE = LUST_DIR / "lust.just"
+
+DEFAULT_JUSTFILE = f"import '{LUST_MODULE}'\n"
+
+LUST_JUST = """\
+# Print the path to this justfile
+[group('lust')]
+file:
+    @echo "{{ justfile() }}"
+
+# Print the directory holding this justfile
+[group('lust')]
+dir:
+    @echo "{{ justfile_directory() }}"
+"""
 
 
 class UserError(Exception):
@@ -52,14 +70,7 @@ class git:
 async def justfile_path():
     raw_url = await git.remote_url()
     encoded = urllib.parse.quote(raw_url, safe="")
-    return (
-        pathlib.Path.home()
-        / ".config"
-        / "just"
-        / "lust"
-        / encoded
-        / "justfile"
-    )
+    return LUST_DIR / encoded / "justfile"
 
 
 def link_justfile(justfile, git_root):
@@ -82,6 +93,10 @@ def just_env(justfile, git_root):
 async def main():
     justfile = await justfile_path()
     git_root = await git.toplevel()
+
+    LUST_MODULE.parent.mkdir(parents=True, exist_ok=True)
+    if not LUST_MODULE.exists() or LUST_MODULE.read_text() != LUST_JUST:
+        LUST_MODULE.write_text(LUST_JUST)
 
     if not justfile.exists():
         justfile.parent.mkdir(parents=True, exist_ok=True)
