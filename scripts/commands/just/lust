@@ -32,7 +32,7 @@ dir:
     @echo "{{ justfile_directory() }}"
 
 # Print agent guidance for using lust (notes, plans, todos)
-[group('lust')]
+[private]
 agents:
     @LUST_NOTE=1 lust agents
 """
