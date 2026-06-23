@@ -1,0 +1,227 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# dependencies = [
+#     "httpx",
+#     "rich",
+# ]
+# ///
+"""Download, extract, and install the latest macOS arm64 Jellyfin Desktop nightly."""
+
+import asyncio
+import pathlib
+import plistlib
+import shutil
+import sys
+import tempfile
+import zipfile
+
+import httpx
+import rich.progress
+
+URL = "https://nightly.link/jellyfin/jellyfin-desktop/workflows/build-macos/main/macos-arm64.zip"
+APPLICATIONS = pathlib.Path("/Applications")
+APP_NAME = "Jellyfin Desktop.app"
+ETAG_XATTR = "org.jellyfin.nightly.etag"
+
+
+class UserError(Exception):
+    pass
+
+
+class ProcessError(Exception):
+    def __init__(self, process, message=None):
+        self.process = process
+        self.message = message
+
+    def __str__(self):
+        text = f"exit {self.process.returncode}"
+        if self.message:
+            text = f"{text} - {self.message}"
+        return text
+
+
+async def run(*args):
+    proc = await asyncio.create_subprocess_exec(
+        *args,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await proc.communicate()
+    if proc.returncode:
+        raise ProcessError(proc, stderr.decode().strip())
+    return stdout.decode()
+
+
+class hdiutil:
+    @staticmethod
+    async def attach(dmg, mountpoint):
+        await run(
+            "hdiutil",
+            "attach",
+            "-nobrowse",
+            "-mountpoint",
+            str(mountpoint),
+            str(dmg),
+        )
+
+    @staticmethod
+    async def detach(mountpoint):
+        await run("hdiutil", "detach", str(mountpoint))
+
+
+def find_app(root):
+    for path in sorted(pathlib.Path(root).rglob("*.app")):
+        return path
+    return None
+
+
+async def stored_etag(app):
+    """Return the ETag previously stored on the installed app, or None."""
+    try:
+        output = await run("xattr", "-p", ETAG_XATTR, str(app))
+    except ProcessError:
+        return None
+    return output.strip()
+
+
+async def is_quarantined(app):
+    """Return True if any file under the app carries the Gatekeeper quarantine
+    attribute. com.apple.provenance is ignored - macOS re-adds it on launch and
+    cannot be cleared, so it is not a meaningful signal."""
+    output = await run("xattr", "-r", str(app))
+    return "com.apple.quarantine" in output
+
+
+def app_version(app):
+    """Return the full version string from an app's Info.plist."""
+    info = app / "Contents" / "Info.plist"
+    with info.open("rb") as handle:
+        plist = plistlib.load(handle)
+    short = plist.get("CFBundleShortVersionString")
+    build = plist.get("CFBundleVersion")
+    if short and build and short != build:
+        return f"{short} ({build})"
+    return short or build or "unknown"
+
+
+async def download(response, dest):
+    total = int(response.headers.get("content-length", 0)) or None
+    columns = (
+        rich.progress.TextColumn("Downloading"),
+        rich.progress.BarColumn(),
+        rich.progress.DownloadColumn(),
+        rich.progress.TransferSpeedColumn(),
+        rich.progress.TimeRemainingColumn(),
+    )
+    with rich.progress.Progress(*columns) as progress:
+        task = progress.add_task("download", total=total)
+        with dest.open("wb") as handle:
+            async for chunk in response.aiter_bytes():
+                handle.write(chunk)
+                progress.update(task, advance=len(chunk))
+
+
+async def resolve_app(work):
+    """Resolve the downloaded payload to a .app, mounting a dmg if needed.
+
+    Returns a (app, mount) tuple. mount is the attached dmg mountpoint to
+    detach after use, or None when no dmg was mounted.
+    """
+    extracted = work / "extracted"
+
+    dmg = next(iter(sorted(extracted.rglob("*.dmg"))), None)
+    if dmg is not None:
+        mount = work / "mnt"
+        mount.mkdir()
+        await hdiutil.attach(dmg, mount)
+        return find_app(mount), mount
+
+    app = find_app(extracted)
+    if app is not None:
+        return app, None
+
+    for pattern in ("*.tar", "*.tar.*", "*.tgz"):
+        tarball = next(iter(sorted(extracted.rglob(pattern))), None)
+        if tarball is not None:
+            untar = work / "untar"
+            untar.mkdir()
+            shutil.unpack_archive(tarball, untar)
+            return find_app(untar), None
+
+    return None, None
+
+
+async def main():
+    installed_app = APPLICATIONS / APP_NAME
+
+    async with httpx.AsyncClient() as client:
+        with tempfile.TemporaryDirectory() as tmp:
+            work = pathlib.Path(tmp)
+            archive = work / "macos-arm64.zip"
+
+            async with client.stream(
+                "GET", URL, follow_redirects=True
+            ) as response:
+                response.raise_for_status()
+                etag = response.headers.get("etag")
+                if (
+                    etag
+                    and installed_app.exists()
+                    and await stored_etag(installed_app) == etag
+                ):
+                    print(f"Already up to date (etag {etag})")
+                    return
+                await download(response, archive)
+
+            print("Extracting...")
+            with zipfile.ZipFile(archive) as zf:
+                zf.extractall(work / "extracted")
+
+            app, mount = await resolve_app(work)
+            try:
+                if app is None:
+                    contents = sorted((work / "extracted").rglob("*"))
+                    listing = "\n".join(str(p) for p in contents)
+                    raise UserError(
+                        f"no .app found in download. contents:\n{listing}"
+                    )
+
+                version = app_version(app)
+                print(f"Version: {version}")
+
+                dest = APPLICATIONS / app.name
+                installed = app_version(dest) if dest.exists() else None
+                if installed == version:
+                    print(f"Already installed: {dest}")
+                else:
+                    if installed is not None:
+                        print(f"Replacing installed version {installed}")
+                    print(f"Installing to {dest}...")
+                    if dest.exists():
+                        shutil.rmtree(dest)
+                    await run("ditto", str(app), str(dest))
+                    print(f"Installed: {dest}")
+            finally:
+                if mount is not None:
+                    await hdiutil.detach(mount)
+
+            if await is_quarantined(dest):
+                print("Clearing quarantine (sudo)...")
+                await run(
+                    "sudo", "xattr", "-dr", "com.apple.quarantine", str(dest)
+                )
+
+            if etag:
+                await run("xattr", "-w", ETAG_XATTR, etag, str(dest))
+                print(f"Stored etag {etag}")
+
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except UserError as e:
+        print(f"error: {e}", file=sys.stderr)
+        sys.exit(1)
+    except ProcessError as e:
+        print(f"error: {e}", file=sys.stderr)
+        sys.exit(1)
