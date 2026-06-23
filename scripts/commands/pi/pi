@@ -1,4 +1,5 @@
 #!/usr/bin/env zsh
+export PI_OFFLINE=1
 
 () {
     typeset -g WRAPPED_BIN=
@@ -15,8 +16,4 @@
     exit 127
 }
 
-tmux set -g allow-passthrough on
-"$WRAPPED_BIN" "$@"
-rc=$?
-tmux set -g allow-passthrough off
-exit $rc
+exec "$WRAPPED_BIN" "$@"

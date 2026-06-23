@@ -1,7 +1,22 @@
-#!/usr/bin/env sh
+#!/usr/bin/env zsh
 
 # needed to fix interleaved log output
-#https://github.com/wercker/stern/issues/96
+# https://github.com/wercker/stern/issues/96
 export GOMAXPROCS=1
 
-exec "$(which -a "${0##*/}" | grep -m 1 -v "^$0$")" "$@"
+() {
+    typeset -g WRAPPED_BIN=
+    local self=${${(%):-%x}:A}
+    local name=${self:t}
+    local cand
+    for cand in ${(f)"$(whence -ap $name)"}; do
+        if [[ "${cand:A}" != "$self" ]]; then
+            WRAPPED_BIN=$cand
+            return
+        fi
+    done
+    print -u2 "$name: not found on PATH"
+    exit 127
+}
+
+exec "$WRAPPED_BIN" "$@"

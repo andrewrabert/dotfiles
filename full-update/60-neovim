@@ -12,3 +12,4 @@ if [ "$(realpath ~/.config/nvim)" != "$DOTFILES/nvim" ]; then
 fi
 
 nvim --headless -c PackSync +qa
+nvim --headless -c "lua require('blink.cmp').build():wait(math.huge)" +qa

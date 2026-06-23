@@ -1,8 +1,19 @@
 #!/usr/bin/env zsh
 
-path=("${(@)path:#$HOME/.local/bin*}")
+() {
+    typeset -g WRAPPED_BIN=
+    local self=${${(%):-%x}:A}
+    local name=${self:t}
+    local cand
+    for cand in ${(f)"$(whence -ap $name)"}; do
+        if [[ "${cand:A}" != "$self" ]]; then
+            WRAPPED_BIN=$cand
+            return
+        fi
+    done
+    print -u2 "$name: not found on PATH"
+    exit 127
+}
 
-for bin in $(whence -ap makepkg); do
-  [[ ${bin:A} != ${0:A} ]] && exec $bin "$@"
-done
-exit 1
+path=("${(@)path:#$HOME/.local/bin*}")
+exec "$WRAPPED_BIN" "$@"
