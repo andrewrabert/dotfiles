@@ -80,9 +80,10 @@ class ImageOptimCache:
     );
     """
 
-    def __init__(self, path, secondary_path=None, relative=False):
+    def __init__(self, path, relative_paths=False):
         self.path = path.absolute()
-        self.relative = relative
+        self.relative_paths = relative_paths
+        self.modified = False
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.conn = sqlite3.connect(self.path)
         self.conn.row_factory = self._dict_factory
@@ -90,22 +91,15 @@ class ImageOptimCache:
         cur.executescript(self.SCHEMA)
         cur.close()
 
-        self.secondary = None
-        self.secondary_path = None
-        if secondary_path is not None:
-            self.secondary_path = secondary_path.absolute()
-            self.secondary = sqlite3.connect(self.secondary_path)
-            self.secondary.row_factory = self._dict_factory
-            self._prune_secondary()
-
     def close(self):
+        if self.modified:
+            self.conn.commit()
+            self.conn.execute("VACUUM")
         self.conn.close()
-        if self.secondary is not None:
-            self.secondary.close()
 
-    def _prune_secondary(self):
-        base = self.secondary_path.parent
-        cur = self.secondary.cursor()
+    def prune(self):
+        base = self.path.parent
+        cur = self.conn.cursor()
         cur.execute("SELECT path FROM paths")
         missing = []
         for row in cur.fetchall():
@@ -116,7 +110,8 @@ class ImageOptimCache:
                 missing.append((row["path"],))
         if missing:
             cur.executemany("DELETE FROM paths WHERE path = ?", missing)
-            self.secondary.commit()
+            self.conn.commit()
+            self.modified = True
         cur.close()
 
     @staticmethod
@@ -126,7 +121,7 @@ class ImageOptimCache:
 
     def _key(self, path):
         path = pathlib.Path(path).absolute()
-        if self.relative:
+        if self.relative_paths:
             return os.path.relpath(path, self.path.parent)
         return os.fspath(path)
 
@@ -146,9 +141,8 @@ class ImageOptimCache:
         cur.close()
         return row
 
-    @staticmethod
-    def _query_sha256(conn, sha256):
-        cur = conn.cursor()
+    def get_by_sha256(self, sha256):
+        cur = self.conn.cursor()
         cur.execute(
             "SELECT * FROM images WHERE sha256 = :sha256",
             {"sha256": sha256},
@@ -157,7 +151,28 @@ class ImageOptimCache:
         cur.close()
         return row
 
-    def _backfill_image(self, row):
+    def delete_path(self, path):
+        path = self._key(path)
+        cur = self.conn.cursor()
+        cur.execute("DELETE FROM paths WHERE path = :path", {"path": path})
+        if cur.rowcount:
+            self.conn.commit()
+            self.modified = True
+        cur.close()
+
+    def delete_paths_under(self, directory):
+        prefix = f"{directory}{os.sep}"
+        cur = self.conn.cursor()
+        cur.execute(
+            "DELETE FROM paths WHERE substr(path, 1, :n) = :prefix",
+            {"n": len(prefix), "prefix": prefix},
+        )
+        if cur.rowcount:
+            self.conn.commit()
+            self.modified = True
+        cur.close()
+
+    def backfill_image(self, row):
         cur = self.conn.cursor()
         cur.execute(
             """
@@ -168,15 +183,8 @@ class ImageOptimCache:
             row,
         )
         self.conn.commit()
+        self.modified = True
         cur.close()
-
-    def get_by_sha256(self, sha256):
-        row = self._query_sha256(self.conn, sha256)
-        if row is None and self.secondary is not None:
-            row = self._query_sha256(self.secondary, sha256)
-            if row is not None:
-                self._backfill_image(row)
-        return row
 
     def upsert_path(self, path, sha256, size, mtime):
         path = self._key(path)
@@ -193,6 +201,7 @@ class ImageOptimCache:
             {"path": path, "sha256": sha256, "size": size, "mtime": mtime},
         )
         self.conn.commit()
+        self.modified = True
         cur.close()
 
     def upsert(self, path, size, mtime, img_type, sha256, fast, strip):
@@ -232,7 +241,45 @@ class ImageOptimCache:
             },
         )
         self.conn.commit()
+        self.modified = True
         cur.close()
+
+
+class ImageOptimCacheBroker:
+    def __init__(self, primary, secondary=None):
+        self.primary = primary
+        self.secondary = secondary
+        if secondary is not None:
+            secondary.prune()
+
+    def get(self, path):
+        return self.primary.get(path)
+
+    def get_by_sha256(self, sha256):
+        row = self.primary.get_by_sha256(sha256)
+        if row is None and self.secondary is not None:
+            row = self.secondary.get_by_sha256(sha256)
+            if row is not None:
+                self.primary.backfill_image(row)
+        return row
+
+    def upsert(self, *args):
+        self._evict_secondary(args[0])
+        self.primary.upsert(*args)
+
+    def upsert_path(self, *args):
+        self._evict_secondary(args[0])
+        self.primary.upsert_path(*args)
+
+    def _evict_secondary(self, path):
+        if self.secondary is not None:
+            self.secondary.delete_path(path)
+
+    def close(self):
+        self.primary.close()
+        if self.secondary is not None:
+            self.secondary.delete_paths_under(self.primary.path.parent)
+            self.secondary.close()
 
 
 @contextlib.contextmanager
@@ -1923,12 +1970,11 @@ async def main_optim():
             args.paths, must_exist=not args.mkdb
         )
         is_local = cache_path.absolute() != GLOBAL_CACHE_PATH.absolute()
-        secondary_path = None
+        primary = ImageOptimCache(cache_path, relative_paths=is_local)
+        secondary = None
         if is_local and GLOBAL_CACHE_PATH.is_file():
-            secondary_path = GLOBAL_CACHE_PATH
-        cache = ImageOptimCache(
-            cache_path, secondary_path, relative=is_local
-        )
+            secondary = ImageOptimCache(GLOBAL_CACHE_PATH)
+        cache = ImageOptimCacheBroker(primary, secondary)
 
     executor = async_executor.AsyncExecutor(args.num_procs)
     future_to_file = {}
