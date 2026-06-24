@@ -96,8 +96,8 @@ class ImageOptimCache:
         cur.executescript(self.SCHEMA)
         cur.close()
 
-    def close(self):
-        if self.modified:
+    def close(self, vacuum=True):
+        if vacuum and self.modified:
             self.conn.commit()
             self.conn.execute("VACUUM")
         self.conn.close()
@@ -288,11 +288,12 @@ class ImageOptimCacheBroker:
         if self.secondary is not None:
             self.secondary.delete_path(path)
 
-    def close(self):
-        self.primary.close()
+    def close(self, cleanup=True):
+        self.primary.close(vacuum=cleanup)
         if self.secondary is not None:
-            self.secondary.delete_paths_under(self.primary.path.parent)
-            self.secondary.close()
+            if cleanup:
+                self.secondary.delete_paths_under(self.primary.path.parent)
+            self.secondary.close(vacuum=cleanup)
         for db in self.hash_dbs:
             db.close()
 
@@ -2032,109 +2033,121 @@ async def cmd_optim(args):
     executor = async_executor.AsyncExecutor(args.num_procs)
     future_to_file = {}
 
-    # phase 1: filter + path-cache check; defer content hashing
-    candidates = []
-    to_hash = []
-    for file in all_files(*args.paths):
-        if exclude_spec and exclude_spec.match_file(str(file)):
-            continue
-        if gitignore_spec and gitignore_spec.match_file(str(file)):
-            continue
-        try:
-            mimetype, options = determine_mime(file)
-        except (FileNotFoundError, IsADirectoryError):
-            # broken symlink can cause this
-            continue
+    loop = asyncio.get_running_loop()
+    task = asyncio.current_task()
+    loop.add_signal_handler(signal.SIGINT, task.cancel)
 
-        if mimetype not in mimetypes:
-            continue
-
-        if args.list:
-            print(file)
-            continue
-
-        if cache:
-            abs_path = str(file.absolute())
-            stat = file.stat()
-            cached = cache.get(abs_path)
-            if cached:
-                if (
-                    cached["size"] == stat.st_size
-                    and cached["mtime"] == stat.st_mtime
-                    and cached["type"] == mimetype
-                    and should_skip(cached)
-                ):
-                    continue
-            else:
-                # path not in cache, hash to check if already optimized
-                to_hash.append((file, abs_path, stat, mimetype, options))
+    size_diff_printer = None
+    interrupted = False
+    try:
+        # phase 1: filter + path-cache check; defer content hashing
+        candidates = []
+        to_hash = []
+        for file in all_files(*args.paths):
+            if exclude_spec and exclude_spec.match_file(str(file)):
+                continue
+            if gitignore_spec and gitignore_spec.match_file(str(file)):
+                continue
+            try:
+                mimetype, options = determine_mime(file)
+            except (FileNotFoundError, IsADirectoryError):
+                # broken symlink can cause this
                 continue
 
-        candidates.append((file, mimetype, options))
+            if mimetype not in mimetypes:
+                continue
 
-    # phase 2: hash deferred files concurrently
-    if to_hash:
-        semaphore = asyncio.Semaphore(hash_threads)
-        hashes = await asyncio.gather(
-            *(_hash_file(item[0], semaphore) for item in to_hash)
-        )
-        # phase 3: content-hash lookups (serial sqlite on primary)
-        for (file, abs_path, stat, mimetype, options), sha256 in zip(
-            to_hash, hashes
-        ):
-            img_rec = cache.get_by_sha256(sha256)
-            if img_rec and img_rec["type"] == mimetype:
-                cache.upsert_path(
-                    abs_path, sha256, stat.st_size, stat.st_mtime
-                )
-                if should_skip(img_rec):
+            if args.list:
+                print(file)
+                continue
+
+            if cache:
+                abs_path = str(file.absolute())
+                stat = file.stat()
+                cached = cache.get(abs_path)
+                if cached:
+                    if (
+                        cached["size"] == stat.st_size
+                        and cached["mtime"] == stat.st_mtime
+                        and cached["type"] == mimetype
+                        and should_skip(cached)
+                    ):
+                        continue
+                else:
+                    # path not in cache, hash to check if already optimized
+                    to_hash.append((file, abs_path, stat, mimetype, options))
                     continue
+
             candidates.append((file, mimetype, options))
 
-    # phase 4: submit optimization work
-    for file, mimetype, options in candidates:
-        if func := _MIME_OPTIM.get(mimetype):
-            future = executor.submit(
-                _process_optim,
-                func,
-                file,
-                fast=args.fast,
-                strip=args.strip,
-                compute_hash=bool(cache),
-                **options,
+        # phase 2: hash deferred files concurrently
+        if to_hash:
+            semaphore = asyncio.Semaphore(hash_threads)
+            hashes = await asyncio.gather(
+                *(_hash_file(item[0], semaphore) for item in to_hash)
             )
-            future_to_file[future] = (file, mimetype)
+            # phase 3: content-hash lookups (serial sqlite on primary)
+            for (file, abs_path, stat, mimetype, options), sha256 in zip(
+                to_hash, hashes
+            ):
+                img_rec = cache.get_by_sha256(sha256)
+                if img_rec and img_rec["type"] == mimetype:
+                    cache.upsert_path(
+                        abs_path, sha256, stat.st_size, stat.st_mtime
+                    )
+                    if should_skip(img_rec):
+                        continue
+                candidates.append((file, mimetype, options))
 
-    size_diff_printer = SizeDiffPrinter(num_items=len(executor))
-    async for future in executor:
-        try:
-            path, before, after, sha256 = future.result()
-        except ProcessError as e:
-            # TODO give this a competent error message
-            print(f"error: {e}", file=sys.stderr)
-            continue
+        # phase 4: submit optimization work
+        for file, mimetype, options in candidates:
+            if func := _MIME_OPTIM.get(mimetype):
+                future = executor.submit(
+                    _process_optim,
+                    func,
+                    file,
+                    fast=args.fast,
+                    strip=args.strip,
+                    compute_hash=bool(cache),
+                    **options,
+                )
+                future_to_file[future] = (file, mimetype)
 
+        size_diff_printer = SizeDiffPrinter(num_items=len(executor))
+        async for future in executor:
+            try:
+                path, before, after, sha256 = future.result()
+            except ProcessError as e:
+                # TODO give this a competent error message
+                print(f"error: {e}", file=sys.stderr)
+                continue
+
+            if cache:
+                _, mimetype = future_to_file[future]
+                stat = path.stat()
+                cache.upsert(
+                    str(path.absolute()),
+                    stat.st_size,
+                    stat.st_mtime,
+                    mimetype,
+                    sha256,
+                    args.fast,
+                    args.strip,
+                )
+
+            if not args.quiet:
+                size_diff_printer.print(before, after, path)
+    except asyncio.CancelledError:
+        interrupted = True
+    finally:
+        loop.remove_signal_handler(signal.SIGINT)
         if cache:
-            _, mimetype = future_to_file[future]
-            stat = path.stat()
-            cache.upsert(
-                str(path.absolute()),
-                stat.st_size,
-                stat.st_mtime,
-                mimetype,
-                sha256,
-                args.fast,
-                args.strip,
-            )
+            cache.close(cleanup=not interrupted)
+        if size_diff_printer is not None and not args.quiet:
+            size_diff_printer.print_total()
 
-        if not args.quiet:
-            size_diff_printer.print(before, after, path)
-
-    if cache:
-        cache.close()
-
-    if not args.quiet:
-        size_diff_printer.print_total()
+    if interrupted:
+        sys.exit(130)
 
 
 async def _has_incorrect_colorspace(path):
