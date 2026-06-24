@@ -80,10 +80,15 @@ class ImageOptimCache:
     );
     """
 
-    def __init__(self, path, relative_paths=False):
+    def __init__(self, path, relative_paths=False, read_only=False):
         self.path = path.absolute()
         self.relative_paths = relative_paths
+        self.read_only = read_only
         self.modified = False
+        if read_only:
+            self.conn = sqlite3.connect(f"file:{self.path}?mode=ro", uri=True)
+            self.conn.row_factory = self._dict_factory
+            return
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.conn = sqlite3.connect(self.path)
         self.conn.row_factory = self._dict_factory
@@ -246,9 +251,10 @@ class ImageOptimCache:
 
 
 class ImageOptimCacheBroker:
-    def __init__(self, primary, secondary=None):
+    def __init__(self, primary, secondary=None, hash_dbs=()):
         self.primary = primary
         self.secondary = secondary
+        self.hash_dbs = list(hash_dbs)
         if secondary is not None:
             secondary.prune()
 
@@ -257,11 +263,18 @@ class ImageOptimCacheBroker:
 
     def get_by_sha256(self, sha256):
         row = self.primary.get_by_sha256(sha256)
-        if row is None and self.secondary is not None:
-            row = self.secondary.get_by_sha256(sha256)
+        if row is not None:
+            return row
+        sources = []
+        if self.secondary is not None:
+            sources.append(self.secondary)
+        sources.extend(self.hash_dbs)
+        for source in sources:
+            row = source.get_by_sha256(sha256)
             if row is not None:
                 self.primary.backfill_image(row)
-        return row
+                return row
+        return None
 
     def upsert(self, *args):
         self._evict_secondary(args[0])
@@ -280,6 +293,8 @@ class ImageOptimCacheBroker:
         if self.secondary is not None:
             self.secondary.delete_paths_under(self.primary.path.parent)
             self.secondary.close()
+        for db in self.hash_dbs:
+            db.close()
 
 
 @contextlib.contextmanager
@@ -1921,6 +1936,16 @@ async def main_optim():
         help="create a new imgbert_optim.db at the input path instead of using ~/.cache/imgbert_optim.db",
     )
     parser.add_argument(
+        "--hash-db",
+        dest="hash_dbs",
+        action="append",
+        default=[],
+        metavar="DB",
+        type=_parser_path_file,
+        help="read-only db consulted by content hash to skip already-optimized "
+        "files; matches are recorded into the cache. may be repeated.",
+    )
+    parser.add_argument(
         "-E",
         "--exclude",
         dest="excludes",
@@ -1974,7 +1999,8 @@ async def main_optim():
         secondary = None
         if is_local and GLOBAL_CACHE_PATH.is_file():
             secondary = ImageOptimCache(GLOBAL_CACHE_PATH)
-        cache = ImageOptimCacheBroker(primary, secondary)
+        hash_dbs = [ImageOptimCache(p, read_only=True) for p in args.hash_dbs]
+        cache = ImageOptimCacheBroker(primary, secondary, hash_dbs)
 
     executor = async_executor.AsyncExecutor(args.num_procs)
     future_to_file = {}
