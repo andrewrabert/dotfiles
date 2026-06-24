@@ -516,7 +516,6 @@ if HOSTNAME in ("mars", "phobos"):
             "dosbox-staging",
             "dvd+rw-tools",
             "evtest",
-            "extra-cmake-modules",
             "flatpak-builder",
             "flatpak-kcm",
             "foot",
