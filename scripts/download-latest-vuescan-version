@@ -19,6 +19,7 @@ import contextvars
 import datetime
 import email.utils
 import logging
+import os
 import pathlib
 import re
 import string
@@ -26,6 +27,17 @@ import tempfile
 
 import async_executor
 import httpx
+
+
+def _num_procs(value):
+    value = int(value)
+    if value == 0:
+        return os.cpu_count()
+    elif value > 0:
+        return value
+    else:
+        raise argparse.ArgumentTypeError("invalid num_procs")
+
 
 LOGGER = logging.getLogger("download-latest-vuescan-version")
 
@@ -309,7 +321,13 @@ def safe_write(path, data):
 async def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--max-concurrent", type=int, default=2, help="(default: %(default)s)"
+        "-n",
+        "--num-concurrent",
+        metavar="NUM",
+        dest="num_procs",
+        type=_num_procs,
+        default=2,
+        help="number of parallel jobs, 0 for cpu count (default: %(default)s)",
     )
     parser.add_argument(
         "--dest",
@@ -324,9 +342,7 @@ async def main():
     if not args.verbose:
         logging.getLogger("httpx").setLevel(logging.WARNING)
 
-    client = VueScanDownloader(
-        path=args.dest, max_concurrent=args.max_concurrent
-    )
+    client = VueScanDownloader(path=args.dest, max_concurrent=args.num_procs)
 
     await client.download_all()
 

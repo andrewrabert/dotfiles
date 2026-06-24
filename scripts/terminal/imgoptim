@@ -1459,7 +1459,7 @@ def _num_procs(value):
     elif value > 0:
         return value
     else:
-        raise argparse.ArgumentError("invalid num_procs")
+        raise argparse.ArgumentTypeError("invalid num_procs")
 
 
 def _parser_path_file(value):
@@ -1585,11 +1585,12 @@ async def main_convert():
     )
     parser.add_argument(
         "-n",
+        "--num-concurrent",
         metavar="NUM",
         dest="num_procs",
         type=_num_procs,
         default=None,
-        help="number of parallel jobs (default: %(default)s)",
+        help="number of parallel jobs, 0 for cpu count (default: %(default)s)",
     )
     parser.add_argument("--rm", action="store_true")
     parser.add_argument(
@@ -1786,11 +1787,12 @@ async def main_optim():
     parser.add_argument("--fast", action="store_true")
     parser.add_argument(
         "-n",
+        "--num-concurrent",
         metavar="NUM",
         dest="num_procs",
         type=_num_procs,
         default=None,
-        help="number of parallel jobs (default: %(default)s)",
+        help="number of parallel jobs, 0 for cpu count (default: %(default)s)",
     )
     parser.add_argument("-q", "--quiet", action="store_true")
     parser.add_argument(

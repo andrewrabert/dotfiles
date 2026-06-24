@@ -291,6 +291,16 @@ async def sync_roms(
             print(f"deleted: {f.name}")
 
 
+def _num_procs(value):
+    value = int(value)
+    if value == 0:
+        return os.cpu_count()
+    elif value > 0:
+        return value
+    else:
+        raise argparse.ArgumentTypeError("invalid num_procs")
+
+
 async def main():
     parser = argparse.ArgumentParser(
         description="Sync Nintendo ROMs from NAS to 3DS microSD"
@@ -308,10 +318,12 @@ async def main():
     )
     parser.add_argument(
         "-n",
-        "--num-jobs",
-        type=int,
+        "--num-concurrent",
+        metavar="NUM",
+        dest="num_procs",
+        type=_num_procs,
         default=4,
-        help="number of parallel sync jobs (default: 4)",
+        help="number of parallel sync jobs, 0 for cpu count (default: %(default)s)",
     )
     parser.add_argument(
         "--delete",
@@ -334,7 +346,7 @@ async def main():
         sdcard_roms_dir=args.sdcard_base / "roms",
         dry_run=args.dry_run,
         verbose=args.verbose,
-        jobs=args.num_jobs,
+        jobs=args.num_procs,
         delete=args.delete,
         path=args.path,
     )

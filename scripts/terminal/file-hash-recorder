@@ -17,6 +17,7 @@ import contextlib
 import dataclasses
 import hashlib
 import json
+import os
 import pathlib
 import pickle
 import sqlite3
@@ -670,6 +671,16 @@ async def _process_db_root_path(root_path, args, parser, db):
         sys.exit(1)
 
 
+def _num_procs(value):
+    value = int(value)
+    if value == 0:
+        return os.cpu_count()
+    elif value > 0:
+        return value
+    else:
+        raise argparse.ArgumentTypeError("invalid num_procs")
+
+
 async def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--no-progress", action="store_true")
@@ -696,7 +707,15 @@ async def main():
         "-c", "--compact", action="store_true", help="output compact json"
     )
     parser.add_argument("-o", "--output", type=pathlib.Path)
-    parser.add_argument("-n", "--num-procs", type=int, default=1)
+    parser.add_argument(
+        "-n",
+        "--num-concurrent",
+        metavar="NUM",
+        dest="num_procs",
+        type=_num_procs,
+        default=1,
+        help="number of parallel jobs, 0 for cpu count (default: %(default)s)",
+    )
     parser.add_argument("--no-archive-contents", action="store_true")
     parser.add_argument("--skip-errors", action="store_true")
     parser.add_argument("--dump-pickle", action="store_true")

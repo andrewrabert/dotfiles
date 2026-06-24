@@ -137,6 +137,12 @@ def cbcopy(data):
     subprocess.run(["cbcopy"], input=data, check=True)
 
 
+def run(*args):
+    return subprocess.run(
+        " ".join(args), shell=True, capture_output=True, text=True
+    )
+
+
 def read_json(path):
     return json.loads(pathlib.Path(path).read_text())
 

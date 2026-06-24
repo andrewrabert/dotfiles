@@ -8,11 +8,23 @@ Redumper finalization tool with async processing.
 # ]
 # ///
 """
+
 import argparse
 import asyncio
+import os
 import pathlib
 
 import async_executor
+
+
+def _num_procs(value):
+    value = int(value)
+    if value == 0:
+        return os.cpu_count()
+    elif value > 0:
+        return value
+    else:
+        raise argparse.ArgumentTypeError("invalid num_procs")
 
 
 def get_dump_profile(log_path):
@@ -66,7 +78,15 @@ async def process_path(path):
 
 async def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("-n", dest="num_procs", type=int, default=1)
+    parser.add_argument(
+        "-n",
+        "--num-concurrent",
+        metavar="NUM",
+        dest="num_procs",
+        type=_num_procs,
+        default=1,
+        help="number of parallel jobs, 0 for cpu count (default: %(default)s)",
+    )
     parser.add_argument("path", type=pathlib.Path, nargs="+")
     args = parser.parse_args()
 
@@ -97,7 +117,9 @@ async def main():
                             needs_finalization = False
                         case ".skeleton":
                             needs_finalization = False
-            if needs_finalization and (len(log_paths) == len(scram_paths) == 1):
+            if needs_finalization and (
+                len(log_paths) == len(scram_paths) == 1
+            ):
                 paths.add(log_paths[0])
 
     executor = async_executor.AsyncExecutor(args.num_procs)

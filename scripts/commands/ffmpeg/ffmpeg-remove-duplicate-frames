@@ -12,10 +12,21 @@ FFmpeg duplicate frame removal tool with async processing.
 import argparse
 import asyncio
 import json
+import os
 import pathlib
 import tempfile
 
 import async_executor
+
+
+def _num_procs(value):
+    value = int(value)
+    if value == 0:
+        return os.cpu_count()
+    elif value > 0:
+        return value
+    else:
+        raise argparse.ArgumentTypeError("invalid num_procs")
 
 
 class ffprobe:
@@ -163,11 +174,12 @@ async def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "-n",
+        "--num-concurrent",
         metavar="NUM",
         dest="num_procs",
-        type=int,
+        type=_num_procs,
         default=1,
-        help="number of parallel jobs (default: %(default)s)",
+        help="number of parallel jobs, 0 for cpu count (default: %(default)s)",
     )
     parser.add_argument(
         "-d",

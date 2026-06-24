@@ -11,6 +11,7 @@
 import argparse
 import asyncio
 import logging
+import os
 import pathlib
 import re
 import sys
@@ -19,9 +20,21 @@ import async_executor
 import tqdm.asyncio
 
 
+def _num_procs(value):
+    value = int(value)
+    if value == 0:
+        return os.cpu_count()
+    elif value > 0:
+        return value
+    else:
+        raise argparse.ArgumentTypeError("invalid num_procs")
+
+
 LOGGER = logging.getLogger("media-validate")
 
-MKV_VOID_DATA_WARNING = re.compile(r"^WRN0D0: There are \d+ bytes of void data$")
+MKV_VOID_DATA_WARNING = re.compile(
+    r"^WRN0D0: There are \d+ bytes of void data$"
+)
 
 MKV_SUPPRESS_WARNING = True
 
@@ -83,7 +96,12 @@ async def validate_flac(path):
 
 async def validate_opus(path):
     proc = await asyncio.create_subprocess_exec(
-        "opusdec", "--quiet", "--", str(path), "-", stdout=asyncio.subprocess.DEVNULL
+        "opusdec",
+        "--quiet",
+        "--",
+        str(path),
+        "-",
+        stdout=asyncio.subprocess.DEVNULL,
     )
     await proc.communicate()
     return proc.returncode == 0
@@ -182,7 +200,7 @@ async def async_main(args):
         else:
             paths.setdefault(path, None)
 
-    executor = async_executor.AsyncExecutor(args.numprocs)
+    executor = async_executor.AsyncExecutor(args.num_procs)
 
     has_error = False
     for path in paths:
@@ -197,7 +215,14 @@ async def async_main(args):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("-n", dest="numprocs", metavar="NUMPROCS", type=int)
+    parser.add_argument(
+        "-n",
+        "--num-concurrent",
+        metavar="NUM",
+        dest="num_procs",
+        type=_num_procs,
+        help="number of parallel jobs, 0 for cpu count (default: %(default)s)",
+    )
 
     log_group = parser.add_mutually_exclusive_group()
     log_group.add_argument("--verbose", action="store_true")

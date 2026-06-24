@@ -670,7 +670,7 @@ def _num_procs(value):
     elif value > 0:
         return value
     else:
-        raise argparse.ArgumentError("invalid num_procs")
+        raise argparse.ArgumentTypeError("invalid num_procs")
 
 
 class SizeDiffPrinter:
@@ -746,11 +746,12 @@ def main_archive():
     )
     parser.add_argument(
         "-n",
+        "--num-concurrent",
         metavar="NUM",
         dest="num_procs",
         type=_num_procs,
         default=1,
-        help="number of parallel jobs (default: %(default)s)",
+        help="number of parallel jobs, 0 for cpu count (default: %(default)s)",
     )
     parser.add_argument(
         "-p",
@@ -3009,11 +3010,12 @@ async def main_extract():
     )
     parser.add_argument(
         "-n",
+        "--num-concurrent",
         metavar="NUM",
         dest="num_procs",
         type=_num_procs,
         default=1,
-        help="number of parallel jobs (default: %(default)s)",
+        help="number of parallel jobs, 0 for cpu count (default: %(default)s)",
     )
     parser.add_argument(
         "-q", "--quiet", action="store_true", help="suppress non-error output"

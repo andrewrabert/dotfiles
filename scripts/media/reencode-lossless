@@ -323,7 +323,7 @@ async def run(args):
         else:
             paths.add(path)
 
-    executor = async_executor.AsyncExecutor(args.numprocs)
+    executor = async_executor.AsyncExecutor(args.num_procs)
     for path in paths:
         if path.suffix.lower() in (".flac", ".ape", ".m4a", ".wav", ".wv"):
             executor.submit(reencode, path, encode_format=args.format)
@@ -391,9 +391,26 @@ class SizeDiffPrinter:
                 print("Total: -")
 
 
+def _num_procs(value):
+    value = int(value)
+    if value == 0:
+        return os.cpu_count()
+    elif value > 0:
+        return value
+    else:
+        raise argparse.ArgumentTypeError("invalid num_procs")
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("-n", dest="numprocs", metavar="NUMPROCS", type=int)
+    parser.add_argument(
+        "-n",
+        "--num-concurrent",
+        metavar="NUM",
+        dest="num_procs",
+        type=_num_procs,
+        help="number of parallel jobs, 0 for cpu count (default: %(default)s)",
+    )
     parser.add_argument("--format", choices=ENCODE_FORMAT, default="flac")
     parser.add_argument("--flac-decode-through-errors", action="store_true")
     parser.add_argument("path", type=pathlib.Path, nargs="+")

@@ -1,10 +1,20 @@
-#!/usr/bin/env python
+#!/usr/bin/env -S uv run --script
+# /// script
+# dependencies = [
+#     "async_executor",
+# ]
+# ///
+"""Merge video and sidecar subtitle files into MKV containers."""
+
 import argparse
 import asyncio
 import contextlib
 import logging
+import os
 import pathlib
 import tempfile
+
+import async_executor
 
 VIDEO_EXTENSIONS = {
     ".avi",
@@ -109,6 +119,16 @@ async def mkvmerge(dest, *sources, delete_parts=True, title):
                 part.unlink()
 
 
+def _num_procs(value):
+    value = int(value)
+    if value == 0:
+        return os.cpu_count()
+    elif value > 0:
+        return value
+    else:
+        raise argparse.ArgumentTypeError("invalid num_procs")
+
+
 async def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -118,6 +138,15 @@ async def main():
         "--keep",
         action="store_true",
         help="keep original files after conversion",
+    )
+    parser.add_argument(
+        "-n",
+        "--num-concurrent",
+        metavar="NUM",
+        dest="num_procs",
+        type=_num_procs,
+        default=1,
+        help="number of parallel jobs, 0 for cpu count (default: %(default)s)",
     )
     parser.add_argument("path", nargs="+", type=pathlib.Path)
     args = parser.parse_args()
@@ -132,6 +161,7 @@ async def main():
         elif path.is_dir():
             paths.update(all_files(path))
 
+    executor = async_executor.AsyncExecutor(args.num_procs)
     for path in sorted(paths):
         if path.suffix.lower() in (".mkv", *VIDEO_EXTENSIONS):
             dest = path.with_suffix(".mkv")
@@ -146,7 +176,8 @@ async def main():
             ]
 
             if args.force or (dest != path) or subtitle_paths:
-                await mkvmerge(
+                executor.submit(
+                    mkvmerge,
                     dest,
                     path,
                     *subtitle_paths,
@@ -155,6 +186,12 @@ async def main():
                 )
         else:
             LOGGER.error('unrecognized extension: "%s"', path.suffix)
+
+    async for result in executor:
+        try:
+            result.result()
+        except ProcessError as e:
+            LOGGER.error("error: %s", e)
 
 
 if __name__ == "__main__":
