@@ -2185,6 +2185,47 @@ async def main_metadata():
             await exiv2.copy_metadata(args.source, args.target)
 
 
+def _db_merge(output, inputs):
+    cache = ImageOptimCache(output)
+    try:
+        for src in inputs:
+            cache.conn.execute(
+                "ATTACH DATABASE ? AS src", (os.fspath(src.absolute()),)
+            )
+            cache.conn.execute(
+                "INSERT OR REPLACE INTO images SELECT * FROM src.images"
+            )
+            cache.conn.execute(
+                "INSERT OR REPLACE INTO paths SELECT * FROM src.paths"
+            )
+            cache.conn.commit()
+            cache.conn.execute("DETACH DATABASE src")
+        cache.modified = True
+    finally:
+        cache.close()
+
+
+async def main_db():
+    parser = argparse.ArgumentParser()
+    subparsers = parser.add_subparsers(dest="subcommand", required=True)
+
+    merge_parser = subparsers.add_parser(
+        "merge", help="merge one or more dbs into <output>"
+    )
+    merge_parser.add_argument(
+        "-o", "--output", type=pathlib.Path, required=True
+    )
+    merge_parser.add_argument(
+        "inputs", metavar="input", nargs="+", type=_parser_path_file
+    )
+
+    args = parser.parse_args()
+
+    match args.subcommand:
+        case "merge":
+            _db_merge(args.output, args.inputs)
+
+
 if __name__ == "__main__":
     signal.signal(signal.SIGINT, _sigint_handler)
     match pathlib.Path(sys.argv[0]).name:
@@ -2196,5 +2237,7 @@ if __name__ == "__main__":
             asyncio.run(main_fixcolorspace())
         case "imgmetadata":
             asyncio.run(main_metadata())
+        case "imgoptim-db":
+            asyncio.run(main_db())
         case "imgoptim" | _:
             asyncio.run(main_optim())
