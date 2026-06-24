@@ -2,7 +2,7 @@
 set -eu
 
 case "${HOST_DOTFILES}" in
-    aweber|mars|sol|phobos)
+    aweber)
         SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
         "${SCRIPT_DIR}/.60-zoekt-simple"
         ;;
