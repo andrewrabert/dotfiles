@@ -59,6 +59,8 @@ CONFIG = types.SimpleNamespace(
     ),
 )
 
+GLOBAL_CACHE_PATH = pathlib.Path.home() / ".cache" / "imgoptim.db"
+
 
 class ImageOptimCache:
     SCHEMA = """
@@ -78,8 +80,9 @@ class ImageOptimCache:
     );
     """
 
-    def __init__(self, path):
+    def __init__(self, path, secondary_path=None, relative=False):
         self.path = path.absolute()
+        self.relative = relative
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.conn = sqlite3.connect(self.path)
         self.conn.row_factory = self._dict_factory
@@ -87,15 +90,48 @@ class ImageOptimCache:
         cur.executescript(self.SCHEMA)
         cur.close()
 
+        self.secondary = None
+        self.secondary_path = None
+        if secondary_path is not None:
+            self.secondary_path = secondary_path.absolute()
+            self.secondary = sqlite3.connect(self.secondary_path)
+            self.secondary.row_factory = self._dict_factory
+            self._prune_secondary()
+
     def close(self):
         self.conn.close()
+        if self.secondary is not None:
+            self.secondary.close()
+
+    def _prune_secondary(self):
+        base = self.secondary_path.parent
+        cur = self.secondary.cursor()
+        cur.execute("SELECT path FROM paths")
+        missing = []
+        for row in cur.fetchall():
+            p = pathlib.Path(row["path"])
+            if not p.is_absolute():
+                p = base / p
+            if not p.exists():
+                missing.append((row["path"],))
+        if missing:
+            cur.executemany("DELETE FROM paths WHERE path = ?", missing)
+            self.secondary.commit()
+        cur.close()
 
     @staticmethod
     def _dict_factory(cursor, row):
         fields = [column[0] for column in cursor.description]
         return {key: value for key, value in zip(fields, row)}
 
+    def _key(self, path):
+        path = pathlib.Path(path).absolute()
+        if self.relative:
+            return os.path.relpath(path, self.path.parent)
+        return os.fspath(path)
+
     def get(self, path):
+        path = self._key(path)
         cur = self.conn.cursor()
         cur.execute(
             """
@@ -110,8 +146,9 @@ class ImageOptimCache:
         cur.close()
         return row
 
-    def get_by_sha256(self, sha256):
-        cur = self.conn.cursor()
+    @staticmethod
+    def _query_sha256(conn, sha256):
+        cur = conn.cursor()
         cur.execute(
             "SELECT * FROM images WHERE sha256 = :sha256",
             {"sha256": sha256},
@@ -120,7 +157,29 @@ class ImageOptimCache:
         cur.close()
         return row
 
+    def _backfill_image(self, row):
+        cur = self.conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO images(sha256, type, fast, strip, inserted_at)
+            VALUES(:sha256, :type, :fast, :strip, :inserted_at)
+            ON CONFLICT DO NOTHING
+            """,
+            row,
+        )
+        self.conn.commit()
+        cur.close()
+
+    def get_by_sha256(self, sha256):
+        row = self._query_sha256(self.conn, sha256)
+        if row is None and self.secondary is not None:
+            row = self._query_sha256(self.secondary, sha256)
+            if row is not None:
+                self._backfill_image(row)
+        return row
+
     def upsert_path(self, path, sha256, size, mtime):
+        path = self._key(path)
         cur = self.conn.cursor()
         cur.execute(
             """
@@ -137,6 +196,7 @@ class ImageOptimCache:
         cur.close()
 
     def upsert(self, path, size, mtime, img_type, sha256, fast, strip):
+        path = self._key(path)
         cur = self.conn.cursor()
         cur.execute(
             """
@@ -1437,7 +1497,7 @@ class SizeDiffPrinter:
                 print("Total: -")
 
 
-def find_default_cache_path(paths):
+def find_default_cache_path(paths, must_exist=True):
     resolved = []
     for p in paths:
         p = p.absolute()
@@ -1449,7 +1509,9 @@ def find_default_cache_path(paths):
         if candidate.is_file():
             return candidate
 
-    return pathlib.Path.home() / ".cache" / "imgoptim.db"
+    if must_exist:
+        return GLOBAL_CACHE_PATH
+    return common / "imgoptim.db"
 
 
 def _num_procs(value):
@@ -1807,6 +1869,11 @@ async def main_optim():
         help="path to cache database (default: walk up from input paths looking for imgoptim.db, then ~/.cache/imgoptim.db)",
     )
     parser.add_argument(
+        "--mkdb",
+        action="store_true",
+        help="create a new imgoptim.db at the input path instead of using ~/.cache/imgoptim.db",
+    )
+    parser.add_argument(
         "-E",
         "--exclude",
         dest="excludes",
@@ -1852,8 +1919,16 @@ async def main_optim():
 
     cache = None
     if not args.no_cache:
-        cache_path = args.cache_path or find_default_cache_path(args.paths)
-        cache = ImageOptimCache(cache_path)
+        cache_path = args.cache_path or find_default_cache_path(
+            args.paths, must_exist=not args.mkdb
+        )
+        is_local = cache_path.absolute() != GLOBAL_CACHE_PATH.absolute()
+        secondary_path = None
+        if is_local and GLOBAL_CACHE_PATH.is_file():
+            secondary_path = GLOBAL_CACHE_PATH
+        cache = ImageOptimCache(
+            cache_path, secondary_path, relative=is_local
+        )
 
     executor = async_executor.AsyncExecutor(args.num_procs)
     future_to_file = {}
