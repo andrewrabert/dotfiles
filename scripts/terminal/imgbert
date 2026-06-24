@@ -1576,6 +1576,18 @@ def find_default_cache_path(paths, must_exist=True):
     return common / "imgbert_optim.db"
 
 
+async def _hash_file(path, semaphore):
+    def _hash():
+        hasher = hashlib.sha256()
+        with open(path, "rb") as file:
+            for chunk in iter(lambda: file.read(1 << 20), b""):
+                hasher.update(chunk)
+        return hasher.hexdigest()
+
+    async with semaphore:
+        return await asyncio.to_thread(_hash)
+
+
 def _num_procs(value):
     value = int(value)
     if value == 0:
@@ -1680,11 +1692,12 @@ async def sha256sum_vips_copy(source):
     return sha256
 
 
-async def main_compare():
-    parser = argparse.ArgumentParser()
+def add_compare_parser(subparsers):
+    parser = subparsers.add_parser("compare")
     parser.add_argument("paths", metavar="path", nargs=2)
-    args = parser.parse_args()
 
+
+async def cmd_compare(args):
     for path in args.paths:
         mimetype, _ = determine_mime(path)
         match mimetype:
@@ -1699,14 +1712,8 @@ async def main_compare():
     # vips copy 'stdin[]' '.ppm[]' < "$1" | tail -n+3 | sha256sum | awk '{print $1}'
 
 
-async def main_convert():
-    parser = argparse.ArgumentParser(
-        formatter_class=lambda prog: argparse.HelpFormatter(
-            prog,
-            max_help_position=30,  # Position where help text starts
-            width=80,  # Total width of output
-        )
-    )
+def add_convert_parser(subparsers):
+    parser = subparsers.add_parser("convert")
     parser.add_argument(
         "-n",
         "--num-concurrent",
@@ -1800,8 +1807,8 @@ async def main_convert():
         help="shrink=only downscale, grow=only upscale, stretch=exact WxH (default: %(default)s)",
     )
 
-    args = parser.parse_args()
 
+async def cmd_convert(args):
     has_resize = (
         args.width is not None
         or args.height is not None
@@ -1896,8 +1903,8 @@ async def main_convert():
         sys.exit(1)
 
 
-async def main_optim():
-    parser = argparse.ArgumentParser()
+def add_optim_parser(subparsers):
+    parser = subparsers.add_parser("optim")
     parser.add_argument("-s", "--strip", action="store_true")
     parser.add_argument(
         "-t",
@@ -1917,6 +1924,16 @@ async def main_optim():
         type=_num_procs,
         default=None,
         help="number of parallel jobs, 0 for cpu count (default: %(default)s)",
+    )
+    parser.add_argument(
+        "-x",
+        "--num-concurrent-hash",
+        metavar="NUM",
+        dest="hash_threads",
+        type=_num_procs,
+        default=None,
+        help="number of parallel file-hashing threads, 0 for cpu count "
+        "(default: --num-concurrent if set, else cpu count)",
     )
     parser.add_argument("-q", "--quiet", action="store_true")
     parser.add_argument(
@@ -1968,8 +1985,8 @@ async def main_optim():
     )
     parser.add_argument("paths", metavar="path", nargs="+", type=pathlib.Path)
 
-    args = parser.parse_args()
 
+async def cmd_optim(args):
     exclude_spec = None
     if args.excludes:
         exclude_spec = pathspec.PathSpec.from_lines(
@@ -2002,8 +2019,22 @@ async def main_optim():
         hash_dbs = [ImageOptimCache(p, read_only=True) for p in args.hash_dbs]
         cache = ImageOptimCacheBroker(primary, secondary, hash_dbs)
 
+    def should_skip(rec):
+        # fast=0 strip=1 is most thorough, always skip
+        if rec["fast"] == 0 and rec["strip"] == 1:
+            return True
+        # otherwise skip only if args match
+        if rec["fast"] == int(args.fast) and rec["strip"] == int(args.strip):
+            return True
+        return False
+
+    hash_threads = args.hash_threads or args.num_procs or os.cpu_count()
     executor = async_executor.AsyncExecutor(args.num_procs)
     future_to_file = {}
+
+    # phase 1: filter + path-cache check; defer content hashing
+    candidates = []
+    to_hash = []
     for file in all_files(*args.paths):
         if exclude_spec and exclude_spec.match_file(str(file)):
             continue
@@ -2026,18 +2057,6 @@ async def main_optim():
             abs_path = str(file.absolute())
             stat = file.stat()
             cached = cache.get(abs_path)
-
-            def should_skip(rec):
-                # fast=0 strip=1 is most thorough, always skip
-                if rec["fast"] == 0 and rec["strip"] == 1:
-                    return True
-                # otherwise skip only if args match
-                if rec["fast"] == int(args.fast) and rec["strip"] == int(
-                    args.strip
-                ):
-                    return True
-                return False
-
             if cached:
                 if (
                     cached["size"] == stat.st_size
@@ -2047,17 +2066,33 @@ async def main_optim():
                 ):
                     continue
             else:
-                # path not in cache, check if content already optimized
-                data = file.read_bytes()
-                sha256 = hashlib.sha256(data).hexdigest()
-                img_rec = cache.get_by_sha256(sha256)
-                if img_rec and img_rec["type"] == mimetype:
-                    cache.upsert_path(
-                        abs_path, sha256, stat.st_size, stat.st_mtime
-                    )
-                    if should_skip(img_rec):
-                        continue
+                # path not in cache, hash to check if already optimized
+                to_hash.append((file, abs_path, stat, mimetype, options))
+                continue
 
+        candidates.append((file, mimetype, options))
+
+    # phase 2: hash deferred files concurrently
+    if to_hash:
+        semaphore = asyncio.Semaphore(hash_threads)
+        hashes = await asyncio.gather(
+            *(_hash_file(item[0], semaphore) for item in to_hash)
+        )
+        # phase 3: content-hash lookups (serial sqlite on primary)
+        for (file, abs_path, stat, mimetype, options), sha256 in zip(
+            to_hash, hashes
+        ):
+            img_rec = cache.get_by_sha256(sha256)
+            if img_rec and img_rec["type"] == mimetype:
+                cache.upsert_path(
+                    abs_path, sha256, stat.st_size, stat.st_mtime
+                )
+                if should_skip(img_rec):
+                    continue
+            candidates.append((file, mimetype, options))
+
+    # phase 4: submit optimization work
+    for file, mimetype, options in candidates:
         if func := _MIME_OPTIM.get(mimetype):
             future = executor.submit(
                 _process_optim,
@@ -2161,11 +2196,12 @@ async def _fix_colorspace(path):
         tmp.replace(path)
 
 
-async def main_fixcolorspace():
-    parser = argparse.ArgumentParser()
+def add_fixcolorspace_parser(subparsers):
+    parser = subparsers.add_parser("fixcolorspace")
     parser.add_argument("paths", metavar="path", nargs="+", type=pathlib.Path)
-    args = parser.parse_args()
 
+
+async def cmd_fixcolorspace(args):
     executor = async_executor.AsyncExecutor()
     executor2 = async_executor.AsyncExecutor()
 
@@ -2194,79 +2230,46 @@ async def main_fixcolorspace():
         print(f"{done} / {total}")
 
 
-async def main_metadata():
-    parser = argparse.ArgumentParser()
-    subparsers = parser.add_subparsers(dest="subcommand", required=True)
+def add_metadata_parser(subparsers):
+    parser = subparsers.add_parser("metadata")
+    metadata_subparsers = parser.add_subparsers(
+        dest="subcommand", required=True
+    )
 
-    copy_parser = subparsers.add_parser(
+    copy_parser = metadata_subparsers.add_parser(
         "copy", help="copy all metadata from <source> to <target>"
     )
     copy_parser.add_argument("source", type=_parser_path_file)
     copy_parser.add_argument("target", type=_parser_path_file)
 
-    args = parser.parse_args()
 
+async def cmd_metadata(args):
     match args.subcommand:
         case "copy":
             await exiv2.copy_metadata(args.source, args.target)
 
 
-def _db_merge(output, inputs):
-    cache = ImageOptimCache(output)
-    try:
-        for src in inputs:
-            cache.conn.execute(
-                "ATTACH DATABASE ? AS src", (os.fspath(src.absolute()),)
-            )
-            cache.conn.execute(
-                "INSERT OR REPLACE INTO images SELECT * FROM src.images"
-            )
-            cache.conn.execute(
-                "INSERT OR REPLACE INTO paths SELECT * FROM src.paths"
-            )
-            cache.conn.commit()
-            cache.conn.execute("DETACH DATABASE src")
-        cache.modified = True
-    finally:
-        cache.close()
-
-
-async def main_db():
-    parser = argparse.ArgumentParser()
-    subparsers = parser.add_subparsers(dest="subcommand", required=True)
-
-    merge_parser = subparsers.add_parser(
-        "merge", help="merge one or more dbs into <output>"
-    )
-    merge_parser.add_argument(
-        "-o", "--output", type=pathlib.Path, required=True
-    )
-    merge_parser.add_argument(
-        "inputs", metavar="input", nargs="+", type=_parser_path_file
-    )
-
+async def main_bert():
+    parser = argparse.ArgumentParser(prog="imgbert")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+    add_compare_parser(subparsers)
+    add_convert_parser(subparsers)
+    add_fixcolorspace_parser(subparsers)
+    add_metadata_parser(subparsers)
+    add_optim_parser(subparsers)
     args = parser.parse_args()
 
-    match args.subcommand:
-        case "merge":
-            _db_merge(args.output, args.inputs)
-
-
-async def main_bert():
-    commands = {
-        "optim": main_optim,
-        "convert": main_convert,
-        "compare": main_compare,
-        "fixcolorspace": main_fixcolorspace,
-        "metadata": main_metadata,
-        "optim-db": main_db,
-    }
-    parser = argparse.ArgumentParser(prog="imgbert")
-    parser.add_argument("command", choices=commands)
-    parser.add_argument("args", nargs=argparse.REMAINDER)
-    ns = parser.parse_args()
-    sys.argv = [f"imgbert {ns.command}", *ns.args]
-    await commands[ns.command]()
+    match args.command:
+        case "compare":
+            await cmd_compare(args)
+        case "convert":
+            await cmd_convert(args)
+        case "fixcolorspace":
+            await cmd_fixcolorspace(args)
+        case "metadata":
+            await cmd_metadata(args)
+        case "optim":
+            await cmd_optim(args)
 
 
 if __name__ == "__main__":
