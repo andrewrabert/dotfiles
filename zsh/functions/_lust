@@ -17,7 +17,7 @@ elif [[ "$words[2]" == notes::* ]]; then
 fi
 if [[ -n "$sub" ]]; then
   case "$sub" in
-    cat|remove|replace|path|edit|move)
+    cat|remove|replace|path|edit|move|run)
       (( CURRENT == argpos )) && { _lust_notes; return; }
       [[ "$sub" == move ]] && (( CURRENT == argpos + 1 )) && { _lust_notes; return; }
       ;;
