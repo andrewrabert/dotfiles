@@ -59,7 +59,7 @@ CONFIG = types.SimpleNamespace(
     ),
 )
 
-GLOBAL_CACHE_PATH = pathlib.Path.home() / ".cache" / "imgoptim.db"
+GLOBAL_CACHE_PATH = pathlib.Path.home() / ".cache" / "imgbert_optim.db"
 
 
 class ImageOptimCache:
@@ -1552,13 +1552,13 @@ def find_default_cache_path(paths, must_exist=True):
 
     common = pathlib.Path(os.path.commonpath(resolved))
     for parent in [common, *common.parents]:
-        candidate = parent / "imgoptim.db"
+        candidate = parent / "imgbert_optim.db"
         if candidate.is_file():
             return candidate
 
     if must_exist:
         return GLOBAL_CACHE_PATH
-    return common / "imgoptim.db"
+    return common / "imgbert_optim.db"
 
 
 def _num_procs(value):
@@ -1913,12 +1913,12 @@ async def main_optim():
         "--cache-path",
         type=pathlib.Path,
         default=None,
-        help="path to cache database (default: walk up from input paths looking for imgoptim.db, then ~/.cache/imgoptim.db)",
+        help="path to cache database (default: walk up from input paths looking for imgbert_optim.db, then ~/.cache/imgbert_optim.db)",
     )
     parser.add_argument(
         "--mkdb",
         action="store_true",
-        help="create a new imgoptim.db at the input path instead of using ~/.cache/imgoptim.db",
+        help="create a new imgbert_optim.db at the input path instead of using ~/.cache/imgbert_optim.db",
     )
     parser.add_argument(
         "-E",
