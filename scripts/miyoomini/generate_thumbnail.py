@@ -42,8 +42,8 @@ def safe_write(path, data):
                 pass
 
 
-async def imgoptim(*path, fast=False, quiet=False, strip=False):
-    args = ["imgoptim"]
+async def imgbert_optim(*path, fast=False, quiet=False, strip=False):
+    args = ["imgbert", "optim"]
     if fast:
         args.append("--fast")
     if quiet:
@@ -109,7 +109,7 @@ async def main():
     with tempfile.NamedTemporaryFile(suffix=SUFFIX) as tmp:
         tmp = pathlib.Path(tmp.name)
         await resize_to_miyoo_thumbnail(args.path, tmp, pico8=args.pico8)
-        await imgoptim(tmp, fast=args.fast, quiet=True, strip=True)
+        await imgbert_optim(tmp, fast=args.fast, quiet=True, strip=True)
         safe_write(output, tmp.read_bytes())
 
 

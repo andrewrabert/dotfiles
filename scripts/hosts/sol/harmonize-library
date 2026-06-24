@@ -21,7 +21,7 @@ target_exclude = [
 command = ["ffmpeg", "-y", "-i", "{input}", "-c:a", "libopus", "-b:a", "128k", "{output}"]
 
 [converters.image]
-command = ["imgconvert", "--force", "-f", "jpeg", "--resize-mode", "shrink", "--width", "2560", "--height", "2560", "--output", "{output}", "{input}"]
+command = ["imgbert", "convert", "--force", "-f", "jpeg", "--resize-mode", "shrink", "--width", "2560", "--height", "2560", "--output", "{output}", "{input}"]
 
 [mappings]
 ".flac" = { converter = "audio", output_ext = ".opus" }

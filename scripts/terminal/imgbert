@@ -2226,18 +2226,23 @@ async def main_db():
             _db_merge(args.output, args.inputs)
 
 
+async def main_bert():
+    commands = {
+        "optim": main_optim,
+        "convert": main_convert,
+        "compare": main_compare,
+        "fixcolorspace": main_fixcolorspace,
+        "metadata": main_metadata,
+        "optim-db": main_db,
+    }
+    parser = argparse.ArgumentParser(prog="imgbert")
+    parser.add_argument("command", choices=commands)
+    parser.add_argument("args", nargs=argparse.REMAINDER)
+    ns = parser.parse_args()
+    sys.argv = [f"imgbert {ns.command}", *ns.args]
+    await commands[ns.command]()
+
+
 if __name__ == "__main__":
     signal.signal(signal.SIGINT, _sigint_handler)
-    match pathlib.Path(sys.argv[0]).name:
-        case "imgcompare":
-            asyncio.run(main_compare())
-        case "imgconvert":
-            asyncio.run(main_convert())
-        case "imgfixcolorspace":
-            asyncio.run(main_fixcolorspace())
-        case "imgmetadata":
-            asyncio.run(main_metadata())
-        case "imgoptim-db":
-            asyncio.run(main_db())
-        case "imgoptim" | _:
-            asyncio.run(main_optim())
+    asyncio.run(main_bert())
