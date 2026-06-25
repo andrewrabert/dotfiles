@@ -1,42 +1,106 @@
-#!/usr/bin/env sh
-set -eu
+#!/usr/bin/env python3
+"""Pick a tmux window or named pane via fzf and switch to it."""
 
-TAB=$(printf '\t')
+import asyncio
+import sys
 
-selection=$(
-    {
-        tmux list-windows -F '#I#{?@renamed,:#W,}'
-        tmux list-panes -s -F '#{?@pane_label,#I.#P:#W: #{@pane_label},}' | grep . || true
-    } | sort -t: -k1,1V | awk -F: '
-        {
-            line[NR]=$0
-            id=($0 ~ /:/) ? $1 : $0
-            d=index(id,".")
-            win[NR]=(d>0) ? substr(id,1,d-1) : id
-            psuf[NR]=(d>0) ? substr(id,d) : ""
-            if (length(win[NR])>w) w=length(win[NR])
-        }
-        END {
-            for (i=1;i<=NR;i++) {
-                c=index(line[i],":")
-                rest=(c>0) ? " " substr(line[i],c+1) : ""
-                printf "%s\t\033[1m%*s%s\033[0m%s\n", line[i], w, win[i], psuf[i], rest
-            }
-        }' | fzf --ansi --reverse --delimiter="$TAB" --with-nth=2
-) || exit 0
 
-selection="${selection%%"$TAB"*}"
+class tmux:
+    @staticmethod
+    async def _lines(*args):
+        proc = await asyncio.create_subprocess_exec(
+            "tmux",
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+        )
+        stdout, _ = await proc.communicate()
+        return [line for line in stdout.decode().splitlines() if line]
 
-case "$selection" in
-    *.*)
-        target="${selection%%:*}"
-        window="${target%%.*}"
-        pane="${target##*.}"
-        tmux select-window -t ":$window"
-        tmux select-pane -t ":.${pane}"
-        ;;
-    *)
-        window="${selection%%:*}"
-        tmux select-window -t ":$window"
-        ;;
-esac
+    @classmethod
+    async def windows(cls):
+        return await cls._lines("list-windows", "-F", "#I#{?@renamed,:#W,}")
+
+    @classmethod
+    async def panes(cls):
+        return await cls._lines(
+            "list-panes",
+            "-s",
+            "-F",
+            "#{?@pane_label,#I.#P:#{?@renamed,#W: ,}#{@pane_label},}",
+        )
+
+    @staticmethod
+    async def select_window(window):
+        proc = await asyncio.create_subprocess_exec(
+            "tmux", "select-window", "-t", f":{window}"
+        )
+        await proc.wait()
+
+    @staticmethod
+    async def select_pane(pane):
+        proc = await asyncio.create_subprocess_exec(
+            "tmux", "select-pane", "-t", f":.{pane}"
+        )
+        await proc.wait()
+
+
+class fzf:
+    @staticmethod
+    async def choose(lines):
+        proc = await asyncio.create_subprocess_exec(
+            "fzf",
+            "--ansi",
+            "--reverse",
+            "--delimiter",
+            "\t",
+            "--with-nth",
+            "2",
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+        )
+        stdout, _ = await proc.communicate(input="\n".join(lines).encode())
+        if proc.returncode != 0:
+            return None
+        selection = stdout.decode().strip()
+        return selection.split("\t", 1)[0] if selection else None
+
+
+def parse(line):
+    head, _, label = line.partition(":")
+    win, _, pane = head.partition(".")
+    return win, (pane or None), (label or None)
+
+
+def render(entries):
+    win_width = max(len(win) for win, _, _ in entries)
+    suffixes = [f".{pane}" if pane else "" for _, pane, _ in entries]
+    suffix_width = max(len(suffix) for suffix in suffixes)
+    lines = []
+    for (win, _, label), suffix in zip(entries, suffixes):
+        ident = f"{win:>{win_width}}{suffix:<{suffix_width}}"
+        display = f"\033[1m{ident}\033[0m"
+        if label:
+            display = f"{display}  {label}"
+        key = f"{win}.{suffix[1:]}" if suffix else win
+        lines.append(f"{key}\t{display}")
+    return lines
+
+
+async def main():
+    raw = await tmux.windows() + await tmux.panes()
+    entries = [parse(line) for line in raw]
+    entries.sort(key=lambda e: (int(e[0]), int(e[1]) if e[1] else -1))
+
+    selected = await fzf.choose(render(entries))
+    if not selected:
+        return 0
+
+    win, _, pane = selected.partition(".")
+    await tmux.select_window(win)
+    if pane:
+        await tmux.select_pane(pane)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(asyncio.run(main()))
