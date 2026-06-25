@@ -1,12 +1,31 @@
 #!/usr/bin/env sh
 set -eu
 
+TAB=$(printf '\t')
+
 selection=$(
     {
         tmux list-windows -F '#I#{?@renamed,:#W,}'
-        tmux list-panes -s -F '#{?@pane_label,#I.#P:#{@pane_label},}' | grep . || true
-    } | fzf --reverse
+        tmux list-panes -s -F '#{?@pane_label,#I.#P:#W: #{@pane_label},}' | grep . || true
+    } | sort -t: -k1,1V | awk -F: '
+        {
+            line[NR]=$0
+            id=($0 ~ /:/) ? $1 : $0
+            d=index(id,".")
+            win[NR]=(d>0) ? substr(id,1,d-1) : id
+            psuf[NR]=(d>0) ? substr(id,d) : ""
+            if (length(win[NR])>w) w=length(win[NR])
+        }
+        END {
+            for (i=1;i<=NR;i++) {
+                c=index(line[i],":")
+                rest=(c>0) ? " " substr(line[i],c+1) : ""
+                printf "%s\t\033[1m%*s%s\033[0m%s\n", line[i], w, win[i], psuf[i], rest
+            }
+        }' | fzf --ansi --reverse --delimiter="$TAB" --with-nth=2
 ) || exit 0
+
+selection="${selection%%"$TAB"*}"
 
 case "$selection" in
     *.*)
