@@ -11,6 +11,23 @@ PREFIX_ROOT = pathlib.Path(
 DEFAULT_PREFIX = PREFIX_ROOT / "default"
 STEAM_ROOT = pathlib.Path("~/.local/share/Steam").expanduser()
 SYSTEM_PROTON = pathlib.Path("/usr/bin/proton-ge")
+FLATPAK_PROTON = "com.valvesoftware.Steam.CompatibilityTool.Proton-GE"
+
+
+def flatpak_proton():
+    proc = subprocess.run(
+        ["flatpak", "info", "--show-location", FLATPAK_PROTON],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+    )
+    if proc.returncode:
+        return None
+    proton_bin = (
+        pathlib.Path(proc.stdout.decode().strip()) / "files" / "proton"
+    )
+    if proton_bin.is_file():
+        return proton_bin
+    return None
 
 
 def installed_versions():
@@ -18,6 +35,9 @@ def installed_versions():
 
     if wine_bin := shutil.which("wine"):
         versions["wine"] = [wine_bin, "wine"]
+
+    if flatpak_bin := flatpak_proton():
+        versions["flatpak"] = [flatpak_bin, "run", "run"]
 
     if SYSTEM_PROTON.is_file():
         versions["system"] = [SYSTEM_PROTON, "run", "run"]
@@ -66,16 +86,32 @@ def _parser_prefix(value):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--versions", action="store_true")
-    parser.add_argument("--winearch", choices=["win32", "win64"], default="win64")
     parser.add_argument(
-        "-p", "--prefix", default=DEFAULT_PREFIX, type=_parser_prefix, nargs="?"
+        "--winearch", choices=["win32", "win64"], default="win64"
     )
-    parser.add_argument("--use", metavar="VERSION", default="system")
+    parser.add_argument(
+        "-p",
+        "--prefix",
+        default=DEFAULT_PREFIX,
+        type=_parser_prefix,
+        nargs="?",
+    )
+    parser.add_argument("--use", metavar="VERSION", default="flatpak")
     parser.add_argument("--cd", action="store_true")
-    parser.add_argument("--wayland", action="store_true", help="force Wayland mode")
-    parser.add_argument("--gamescope", action="store_true", help="run through gamescope")
-    parser.add_argument("--resolution", metavar="WxH", help="gamescope resolution (e.g. 1920x1080)")
-    parser.add_argument("--fullscreen", action="store_true", help="gamescope fullscreen mode")
+    parser.add_argument(
+        "--wayland", action="store_true", help="force Wayland mode"
+    )
+    parser.add_argument(
+        "--gamescope", action="store_true", help="run through gamescope"
+    )
+    parser.add_argument(
+        "--resolution",
+        metavar="WxH",
+        help="gamescope resolution (e.g. 1920x1080)",
+    )
+    parser.add_argument(
+        "--fullscreen", action="store_true", help="gamescope fullscreen mode"
+    )
     parser.add_argument("args", nargs="*")
 
     args = parser.parse_args()
@@ -128,7 +164,7 @@ def main():
         }
     )
     if args.wayland:
-        os.environ.pop("DISPLAY", None)
+        os.environ["PROTON_ENABLE_WAYLAND"] = "1"
 
     if args.gamescope or args.resolution or args.fullscreen:
         gamescope_cmd = ["gamescope"]

@@ -482,7 +482,6 @@ if HOSTNAME in ("mars", "phobos", "lounge-htpc"):
             "jellyfin-desktop-git",
             "kwalletmanager",
             "noto-fonts",
-            "proton-ge-custom-bin",
             "steam",
             "ttf-hack",
         }
@@ -768,17 +767,6 @@ EXPECTED_PACKAGE_DEPENDENCIES = {
     },
     "print-manager": {
         "system-config-printer",
-    },
-    "proton-ge-custom-bin": {
-        "kdialog",
-        "lib32-vulkan-icd-loader",
-        "python-kivy",
-        "steam",
-        "vulkan-driver",
-        "wine",
-        "winetricks",
-        "xboxdrv",
-        "zenity",
     },
     "python": {
         "python-setuptools",
