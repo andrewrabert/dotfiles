@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 import argparse
+import json
 import os
 import pathlib
 import shutil
@@ -27,6 +28,19 @@ def flatpak_proton():
     )
     if proton_bin.is_file():
         return proton_bin
+    return None
+
+
+def kde_primary_scale():
+    if not shutil.which("kscreen-doctor"):
+        return None
+    proc = subprocess.run(
+        ["kscreen-doctor", "-j"], stdout=subprocess.PIPE, check=True
+    )
+    data = json.loads(proc.stdout)
+    for output in data["outputs"]:
+        if output.get("enabled") and output.get("priority") == 1:
+            return output["scale"]
     return None
 
 
@@ -99,7 +113,14 @@ def main():
     parser.add_argument("--use", metavar="VERSION", default="flatpak")
     parser.add_argument("--cd", action="store_true")
     parser.add_argument(
-        "--wayland", action="store_true", help="force Wayland mode"
+        "--no-wayland",
+        action="store_true",
+        help="disable Wayland mode (on by default in a Wayland session)",
+    )
+    parser.add_argument(
+        "--auto-dpi",
+        action="store_true",
+        help="sync wine DPI to the KDE primary display scale",
     )
     parser.add_argument(
         "--gamescope", action="store_true", help="run through gamescope"
@@ -163,8 +184,28 @@ def main():
             "WINEPREFIX": str(prefix / "pfx"),
         }
     )
-    if args.wayland:
-        os.environ["PROTON_ENABLE_WAYLAND"] = "1"
+    wayland = bool(os.environ.get("WAYLAND_DISPLAY")) and not args.no_wayland
+    os.environ["PROTON_ENABLE_WAYLAND"] = "1" if wayland else "0"
+
+    if args.auto_dpi and (scale := kde_primary_scale()):
+        dpi = round(96 * scale)
+        subprocess.run(
+            [
+                proton_bin[0],
+                "run",
+                "reg",
+                "add",
+                "HKCU\\Control Panel\\Desktop",
+                "/v",
+                "LogPixels",
+                "/t",
+                "REG_DWORD",
+                "/d",
+                str(dpi),
+                "/f",
+            ],
+            check=True,
+        )
 
     if args.gamescope or args.resolution or args.fullscreen:
         gamescope_cmd = ["gamescope"]
