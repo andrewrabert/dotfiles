@@ -9,6 +9,7 @@
 import json
 import os
 import pathlib
+import shlex
 import shutil
 import subprocess
 import typing
@@ -21,7 +22,6 @@ PREFIX_ROOT = pathlib.Path(
 DEFAULT_PREFIX = PREFIX_ROOT / "default"
 STEAM_ROOT = pathlib.Path("~/.local/share/Steam").expanduser()
 SYSTEM_PROTON = pathlib.Path("/usr/bin/proton-ge")
-FLATPAK_PROTON = "com.valvesoftware.Steam.CompatibilityTool.Proton-GE"
 
 PANEL_UPSCALE = "Upscaling / FSR / DLSS"
 PANEL_RENDER = "Rendering / DirectX"
@@ -30,22 +30,6 @@ PANEL_SYNC = "Sync / Memory"
 PANEL_INPUT = "Input"
 PANEL_MISC = "Drives / Window / Misc"
 PANEL_GAMESCOPE = "Gamescope"
-
-
-def flatpak_proton():
-    proc = subprocess.run(
-        ["flatpak", "info", "--show-location", FLATPAK_PROTON],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-    )
-    if proc.returncode:
-        return None
-    proton_bin = (
-        pathlib.Path(proc.stdout.decode().strip()) / "files" / "proton"
-    )
-    if proton_bin.is_file():
-        return proton_bin
-    return None
 
 
 def kde_primary_scale():
@@ -66,9 +50,6 @@ def installed_versions():
 
     if wine_bin := shutil.which("wine"):
         versions["wine"] = [wine_bin, "wine"]
-
-    if flatpak_bin := flatpak_proton():
-        versions["flatpak"] = [flatpak_bin, "run", "run"]
 
     if SYSTEM_PROTON.is_file():
         versions["system"] = [SYSTEM_PROTON, "run", "run"]
@@ -125,7 +106,7 @@ def main(
     ),
     use: typing.Annotated[
         str, typer.Option("--use", metavar="VERSION")
-    ] = "flatpak",
+    ] = "system",
     cd: typing.Annotated[bool, typer.Option("--cd")] = False,
     no_wayland: typing.Annotated[
         bool,
@@ -869,9 +850,9 @@ def main(
             print("Casefold not supported. Ignoring")
 
     cmd = args
-    if args[0].startswith("c:\\"):
+    if args[0][:3].lower() == "c:\\":
         path = prefix / "pfx" / "drive_c"
-        parts = args[0].removeprefix("c:\\").split("\\")
+        parts = args[0][3:].split("\\")
         for part in parts[:-1]:
             path = path / part
         os.chdir(path)
@@ -958,7 +939,7 @@ def main(
         subprocess.run(
             [
                 proton_bin[0],
-                "run",
+                *proton_bin[2:],
                 "reg",
                 "add",
                 "HKCU\\Control Panel\\Desktop",
@@ -1014,6 +995,7 @@ def main(
             gamescope_cmd += ["-f"]
         gamescope_cmd += gs_bool + gs_value
         gamescope_cmd += ["--"] + [proton_bin[0]] + proton_bin[2:] + cmd
+        print(shlex.join(str(part) for part in gamescope_cmd))
         os.execvp("gamescope", gamescope_cmd)
     else:
         os.execl(*proton_bin, *cmd)

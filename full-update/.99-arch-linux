@@ -482,6 +482,7 @@ if HOSTNAME in ("mars", "phobos", "lounge-htpc"):
             "jellyfin-desktop-git",
             "kwalletmanager",
             "noto-fonts",
+            "proton-ge-custom-bin",
             "steam",
             "ttf-hack",
         }
@@ -588,7 +589,6 @@ if HOSTNAME in ("mars", "phobos"):
         {
             "com.bitwarden.desktop",
             "com.bitwig.BitwigStudio",
-            "com.valvesoftware.Steam.CompatibilityTool.Proton-GE",
             "im.riot.Riot",
             "md.obsidian.Obsidian",
             "org.equeim.Tremotesf",
@@ -767,6 +767,17 @@ EXPECTED_PACKAGE_DEPENDENCIES = {
     },
     "print-manager": {
         "system-config-printer",
+    },
+    "proton-ge-custom-bin": {
+        "kdialog",
+        "lib32-vulkan-icd-loader",
+        "python-kivy",
+        "steam",
+        "vulkan-driver",
+        "wine",
+        "winetricks",
+        "xboxdrv",
+        "zenity",
     },
     "python": {
         "python-setuptools",
