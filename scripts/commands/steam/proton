@@ -1,10 +1,19 @@
-#!/usr/bin/env python
-import argparse
+#!/usr/bin/env -S uv run --script
+# /// script
+# dependencies = [
+#   "typer",
+# ]
+# ///
+"""Run programs through Proton/Wine in a managed prefix."""
+
 import json
 import os
 import pathlib
 import shutil
 import subprocess
+import typing
+
+import typer
 
 PREFIX_ROOT = pathlib.Path(
     os.environ.get("PROTON_PREFIX_ROOT", "~/.local/share/proton-prefixes")
@@ -13,6 +22,14 @@ DEFAULT_PREFIX = PREFIX_ROOT / "default"
 STEAM_ROOT = pathlib.Path("~/.local/share/Steam").expanduser()
 SYSTEM_PROTON = pathlib.Path("/usr/bin/proton-ge")
 FLATPAK_PROTON = "com.valvesoftware.Steam.CompatibilityTool.Proton-GE"
+
+PANEL_UPSCALE = "Upscaling / FSR / DLSS"
+PANEL_RENDER = "Rendering / DirectX"
+PANEL_GPU = "GPU / NVAPI"
+PANEL_SYNC = "Sync / Memory"
+PANEL_INPUT = "Input"
+PANEL_MISC = "Drives / Window / Misc"
+PANEL_GAMESCOPE = "Gamescope"
 
 
 def flatpak_proton():
@@ -90,74 +107,759 @@ def case_insensitivty(path):
             raise RuntimeError(proc.returncode)
 
 
-def _parser_prefix(value):
+def resolve_prefix(value):
     if "/" in value:
         return pathlib.Path(value).absolute()
     else:
         return PREFIX_ROOT / value
 
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--versions", action="store_true")
-    parser.add_argument(
-        "--winearch", choices=["win32", "win64"], default="win64"
-    )
-    parser.add_argument(
-        "-p",
-        "--prefix",
-        default=DEFAULT_PREFIX,
-        type=_parser_prefix,
-        nargs="?",
-    )
-    parser.add_argument("--use", metavar="VERSION", default="flatpak")
-    parser.add_argument("--cd", action="store_true")
-    parser.add_argument(
-        "--no-wayland",
-        action="store_true",
-        help="disable Wayland mode (on by default in a Wayland session)",
-    )
-    parser.add_argument(
-        "--auto-dpi",
-        action="store_true",
-        help="sync wine DPI to the KDE primary display scale",
-    )
-    parser.add_argument(
-        "--gamescope", action="store_true", help="run through gamescope"
-    )
-    parser.add_argument(
-        "--resolution",
-        metavar="WxH",
-        help="gamescope resolution (e.g. 1920x1080)",
-    )
-    parser.add_argument(
-        "--fullscreen", action="store_true", help="gamescope fullscreen mode"
-    )
-    parser.add_argument("args", nargs="*")
+def main(
+    args: typing.Annotated[
+        typing.Optional[list[str]], typer.Argument()
+    ] = None,
+    show_versions: typing.Annotated[bool, typer.Option("--versions")] = False,
+    winearch: typing.Annotated[str, typer.Option()] = "win64",
+    prefix: typing.Annotated[str, typer.Option("-p", "--prefix")] = str(
+        DEFAULT_PREFIX
+    ),
+    use: typing.Annotated[
+        str, typer.Option("--use", metavar="VERSION")
+    ] = "flatpak",
+    cd: typing.Annotated[bool, typer.Option("--cd")] = False,
+    no_wayland: typing.Annotated[
+        bool,
+        typer.Option(
+            "--no-wayland",
+            help="disable Wayland mode (on by default in a Wayland session)",
+        ),
+    ] = False,
+    auto_dpi: typing.Annotated[
+        bool,
+        typer.Option(
+            "--auto-dpi",
+            help="sync wine DPI to the KDE primary display scale",
+        ),
+    ] = False,
+    gamescope: typing.Annotated[
+        bool, typer.Option("--gamescope", help="run through gamescope")
+    ] = False,
+    resolution: typing.Annotated[
+        typing.Optional[str],
+        typer.Option(
+            metavar="WxH", help="gamescope resolution (e.g. 1920x1080)"
+        ),
+    ] = None,
+    fullscreen: typing.Annotated[
+        bool, typer.Option("--fullscreen", help="gamescope fullscreen mode")
+    ] = False,
+    # --- Upscaling / FSR / DLSS ---
+    fsr: typing.Annotated[
+        typing.Optional[bool],
+        typer.Option(
+            "--fsr/--no-fsr",
+            envvar="WINE_FULLSCREEN_FSR",
+            rich_help_panel=PANEL_UPSCALE,
+            help="AMD FidelityFX Super Resolution (Vulkan)",
+        ),
+    ] = None,
+    fsr_strength: typing.Annotated[
+        typing.Optional[int],
+        typer.Option(
+            "--fsr-strength",
+            envvar="WINE_FULLSCREEN_FSR_STRENGTH",
+            rich_help_panel=PANEL_UPSCALE,
+            metavar="0-5",
+            help="FSR sharpening strength (default 2)",
+        ),
+    ] = None,
+    fsr_mode: typing.Annotated[
+        typing.Optional[str],
+        typer.Option(
+            "--fsr-mode",
+            envvar="WINE_FULLSCREEN_FSR_CUSTOM_MODE",
+            rich_help_panel=PANEL_UPSCALE,
+            metavar="WxH",
+            help="FSR fake screen resolution",
+        ),
+    ] = None,
+    fsr3: typing.Annotated[
+        typing.Optional[str],
+        typer.Option(
+            "--fsr3",
+            envvar="PROTON_FSR3_UPGRADE",
+            rich_help_panel=PANEL_UPSCALE,
+            metavar="VERSION",
+            help="inject FSR 3 DLL (version or default)",
+        ),
+    ] = None,
+    fsr4: typing.Annotated[
+        typing.Optional[str],
+        typer.Option(
+            "--fsr4",
+            envvar="PROTON_FSR4_UPGRADE",
+            rich_help_panel=PANEL_UPSCALE,
+            metavar="VERSION",
+            help="inject FSR 4 DLL (version or default 4.0.2)",
+        ),
+    ] = None,
+    fsr4_rdna3: typing.Annotated[
+        typing.Optional[str],
+        typer.Option(
+            "--fsr4-rdna3",
+            envvar="PROTON_FSR4_RDNA3_UPGRADE",
+            rich_help_panel=PANEL_UPSCALE,
+            metavar="VERSION",
+            help="FSR 4 for RDNA3 GPUs (default 4.0.0)",
+        ),
+    ] = None,
+    fsr4_hud: typing.Annotated[
+        typing.Optional[bool],
+        typer.Option(
+            "--fsr4-hud/--no-fsr4-hud",
+            envvar="PROTON_FSR4_INDICATOR",
+            rich_help_panel=PANEL_UPSCALE,
+            help="show FSR 4 watermark overlay",
+        ),
+    ] = None,
+    dlss: typing.Annotated[
+        typing.Optional[str],
+        typer.Option(
+            "--dlss",
+            envvar="PROTON_DLSS_UPGRADE",
+            rich_help_panel=PANEL_UPSCALE,
+            metavar="VERSION",
+            help="inject NVIDIA DLSS DLL (version or latest)",
+        ),
+    ] = None,
+    dlss_hud: typing.Annotated[
+        typing.Optional[bool],
+        typer.Option(
+            "--dlss-hud/--no-dlss-hud",
+            envvar="PROTON_DLSS_INDICATOR",
+            rich_help_panel=PANEL_UPSCALE,
+            help="show DLSS overlay indicator",
+        ),
+    ] = None,
+    xess: typing.Annotated[
+        typing.Optional[str],
+        typer.Option(
+            "--xess",
+            envvar="PROTON_XESS_UPGRADE",
+            rich_help_panel=PANEL_UPSCALE,
+            metavar="VERSION",
+            help="inject Intel XeSS DLL",
+        ),
+    ] = None,
+    optiscaler: typing.Annotated[
+        typing.Optional[bool],
+        typer.Option(
+            "--optiscaler/--no-optiscaler",
+            envvar="PROTON_USE_OPTISCALER",
+            rich_help_panel=PANEL_UPSCALE,
+            help="OptiScaler upscaler swap",
+        ),
+    ] = None,
+    # --- Rendering / DirectX ---
+    wined3d: typing.Annotated[
+        typing.Optional[bool],
+        typer.Option(
+            "--wined3d/--no-wined3d",
+            envvar="PROTON_USE_WINED3D",
+            rich_help_panel=PANEL_RENDER,
+            help="OpenGL wined3d instead of DXVK",
+        ),
+    ] = None,
+    wined3d11: typing.Annotated[
+        typing.Optional[bool],
+        typer.Option(
+            "--wined3d11/--no-wined3d11",
+            envvar="PROTON_USE_WINED3D11",
+            rich_help_panel=PANEL_RENDER,
+            help="wined3d for D3D11 only",
+        ),
+    ] = None,
+    d7vk: typing.Annotated[
+        typing.Optional[bool],
+        typer.Option(
+            "--d7vk/--no-d7vk",
+            envvar="PROTON_USE_D7VK",
+            rich_help_panel=PANEL_RENDER,
+            help="d7vk ddraw.dll for old DirectDraw games",
+        ),
+    ] = None,
+    dxvk_d3d8: typing.Annotated[
+        typing.Optional[bool],
+        typer.Option(
+            "--dxvk-d3d8/--no-dxvk-d3d8",
+            envvar="PROTON_DXVK_D3D8",
+            rich_help_panel=PANEL_RENDER,
+            help="D3D8 via DXVK",
+        ),
+    ] = None,
+    no_d3d11: typing.Annotated[
+        typing.Optional[bool],
+        typer.Option(
+            "--no-d3d11/--d3d11",
+            envvar="PROTON_NO_D3D11",
+            rich_help_panel=PANEL_RENDER,
+            help="disable DirectX 11",
+        ),
+    ] = None,
+    no_d3d10: typing.Annotated[
+        typing.Optional[bool],
+        typer.Option(
+            "--no-d3d10/--d3d10",
+            envvar="PROTON_NO_D3D10",
+            rich_help_panel=PANEL_RENDER,
+            help="disable DirectX 10",
+        ),
+    ] = None,
+    old_gl_string: typing.Annotated[
+        typing.Optional[bool],
+        typer.Option(
+            "--old-gl-string/--no-old-gl-string",
+            envvar="PROTON_OLD_GL_STRING",
+            rich_help_panel=PANEL_RENDER,
+            help="limit GL extension string for legacy games",
+        ),
+    ] = None,
+    no_dxgi_device_manager: typing.Annotated[
+        typing.Optional[bool],
+        typer.Option(
+            "--no-dxgi-device-manager/--dxgi-device-manager",
+            envvar="WINE_DO_NOT_CREATE_DXGI_DEVICE_MANAGER",
+            rich_help_panel=PANEL_RENDER,
+            help="fix miscolored video playback in some titles",
+        ),
+    ] = None,
+    # --- GPU / NVAPI ---
+    hide_nvidia: typing.Annotated[
+        typing.Optional[bool],
+        typer.Option(
+            "--hide-nvidia/--show-nvidia",
+            envvar="PROTON_HIDE_NVIDIA_GPU",
+            rich_help_panel=PANEL_GPU,
+            help="hide NVIDIA GPU from the game",
+        ),
+    ] = None,
+    hide_intel: typing.Annotated[
+        typing.Optional[bool],
+        typer.Option(
+            "--hide-intel/--show-intel",
+            envvar="PROTON_HIDE_INTEL_GPU",
+            rich_help_panel=PANEL_GPU,
+            help="hide Intel GPU from the game",
+        ),
+    ] = None,
+    hide_apu: typing.Annotated[
+        typing.Optional[bool],
+        typer.Option(
+            "--hide-apu/--show-apu",
+            envvar="PROTON_HIDE_APU",
+            rich_help_panel=PANEL_GPU,
+            help="hide APU from the game",
+        ),
+    ] = None,
+    hide_vangogh: typing.Annotated[
+        typing.Optional[bool],
+        typer.Option(
+            "--hide-vangogh/--show-vangogh",
+            envvar="PROTON_HIDE_VANGOGH_GPU",
+            rich_help_panel=PANEL_GPU,
+            help="hide Steam Deck (Van Gogh) GPU",
+        ),
+    ] = None,
+    no_nvapi: typing.Annotated[
+        typing.Optional[bool],
+        typer.Option(
+            "--no-nvapi/--nvapi",
+            envvar="PROTON_DISABLE_NVAPI",
+            rich_help_panel=PANEL_GPU,
+            help="disable NVIDIA NVAPI",
+        ),
+    ] = None,
+    force_nvapi: typing.Annotated[
+        typing.Optional[bool],
+        typer.Option(
+            "--force-nvapi/--no-force-nvapi",
+            envvar="PROTON_FORCE_NVAPI",
+            rich_help_panel=PANEL_GPU,
+            help="force-enable NVAPI",
+        ),
+    ] = None,
+    native_ags: typing.Annotated[
+        typing.Optional[bool],
+        typer.Option(
+            "--native-ags/--no-native-ags",
+            envvar="PROTON_NATIVE_AGS",
+            rich_help_panel=PANEL_GPU,
+            help="use native AMD AGS library",
+        ),
+    ] = None,
+    # --- Sync / Memory ---
+    no_esync: typing.Annotated[
+        typing.Optional[bool],
+        typer.Option(
+            "--no-esync/--esync",
+            envvar="PROTON_NO_ESYNC",
+            rich_help_panel=PANEL_SYNC,
+            help="disable eventfd synchronization",
+        ),
+    ] = None,
+    no_fsync: typing.Annotated[
+        typing.Optional[bool],
+        typer.Option(
+            "--no-fsync/--fsync",
+            envvar="PROTON_NO_FSYNC",
+            rich_help_panel=PANEL_SYNC,
+            help="disable futex synchronization",
+        ),
+    ] = None,
+    no_ntsync: typing.Annotated[
+        typing.Optional[bool],
+        typer.Option(
+            "--no-ntsync/--ntsync",
+            envvar="PROTON_NO_NTSYNC",
+            rich_help_panel=PANEL_SYNC,
+            help="disable ntsync kernel module support",
+        ),
+    ] = None,
+    heap_delay_free: typing.Annotated[
+        typing.Optional[bool],
+        typer.Option(
+            "--heap-delay-free/--no-heap-delay-free",
+            envvar="PROTON_HEAP_DELAY_FREE",
+            rich_help_panel=PANEL_SYNC,
+            help="delay heap frees for buggy apps",
+        ),
+    ] = None,
+    heap_zero: typing.Annotated[
+        typing.Optional[bool],
+        typer.Option(
+            "--heap-zero/--no-heap-zero",
+            envvar="PROTON_HEAP_ZERO_MEMORY",
+            rich_help_panel=PANEL_SYNC,
+            help="zero heap memory on allocation",
+        ),
+    ] = None,
+    writecopy: typing.Annotated[
+        typing.Optional[bool],
+        typer.Option(
+            "--writecopy/--no-writecopy",
+            envvar="PROTON_USE_WRITECOPY",
+            rich_help_panel=PANEL_SYNC,
+            help="emulate Windows write-copy semantics",
+        ),
+    ] = None,
+    force_lgadd: typing.Annotated[
+        typing.Optional[bool],
+        typer.Option(
+            "--force-lgadd/--no-force-lgadd",
+            envvar="PROTON_FORCE_LARGE_ADDRESS_AWARE",
+            rich_help_panel=PANEL_SYNC,
+            help="force LARGE_ADDRESS_AWARE on executables",
+        ),
+    ] = None,
+    limit_address_space: typing.Annotated[
+        typing.Optional[bool],
+        typer.Option(
+            "--limit-address-space/--no-limit-address-space",
+            envvar="PROTON_LIMIT_ADDRESS_SPACE",
+            rich_help_panel=PANEL_SYNC,
+            help="limit address space for buggy apps",
+        ),
+    ] = None,
+    # --- Input ---
+    sdl: typing.Annotated[
+        typing.Optional[bool],
+        typer.Option(
+            "--sdl/--no-sdl",
+            envvar="PROTON_USE_SDL",
+            rich_help_panel=PANEL_INPUT,
+            help="use SDL input instead of hidraw/Steam Input",
+        ),
+    ] = None,
+    prefer_sdl: typing.Annotated[
+        typing.Optional[bool],
+        typer.Option(
+            "--prefer-sdl/--no-prefer-sdl",
+            envvar="PROTON_PREFER_SDL",
+            rich_help_panel=PANEL_INPUT,
+            help="prefer SDL input over hidraw",
+        ),
+    ] = None,
+    no_hidraw: typing.Annotated[
+        typing.Optional[bool],
+        typer.Option(
+            "--no-hidraw/--hidraw",
+            envvar="PROTON_DISABLE_HIDRAW",
+            rich_help_panel=PANEL_INPUT,
+            help="disable raw HID access",
+        ),
+    ] = None,
+    emulate_steaminput: typing.Annotated[
+        typing.Optional[bool],
+        typer.Option(
+            "--emulate-steaminput/--no-emulate-steaminput",
+            envvar="PROTON_EMULATE_STEAMINPUT",
+            rich_help_panel=PANEL_INPUT,
+            help="emulate Steam Input",
+        ),
+    ] = None,
+    no_steaminput: typing.Annotated[
+        typing.Optional[bool],
+        typer.Option(
+            "--no-steaminput/--steaminput",
+            envvar="PROTON_NO_STEAMINPUT",
+            rich_help_panel=PANEL_INPUT,
+            help="disable Steam Input",
+        ),
+    ] = None,
+    # --- Drives / Window / Misc ---
+    game_drive: typing.Annotated[
+        typing.Optional[bool],
+        typer.Option(
+            "--game-drive/--no-game-drive",
+            envvar="PROTON_SET_GAME_DRIVE",
+            rich_help_panel=PANEL_MISC,
+            help="map the game install as a drive",
+        ),
+    ] = None,
+    steam_drive: typing.Annotated[
+        typing.Optional[bool],
+        typer.Option(
+            "--steam-drive/--no-steam-drive",
+            envvar="PROTON_SET_STEAM_DRIVE",
+            rich_help_panel=PANEL_MISC,
+            help="map the Steam library as a drive",
+        ),
+    ] = None,
+    hdr: typing.Annotated[
+        typing.Optional[bool],
+        typer.Option(
+            "--hdr/--no-hdr",
+            envvar="PROTON_ENABLE_HDR",
+            rich_help_panel=PANEL_MISC,
+            help="enable HDR rendering",
+        ),
+    ] = None,
+    no_wm_decoration: typing.Annotated[
+        typing.Optional[bool],
+        typer.Option(
+            "--no-wm-decoration/--wm-decoration",
+            envvar="PROTON_NO_WM_DECORATION",
+            rich_help_panel=PANEL_MISC,
+            help="disable window manager decorations",
+        ),
+    ] = None,
+    no_xim: typing.Annotated[
+        typing.Optional[bool],
+        typer.Option(
+            "--no-xim/--xim",
+            envvar="PROTON_NO_XIM",
+            rich_help_panel=PANEL_MISC,
+            help="disable X input method",
+        ),
+    ] = None,
+    arm64: typing.Annotated[
+        typing.Optional[bool],
+        typer.Option(
+            "--arm64/--no-arm64",
+            envvar="PROTON_USE_ARM64",
+            rich_help_panel=PANEL_MISC,
+            help="use the ARM64 wine build",
+        ),
+    ] = None,
+    cpu_topology: typing.Annotated[
+        typing.Optional[str],
+        typer.Option(
+            "--cpu-topology",
+            envvar="PROTON_CPU_TOPOLOGY",
+            rich_help_panel=PANEL_MISC,
+            metavar="N:0,1,...",
+            help="override CPU topology exposed to the game",
+        ),
+    ] = None,
+    limit_resolutions: typing.Annotated[
+        typing.Optional[int],
+        typer.Option(
+            "--limit-resolutions",
+            envvar="PROTON_LIMIT_RESOLUTIONS",
+            rich_help_panel=PANEL_MISC,
+            help="limit number of exposed display resolutions",
+        ),
+    ] = None,
+    no_mediaconv_video: typing.Annotated[
+        typing.Optional[bool],
+        typer.Option(
+            "--no-mediaconv-video/--mediaconv-video",
+            envvar="PROTON_MEDIACONV_NO_VIDEO",
+            rich_help_panel=PANEL_MISC,
+            help="disable video in the media converter",
+        ),
+    ] = None,
+    wayland_monitor: typing.Annotated[
+        typing.Optional[str],
+        typer.Option(
+            "--wayland-monitor",
+            envvar="PROTON_WAYLAND_MONITOR",
+            rich_help_panel=PANEL_MISC,
+            metavar="CONNECTOR",
+            help="primary Wayland monitor (e.g. eDP-1)",
+        ),
+    ] = None,
+    log_dir: typing.Annotated[
+        typing.Optional[str],
+        typer.Option(
+            "--log-dir",
+            envvar="PROTON_LOG_DIR",
+            rich_help_panel=PANEL_MISC,
+            metavar="DIR",
+            help="directory for Proton logs",
+        ),
+    ] = None,
+    crash_report_dir: typing.Annotated[
+        typing.Optional[str],
+        typer.Option(
+            "--crash-report-dir",
+            envvar="PROTON_CRASH_REPORT_DIR",
+            rich_help_panel=PANEL_MISC,
+            metavar="DIR",
+            help="directory for crash reports",
+        ),
+    ] = None,
+    # --- Gamescope (CLI flags) ---
+    mangoapp: typing.Annotated[
+        bool,
+        typer.Option(
+            "--mangoapp",
+            rich_help_panel=PANEL_GAMESCOPE,
+            help="MangoHud performance overlay",
+        ),
+    ] = False,
+    adaptive_sync: typing.Annotated[
+        bool,
+        typer.Option(
+            "--adaptive-sync",
+            rich_help_panel=PANEL_GAMESCOPE,
+            help="enable variable refresh rate (VRR)",
+        ),
+    ] = False,
+    immediate_flips: typing.Annotated[
+        bool,
+        typer.Option(
+            "--immediate-flips",
+            rich_help_panel=PANEL_GAMESCOPE,
+            help="allow tearing via immediate flips",
+        ),
+    ] = False,
+    force_grab_cursor: typing.Annotated[
+        bool,
+        typer.Option(
+            "--force-grab-cursor",
+            rich_help_panel=PANEL_GAMESCOPE,
+            help="always use relative mouse mode",
+        ),
+    ] = False,
+    grab: typing.Annotated[
+        bool,
+        typer.Option(
+            "--grab",
+            rich_help_panel=PANEL_GAMESCOPE,
+            help="grab the keyboard",
+        ),
+    ] = False,
+    borderless: typing.Annotated[
+        bool,
+        typer.Option(
+            "--borderless",
+            rich_help_panel=PANEL_GAMESCOPE,
+            help="borderless window (nested)",
+        ),
+    ] = False,
+    expose_wayland: typing.Annotated[
+        bool,
+        typer.Option(
+            "--expose-wayland",
+            rich_help_panel=PANEL_GAMESCOPE,
+            help="support Wayland clients via xdg-shell",
+        ),
+    ] = False,
+    force_windows_fullscreen: typing.Annotated[
+        bool,
+        typer.Option(
+            "--force-windows-fullscreen",
+            rich_help_panel=PANEL_GAMESCOPE,
+            help="force windows to nested display size",
+        ),
+    ] = False,
+    steam_integration: typing.Annotated[
+        bool,
+        typer.Option(
+            "--steam-integration",
+            rich_help_panel=PANEL_GAMESCOPE,
+            help="enable gamescope Steam integration",
+        ),
+    ] = False,
+    gamescope_hdr: typing.Annotated[
+        bool,
+        typer.Option(
+            "--gamescope-hdr",
+            rich_help_panel=PANEL_GAMESCOPE,
+            help="enable gamescope HDR output",
+        ),
+    ] = False,
+    hdr_itm: typing.Annotated[
+        bool,
+        typer.Option(
+            "--hdr-itm",
+            rich_help_panel=PANEL_GAMESCOPE,
+            help="SDR->HDR inverse tone mapping",
+        ),
+    ] = False,
+    scaler: typing.Annotated[
+        typing.Optional[str],
+        typer.Option(
+            "--scaler",
+            rich_help_panel=PANEL_GAMESCOPE,
+            metavar="MODE",
+            help="upscaler: auto|integer|fit|fill|stretch",
+        ),
+    ] = None,
+    filter: typing.Annotated[
+        typing.Optional[str],
+        typer.Option(
+            "--filter",
+            rich_help_panel=PANEL_GAMESCOPE,
+            metavar="FILTER",
+            help="upscaler filter: linear|nearest|fsr|nis|pixel",
+        ),
+    ] = None,
+    sharpness: typing.Annotated[
+        typing.Optional[int],
+        typer.Option(
+            "--sharpness",
+            rich_help_panel=PANEL_GAMESCOPE,
+            metavar="0-20",
+            help="FSR/NIS sharpness (0 max .. 20 min)",
+        ),
+    ] = None,
+    gs_refresh: typing.Annotated[
+        typing.Optional[int],
+        typer.Option(
+            "--gs-refresh",
+            rich_help_panel=PANEL_GAMESCOPE,
+            metavar="FPS",
+            help="gamescope nested refresh rate",
+        ),
+    ] = None,
+    mouse_sensitivity: typing.Annotated[
+        typing.Optional[float],
+        typer.Option(
+            "--mouse-sensitivity",
+            rich_help_panel=PANEL_GAMESCOPE,
+            help="multiply mouse movement",
+        ),
+    ] = None,
+    backend: typing.Annotated[
+        typing.Optional[str],
+        typer.Option(
+            "--backend",
+            rich_help_panel=PANEL_GAMESCOPE,
+            metavar="BACKEND",
+            help="auto|drm|sdl|openvr|headless|wayland",
+        ),
+    ] = None,
+    prefer_output: typing.Annotated[
+        typing.Optional[str],
+        typer.Option(
+            "--prefer-output",
+            rich_help_panel=PANEL_GAMESCOPE,
+            metavar="CONNECTORS",
+            help="preferred output connectors (e.g. DP-1,HDMI-A-1)",
+        ),
+    ] = None,
+    orientation: typing.Annotated[
+        typing.Optional[str],
+        typer.Option(
+            "--orientation",
+            rich_help_panel=PANEL_GAMESCOPE,
+            metavar="DIR",
+            help="rotate display: normal|left|right|upsidedown",
+        ),
+    ] = None,
+    framerate_limit: typing.Annotated[
+        typing.Optional[int],
+        typer.Option(
+            "--framerate-limit",
+            rich_help_panel=PANEL_GAMESCOPE,
+            metavar="FPS",
+            help="gamescope framerate limit",
+        ),
+    ] = None,
+    # --- Gamescope (env-var passthroughs) ---
+    gamescope_wsi: typing.Annotated[
+        typing.Optional[bool],
+        typer.Option(
+            "--gamescope-wsi/--no-gamescope-wsi",
+            envvar="ENABLE_GAMESCOPE_WSI",
+            rich_help_panel=PANEL_GAMESCOPE,
+            help="gamescope WSI layer (disable to fix some games)",
+        ),
+    ] = None,
+    gamescope_tearing: typing.Annotated[
+        typing.Optional[bool],
+        typer.Option(
+            "--gamescope-tearing/--no-gamescope-tearing",
+            envvar="GAMESCOPE_ALLOW_TEARING",
+            rich_help_panel=PANEL_GAMESCOPE,
+            help="allow tearing",
+        ),
+    ] = None,
+    gamescope_limiter_file: typing.Annotated[
+        typing.Optional[str],
+        typer.Option(
+            "--gamescope-limiter-file",
+            envvar="GAMESCOPE_LIMITER_FILE",
+            rich_help_panel=PANEL_GAMESCOPE,
+            metavar="FILE",
+            help="path to a live fps-limit file",
+        ),
+    ] = None,
+    dxvk_hdr: typing.Annotated[
+        typing.Optional[bool],
+        typer.Option(
+            "--dxvk-hdr/--no-dxvk-hdr",
+            envvar="DXVK_HDR",
+            rich_help_panel=PANEL_GAMESCOPE,
+            help="DXVK HDR signalling (pairs with --gamescope-hdr)",
+        ),
+    ] = None,
+):
+    if winearch not in ("win32", "win64"):
+        raise typer.BadParameter("winearch must be win32 or win64")
 
-    args = parser.parse_args()
+    if cd:
+        raise typer.BadParameter("cd zsh integration failure")
 
-    if args.cd:
-        parser.error("cd zsh integration failure")
-        parser.exit(1)
-
-    prefix = args.prefix
+    args = args or []
+    prefix = resolve_prefix(prefix)
 
     versions = installed_versions()
-    if args.versions:
+    if show_versions:
         for version in sorted(versions):
             print(version)
-        parser.exit()
+        raise typer.Exit()
 
-    proton_bin = versions[args.use]
+    proton_bin = versions[use]
 
-    if not args.args:
+    if not args:
         if prefix.is_dir():
             print(prefix)
-            parser.exit()
+            raise typer.Exit()
         else:
-            parser.error("no such prefix")
-            parser.exit(1)
+            raise typer.BadParameter("no such prefix")
 
     if not prefix.is_dir():
         prefix.mkdir(exist_ok=True, parents=True)
@@ -166,28 +868,92 @@ def main():
         except CasefoldUnsupported:
             print("Casefold not supported. Ignoring")
 
-    cmd = args.args
-    if args.args[0].startswith("c:\\"):
+    cmd = args
+    if args[0].startswith("c:\\"):
         path = prefix / "pfx" / "drive_c"
-        parts = args.args[0].removeprefix("c:\\").split("\\")
+        parts = args[0].removeprefix("c:\\").split("\\")
         for part in parts[:-1]:
             path = path / part
         os.chdir(path)
-        cmd = [path / parts[-1], *args.args[1:]]
+        cmd = [path / parts[-1], *args[1:]]
 
     os.environ.update(
         {
             "STEAMAPPS_COMMON": str(STEAM_ROOT / "steamapps" / "common"),
             "STEAM_COMPAT_CLIENT_INSTALL_PATH": str(STEAM_ROOT),
             "STEAM_COMPAT_DATA_PATH": str(prefix),
-            "WINEARCH": args.winearch,
+            "WINEARCH": winearch,
             "WINEPREFIX": str(prefix / "pfx"),
         }
     )
-    wayland = bool(os.environ.get("WAYLAND_DISPLAY")) and not args.no_wayland
+    wayland = bool(os.environ.get("WAYLAND_DISPLAY")) and not no_wayland
     os.environ["PROTON_ENABLE_WAYLAND"] = "1" if wayland else "0"
 
-    if args.auto_dpi and (scale := kde_primary_scale()):
+    env_flags = {
+        "WINE_FULLSCREEN_FSR": fsr,
+        "WINE_FULLSCREEN_FSR_STRENGTH": fsr_strength,
+        "WINE_FULLSCREEN_FSR_CUSTOM_MODE": fsr_mode,
+        "PROTON_FSR3_UPGRADE": fsr3,
+        "PROTON_FSR4_UPGRADE": fsr4,
+        "PROTON_FSR4_RDNA3_UPGRADE": fsr4_rdna3,
+        "PROTON_FSR4_INDICATOR": fsr4_hud,
+        "PROTON_DLSS_UPGRADE": dlss,
+        "PROTON_DLSS_INDICATOR": dlss_hud,
+        "PROTON_XESS_UPGRADE": xess,
+        "PROTON_USE_OPTISCALER": optiscaler,
+        "PROTON_USE_WINED3D": wined3d,
+        "PROTON_USE_WINED3D11": wined3d11,
+        "PROTON_USE_D7VK": d7vk,
+        "PROTON_DXVK_D3D8": dxvk_d3d8,
+        "PROTON_NO_D3D11": no_d3d11,
+        "PROTON_NO_D3D10": no_d3d10,
+        "PROTON_OLD_GL_STRING": old_gl_string,
+        "WINE_DO_NOT_CREATE_DXGI_DEVICE_MANAGER": no_dxgi_device_manager,
+        "PROTON_HIDE_NVIDIA_GPU": hide_nvidia,
+        "PROTON_HIDE_INTEL_GPU": hide_intel,
+        "PROTON_HIDE_APU": hide_apu,
+        "PROTON_HIDE_VANGOGH_GPU": hide_vangogh,
+        "PROTON_DISABLE_NVAPI": no_nvapi,
+        "PROTON_FORCE_NVAPI": force_nvapi,
+        "PROTON_NATIVE_AGS": native_ags,
+        "PROTON_NO_ESYNC": no_esync,
+        "PROTON_NO_FSYNC": no_fsync,
+        "PROTON_NO_NTSYNC": no_ntsync,
+        "PROTON_HEAP_DELAY_FREE": heap_delay_free,
+        "PROTON_HEAP_ZERO_MEMORY": heap_zero,
+        "PROTON_USE_WRITECOPY": writecopy,
+        "PROTON_FORCE_LARGE_ADDRESS_AWARE": force_lgadd,
+        "PROTON_LIMIT_ADDRESS_SPACE": limit_address_space,
+        "PROTON_USE_SDL": sdl,
+        "PROTON_PREFER_SDL": prefer_sdl,
+        "PROTON_DISABLE_HIDRAW": no_hidraw,
+        "PROTON_EMULATE_STEAMINPUT": emulate_steaminput,
+        "PROTON_NO_STEAMINPUT": no_steaminput,
+        "PROTON_SET_GAME_DRIVE": game_drive,
+        "PROTON_SET_STEAM_DRIVE": steam_drive,
+        "PROTON_ENABLE_HDR": hdr,
+        "PROTON_NO_WM_DECORATION": no_wm_decoration,
+        "PROTON_NO_XIM": no_xim,
+        "PROTON_USE_ARM64": arm64,
+        "PROTON_CPU_TOPOLOGY": cpu_topology,
+        "PROTON_LIMIT_RESOLUTIONS": limit_resolutions,
+        "PROTON_MEDIACONV_NO_VIDEO": no_mediaconv_video,
+        "PROTON_WAYLAND_MONITOR": wayland_monitor,
+        "PROTON_LOG_DIR": log_dir,
+        "PROTON_CRASH_REPORT_DIR": crash_report_dir,
+        "ENABLE_GAMESCOPE_WSI": gamescope_wsi,
+        "GAMESCOPE_ALLOW_TEARING": gamescope_tearing,
+        "GAMESCOPE_LIMITER_FILE": gamescope_limiter_file,
+        "DXVK_HDR": dxvk_hdr,
+    }
+    for var, value in env_flags.items():
+        if value is None:
+            continue
+        os.environ[var] = (
+            "1" if value is True else "0" if value is False else str(value)
+        )
+
+    if auto_dpi and (scale := kde_primary_scale()):
         dpi = round(96 * scale)
         subprocess.run(
             [
@@ -207,13 +973,46 @@ def main():
             check=True,
         )
 
-    if args.gamescope or args.resolution or args.fullscreen:
+    gs_bool = [
+        flag
+        for flag, on in (
+            ("--mangoapp", mangoapp),
+            ("--adaptive-sync", adaptive_sync),
+            ("--immediate-flips", immediate_flips),
+            ("--force-grab-cursor", force_grab_cursor),
+            ("-g", grab),
+            ("-b", borderless),
+            ("--expose-wayland", expose_wayland),
+            ("--force-windows-fullscreen", force_windows_fullscreen),
+            ("-e", steam_integration),
+            ("--hdr-enabled", gamescope_hdr),
+            ("--hdr-itm-enabled", hdr_itm),
+        )
+        if on
+    ]
+    gs_value = []
+    for flag, value in (
+        ("-S", scaler),
+        ("-F", filter),
+        ("--fsr-sharpness", sharpness),
+        ("-r", gs_refresh),
+        ("-s", mouse_sensitivity),
+        ("--backend", backend),
+        ("-O", prefer_output),
+        ("--force-orientation", orientation),
+        ("--framerate-limit", framerate_limit),
+    ):
+        if value is not None:
+            gs_value += [flag, str(value)]
+
+    if gamescope or resolution or fullscreen or gs_bool or gs_value:
         gamescope_cmd = ["gamescope"]
-        if args.resolution:
-            w, h = args.resolution.split("x")
+        if resolution:
+            w, h = resolution.split("x")
             gamescope_cmd += ["-w", w, "-h", h, "-W", w, "-H", h]
-        if args.fullscreen:
+        if fullscreen:
             gamescope_cmd += ["-f"]
+        gamescope_cmd += gs_bool + gs_value
         gamescope_cmd += ["--"] + [proton_bin[0]] + proton_bin[2:] + cmd
         os.execvp("gamescope", gamescope_cmd)
     else:
@@ -221,4 +1020,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    typer.run(main)
