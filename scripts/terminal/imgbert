@@ -555,7 +555,7 @@ class exiv2:
         if proc.returncode == 1 and not stderr:
             return None
         elif proc.returncode != 0:
-            raise ProcessError(proc)
+            raise ProcessError(proc, stderr=stderr.decode().strip() or None)
 
         _, _, _, value = stdout.decode().split(maxsplit=3)
         value = value.strip()
@@ -574,7 +574,7 @@ class exiv2:
         )
         _, stderr = await proc.communicate()
         if stderr or proc.returncode != 0:
-            raise ProcessError(proc)
+            raise ProcessError(proc, stderr=stderr.decode().strip() or None)
 
     @staticmethod
     async def copy_metadata(source, target):
@@ -601,7 +601,9 @@ class exiv2:
             _, stderr = await proc.communicate()
             # treat warnings as errors
             if stderr or proc.returncode != 0:
-                raise ProcessError(proc)
+                raise ProcessError(
+                    proc, stderr=stderr.decode().strip() or None
+                )
 
 
 class magick_convert:
@@ -629,9 +631,10 @@ class magick_convert:
 
 
 class ProcessError(Exception):
-    def __init__(self, process, message=None):
+    def __init__(self, process, message=None, stderr=None):
         self.process = process
         self.message = message
+        self.stderr = stderr
 
     def __str__(self):
         proc = self.process
@@ -1938,6 +1941,12 @@ def add_optim_parser(subparsers):
     )
     parser.add_argument("-q", "--quiet", action="store_true")
     parser.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="print subprocess stderr (e.g. exiv2 warnings) on error",
+    )
+    parser.add_argument(
         "--no-cache",
         action="store_true",
         help="disable cache (by default, files already processed are skipped)",
@@ -2120,6 +2129,10 @@ async def cmd_optim(args):
             except ProcessError as e:
                 # TODO give this a competent error message
                 print(f"error: {e}", file=sys.stderr)
+                if args.verbose and e.stderr:
+                    file, _ = future_to_file[future]
+                    for line in e.stderr.splitlines():
+                        print(f"error: {file}: {line}", file=sys.stderr)
                 continue
 
             if cache:

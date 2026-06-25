@@ -589,6 +589,7 @@ if HOSTNAME in ("mars", "phobos"):
         {
             "com.bitwarden.desktop",
             "com.bitwig.BitwigStudio",
+            "com.valvesoftware.Steam.CompatibilityTool.Proton-GE",
             "im.riot.Riot",
             "md.obsidian.Obsidian",
             "org.equeim.Tremotesf",
