@@ -9,7 +9,6 @@
 import json
 import os
 import pathlib
-import shlex
 import shutil
 import subprocess
 import typing
@@ -22,6 +21,7 @@ PREFIX_ROOT = pathlib.Path(
 DEFAULT_PREFIX = PREFIX_ROOT / "default"
 STEAM_ROOT = pathlib.Path("~/.local/share/Steam").expanduser()
 SYSTEM_PROTON = pathlib.Path("/usr/bin/proton-ge")
+FLATPAK_PROTON = "com.valvesoftware.Steam.CompatibilityTool.Proton-GE"
 
 PANEL_UPSCALE = "Upscaling / FSR / DLSS"
 PANEL_RENDER = "Rendering / DirectX"
@@ -30,6 +30,22 @@ PANEL_SYNC = "Sync / Memory"
 PANEL_INPUT = "Input"
 PANEL_MISC = "Drives / Window / Misc"
 PANEL_GAMESCOPE = "Gamescope"
+
+
+def flatpak_proton():
+    proc = subprocess.run(
+        ["flatpak", "info", "--show-location", FLATPAK_PROTON],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+    )
+    if proc.returncode:
+        return None
+    proton_bin = (
+        pathlib.Path(proc.stdout.decode().strip()) / "files" / "proton"
+    )
+    if proton_bin.is_file():
+        return proton_bin
+    return None
 
 
 def kde_primary_scale():
@@ -50,6 +66,9 @@ def installed_versions():
 
     if wine_bin := shutil.which("wine"):
         versions["wine"] = [wine_bin, "wine"]
+
+    if flatpak_bin := flatpak_proton():
+        versions["flatpak"] = [flatpak_bin, "run", "run"]
 
     if SYSTEM_PROTON.is_file():
         versions["system"] = [SYSTEM_PROTON, "run", "run"]
@@ -106,7 +125,7 @@ def main(
     ),
     use: typing.Annotated[
         str, typer.Option("--use", metavar="VERSION")
-    ] = "system",
+    ] = "flatpak",
     cd: typing.Annotated[bool, typer.Option("--cd")] = False,
     no_wayland: typing.Annotated[
         bool,
@@ -543,6 +562,15 @@ def main(
             help="disable X input method",
         ),
     ] = None,
+    desktop: typing.Annotated[
+        typing.Optional[str],
+        typer.Option(
+            "--desktop",
+            rich_help_panel=PANEL_MISC,
+            metavar="WxH",
+            help="run in a wine virtual desktop (e.g. 800x600)",
+        ),
+    ] = None,
     arm64: typing.Annotated[
         typing.Optional[bool],
         typer.Option(
@@ -858,6 +886,10 @@ def main(
         os.chdir(path)
         cmd = [path / parts[-1], *args[1:]]
 
+    if desktop:
+        w, h = desktop.split("x")
+        cmd = ["explorer", f"/desktop=proton,{w}x{h}", *cmd]
+
     os.environ.update(
         {
             "STEAMAPPS_COMMON": str(STEAM_ROOT / "steamapps" / "common"),
@@ -939,7 +971,7 @@ def main(
         subprocess.run(
             [
                 proton_bin[0],
-                *proton_bin[2:],
+                "run",
                 "reg",
                 "add",
                 "HKCU\\Control Panel\\Desktop",
@@ -995,7 +1027,6 @@ def main(
             gamescope_cmd += ["-f"]
         gamescope_cmd += gs_bool + gs_value
         gamescope_cmd += ["--"] + [proton_bin[0]] + proton_bin[2:] + cmd
-        print(shlex.join(str(part) for part in gamescope_cmd))
         os.execvp("gamescope", gamescope_cmd)
     else:
         os.execl(*proton_bin, *cmd)
