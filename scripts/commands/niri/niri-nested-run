@@ -19,4 +19,4 @@ shift 3
 exec "$@" <"$IN" >"$OUT" 2>"$ERR"
 '
 
-exec niri -- sh -c "$SCRIPT" _ "$IN" "$OUT" "$ERR" "$@" >/dev/null 2>&1
+exec niri -c /dev/null -- sh -c "$SCRIPT" _ "$IN" "$OUT" "$ERR" "$@" >/dev/null 2>&1
