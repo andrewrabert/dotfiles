@@ -12,16 +12,11 @@ XDG_CONFIG_HOME = pathlib.Path(
 )
 LUST_DIR = XDG_CONFIG_HOME / "just" / "lust"
 LUST_MODULE = LUST_DIR / "lust.just"
-NOTES_MODULE = LUST_DIR / "notes.just"
 AGENTS_MODULE = LUST_DIR / "AGENTS.md"
-NOTES_DIRNAME = "notes"
-NOTE_DIRS = ("scripts", "plans", "todos", "docs")
 
 DEFAULT_JUSTFILE = f"import '{LUST_MODULE}'\n"
 
 LUST_JUST = """\
-mod notes 'notes.just'
-
 # Print the path to this justfile
 [group('lust')]
 file:
@@ -32,21 +27,21 @@ file:
 dir:
     @echo "{{ justfile_directory() }}"
 
-# Print agent guidance for using lust (notes, plans, todos)
+# Print agent guidance for using lust
 [private]
 agents:
-    @LUST_NOTE=1 lust agents
+    @LUST_AGENTS=1 lust
 """
 
 # Agent guidance, written to AGENTS.md next to the global lust.just and printed
 # by the `agents` recipe. Self-contained so a global CLAUDE.md/AGENTS.md can
 # simply `@`-include it.
 AGENTS_MD = """\
-# `lust` — personal per-repo justfile + scratch dir
+# `lust` — personal per-repo justfile
 
 `lust` runs `just` against a personal justfile stored *outside* the current repo,
-keyed by the repo's git remote URL. Use it for personal recipes, notes, and docs
-that should not be committed to the project.
+keyed by the repo's git remote URL. Use it for personal recipes that should not
+be committed to the project.
 
 - Per-repo dir: `~/.config/just/lust/<url-encoded-git-remote>/`
 - Justfile lives at `<lust dir>/justfile`; lust auto-creates it and a
@@ -54,104 +49,6 @@ that should not be committed to the project.
 - `lust dir` — print the per-repo lust directory.
 - `lust file` — print the path to the per-repo justfile.
 - `lust` (no args) — list recipes.
-
-## Storing notes, plans, and todos
-
-Prefer `lust notes` for any notes, plans, todos, scratch, or docs to keep out of
-the project tree. Stored outside the repo, keyed per-repo by git remote. Notes are
-arbitrary relative paths (e.g. `plans/auth.md`); nested dirs are fine.
-
-```
-$ lust notes
-Available recipes:
-    cat path     # Print a note
-    dir          # Print the notes directory
-    edit path='' # Edit a note in $EDITOR (fzf picker when no path given)
-    list         # List notes
-    move src dst # Move/rename a note
-    new path     # Create a new note in $EDITOR (error if it exists)
-    path path    # Print the absolute path of a note
-    remove path  # Remove a note
-    replace path # Replace a note's contents from stdin
-    run path *args # Run a note as an executable, passing through remaining args
-
-    [search]
-    fd *args     # Find notes by name with fd
-    rg *args     # Search note contents with ripgrep
-```
-
-Write non-interactively with `replace` (stdin only): `printf '%s' "$body" | lust
-notes replace plans/auth.md`. Read with `lust notes cat <path>`. The `notes`
-prefix also works with `::` (`lust notes::cat <path>`).
-
-## Directory conventions
-
-Notes paths are arbitrary, but group them under these top-level dirs so notes
-stay predictable across repos:
-
-- `scripts/` — executable scripts and PoCs. Run with `lust notes run
-  scripts/<file> [args...]` (passes remaining args through; the file must be
-  executable). Prefer this over an ad-hoc per-repo justfile recipe.
-- `plans/` — implementation plans and design docs (e.g. `plans/auth.md`).
-- `todos/` — task lists and running todos.
-- `docs/` — reference notes, scratch docs, and links.
-"""
-
-# The `notes` module's recipes re-invoke this script in note mode
-# (LUST_NOTE=1). Notes are files under `notes/` in the per-repo lust dir; the
-# script resolves and guards the path.
-NOTES_JUST = """\
-set positional-arguments := true
-
-# List notes
-list:
-    @LUST_NOTE=1 lust list
-
-# Print a note
-cat path:
-    @LUST_NOTE=1 lust cat "$1"
-
-# Run a note as an executable, passing through remaining args
-run path *args:
-    @LUST_NOTE=1 lust run "$@"
-
-# Replace a note's contents from stdin
-replace path:
-    @LUST_NOTE=1 lust replace "$1"
-
-# Remove a note
-remove path:
-    @LUST_NOTE=1 lust remove "$1"
-
-# Print the absolute path of a note
-path path:
-    @LUST_NOTE=1 lust path "$1"
-
-# Print the notes directory
-dir:
-    @LUST_NOTE=1 lust dir
-
-# Create a new note in $EDITOR (error if it exists)
-new path:
-    @LUST_NOTE=1 lust new "$1"
-
-# Edit a note in $EDITOR (fzf picker when no path given)
-edit path='':
-    @LUST_NOTE=1 lust edit "$1"
-
-# Move/rename a note
-move src dst:
-    @LUST_NOTE=1 lust move "$1" "$2"
-
-# Search note contents with ripgrep
-[group('search')]
-rg *args:
-    -@LUST_NOTE=1 lust rg "$@"
-
-# Find notes by name with fd
-[group('search')]
-fd *args:
-    -@LUST_NOTE=1 lust fd "$@"
 """
 
 
@@ -200,229 +97,15 @@ async def justfile_path():
     return LUST_DIR / encoded / "justfile"
 
 
-class note:
-    @classmethod
-    def base(cls):
-        repo_dir = os.environ.get("LUST_REPO_DIR")
-        if not repo_dir:
-            raise UserError("LUST_REPO_DIR is not set")
-        return (pathlib.Path(repo_dir) / NOTES_DIRNAME).resolve()
-
-    @staticmethod
-    def is_hidden(target, base):
-        return any(
-            part.startswith(".") for part in target.relative_to(base).parts
-        )
-
-    @classmethod
-    def target(cls, rel):
-        if not rel:
-            raise UserError("a note path is required")
-        base = cls.base()
-        target = (base / rel).resolve()
-        if target != base and base not in target.parents:
-            raise UserError("note path escapes the notes dir")
-        if cls.is_hidden(target, base):
-            raise UserError("note path contains a hidden component")
-        return target
-
-    @classmethod
-    def prune(cls, start, base):
-        for parent in start.parents:
-            if parent == base or any(parent.iterdir()):
-                break
-            if parent.parent == base and parent.name in NOTE_DIRS:
-                break
-            parent.rmdir()
-
-    @classmethod
-    async def editor(cls, target):
-        editor = os.environ.get("EDITOR", "vi")
-        proc = await asyncio.create_subprocess_exec(editor, str(target))
-        await proc.wait()
-        if proc.returncode != 0:
-            raise UserError(f"{editor} exited with {proc.returncode}")
-
-    @classmethod
-    def names(cls):
-        base = cls.base()
-        if not base.is_dir():
-            return []
-        return sorted(
-            str(p.relative_to(base))
-            for p in base.rglob("*")
-            if p.is_file() and not cls.is_hidden(p, base)
-        )
-
-    @classmethod
-    async def pick(cls):
-        notes = cls.names()
-        if not notes:
-            raise UserError("no notes")
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                "fzf",
-                stdin=asyncio.subprocess.PIPE,
-                stdout=asyncio.subprocess.PIPE,
-            )
-        except FileNotFoundError:
-            raise UserError("fzf not found")
-        stdout, _ = await proc.communicate("\n".join(notes).encode())
-        return stdout.decode().strip() if proc.returncode == 0 else ""
-
-    @classmethod
-    def list(cls):
-        notes = cls.names()
-        if notes:
-            print("\n".join(notes))
-
-    @classmethod
-    def cat(cls, rel):
-        target = cls.target(rel)
-        if not target.is_file():
-            raise UserError(f"no such note: {rel}")
-        sys.stdout.write(target.read_text())
-
-    @classmethod
-    async def run(cls, rel, args):
-        target = cls.target(rel)
-        if not target.is_file():
-            raise UserError(f"no such note: {rel}")
-        if not os.access(target, os.X_OK):
-            raise UserError(f"note is not executable: {rel}")
-        proc = await asyncio.create_subprocess_exec(str(target), *args)
-        await proc.wait()
-        sys.exit(proc.returncode)
-
-    @classmethod
-    def path(cls, rel):
-        print(cls.target(rel))
-
-    @classmethod
-    def dir(cls):
-        print(cls.base())
-
-    @classmethod
-    def remove(cls, rel):
-        base = cls.base()
-        target = cls.target(rel)
-        if not target.is_file():
-            raise UserError(f"no such note: {rel}")
-        target.unlink()
-        cls.prune(target, base)
-        print(f"Removed {rel}", file=sys.stderr)
-
-    @classmethod
-    def move(cls, src_rel, dst_rel):
-        base = cls.base()
-        src = cls.target(src_rel)
-        dst = cls.target(dst_rel)
-        if not src.is_file():
-            raise UserError(f"no such note: {src_rel}")
-        if dst.exists():
-            raise UserError(f"note already exists: {dst_rel}")
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        src.replace(dst)
-        cls.prune(src, base)
-        print(f"Moved {src_rel} -> {dst_rel}", file=sys.stderr)
-
-    @classmethod
-    async def new(cls, rel):
-        target = cls.target(rel)
-        if target.exists():
-            raise UserError(f"note already exists: {rel}")
-        target.parent.mkdir(parents=True, exist_ok=True)
-        await cls.editor(target)
-
-    @classmethod
-    async def edit(cls, rel):
-        if not rel:
-            rel = await cls.pick()
-            if not rel:
-                return
-        target = cls.target(rel)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        await cls.editor(target)
-
-    @classmethod
-    async def rg(cls, args):
-        base = cls.base()
-        # Force-exclude hidden paths so passthrough args (e.g. --hidden)
-        # can never surface a path with a hidden component.
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                "rg", "--glob=!.*", *args, cwd=str(base)
-            )
-        except FileNotFoundError:
-            raise UserError("ripgrep (rg) not found")
-        await proc.wait()
-        sys.exit(proc.returncode)
-
-    @classmethod
-    async def fd(cls, args):
-        base = cls.base()
-        # Force-exclude hidden paths so passthrough args (e.g. --hidden)
-        # can never surface a path with a hidden component.
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                "fd", "--exclude=.*", *args, cwd=str(base)
-            )
-        except FileNotFoundError:
-            raise UserError("fd not found")
-        await proc.wait()
-        sys.exit(proc.returncode)
-
-    @classmethod
-    def replace(cls, rel):
-        target = cls.target(rel)
-        if sys.stdin.isatty():
-            raise UserError("note content must be piped via stdin")
-        content = sys.stdin.read()
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(content)
-        print(f"Wrote {rel}", file=sys.stderr)
-
-
-async def note_main():
-    argv = sys.argv[1:]
-    sub = argv[0] if argv else "list"
-    rel = argv[1] if len(argv) > 1 else ""
-    match sub:
-        case "list":
-            note.list()
-        case "cat":
-            note.cat(rel)
-        case "run":
-            await note.run(rel, argv[2:])
-        case "path":
-            note.path(rel)
-        case "dir":
-            note.dir()
-        case "remove":
-            note.remove(rel)
-        case "move":
-            note.move(rel, argv[2] if len(argv) > 2 else "")
-        case "new":
-            await note.new(rel)
-        case "edit":
-            await note.edit(rel)
-        case "rg":
-            await note.rg(argv[1:])
-        case "fd":
-            await note.fd(argv[1:])
-        case "replace":
-            note.replace(rel)
-        case "agents":
-            ensure_agents()
-            sys.stdout.write(AGENTS_MD)
-        case _:
-            raise UserError(f"unknown note command: {sub}")
-
-
 def ensure_agents():
     LUST_DIR.mkdir(parents=True, exist_ok=True)
     if not AGENTS_MODULE.exists() or AGENTS_MODULE.read_text() != AGENTS_MD:
         AGENTS_MODULE.write_text(AGENTS_MD)
+
+
+async def agents_main():
+    ensure_agents()
+    sys.stdout.write(AGENTS_MD)
 
 
 def link_justfile(justfile, git_root):
@@ -450,18 +133,12 @@ async def main():
     LUST_MODULE.parent.mkdir(parents=True, exist_ok=True)
     if not LUST_MODULE.exists() or LUST_MODULE.read_text() != LUST_JUST:
         LUST_MODULE.write_text(LUST_JUST)
-    if not NOTES_MODULE.exists() or NOTES_MODULE.read_text() != NOTES_JUST:
-        NOTES_MODULE.write_text(NOTES_JUST)
     ensure_agents()
 
     if not justfile.exists():
         justfile.parent.mkdir(parents=True, exist_ok=True)
         justfile.write_text(DEFAULT_JUSTFILE)
         print(f"Created {justfile}", file=sys.stderr)
-
-    notes_dir = justfile.parent / NOTES_DIRNAME
-    for sub in NOTE_DIRS:
-        (notes_dir / sub).mkdir(parents=True, exist_ok=True)
 
     link_justfile(justfile, git_root)
     proc = await asyncio.create_subprocess_exec(
@@ -479,7 +156,7 @@ async def main():
 
 
 if __name__ == "__main__":
-    entry = note_main if os.environ.get("LUST_NOTE") else main
+    entry = agents_main if os.environ.get("LUST_AGENTS") else main
     try:
         asyncio.run(entry())
     except UserError as e:

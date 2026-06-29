@@ -1,29 +1,5 @@
 #compdef lust
 
-# Complete existing note paths.
-_lust_notes() {
-  local -a notes
-  notes=(${(f)"$(lust notes list 2>/dev/null)"})
-  compadd -- $notes
-}
-
-# Complete note paths for a notes subcommand's path argument, handling both
-# `lust notes <cmd> <path>` and `lust notes::<cmd> <path>`.
-local sub argpos
-if [[ "$words[2]" == notes ]]; then
-  sub="$words[3]"; argpos=4
-elif [[ "$words[2]" == notes::* ]]; then
-  sub="${words[2]#notes::}"; argpos=3
-fi
-if [[ -n "$sub" ]]; then
-  case "$sub" in
-    cat|remove|replace|path|edit|move|run)
-      (( CURRENT == argpos )) && { _lust_notes; return; }
-      [[ "$sub" == move ]] && (( CURRENT == argpos + 1 )) && { _lust_notes; return; }
-      ;;
-  esac
-fi
-
 source <(JUST_COMPLETE=zsh just)
 if [ "$funcstack[1]" = "_lust" ]; then
   JUST_JUSTFILE="$(lust file)" _clap_dynamic_completer_just "$@"

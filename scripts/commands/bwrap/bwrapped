@@ -73,6 +73,9 @@ CODEX_HOME = os.environ.get("CODEX_HOME") or HOME / ".codex"
 OPENCODE_DIR = HOME / ".config/opencode"
 PI_DIR = HOME / ".pi"
 PI_AGENT_DIR = PI_DIR / "agent"
+DOTFILES_PUBLIC = HOME / ".dotfiles" / "public"
+DOTFILES_PUBLIC_BIN = DOTFILES_PUBLIC / ".local" / "bin"
+DOTFILES_PUBLIC_SCRIPTS = DOTFILES_PUBLIC / "scripts"
 
 DEFAULT_CONFIG = {
     "proc": ["/proc"],
@@ -90,6 +93,8 @@ DEFAULT_CONFIG = {
             "/usr",
             "/run/systemd/resolve",
             HOME / ".local/bin",
+            DOTFILES_PUBLIC_BIN,
+            DOTFILES_PUBLIC_SCRIPTS,
             HOME / ".cargo",
             HOME / ".rustup",
             GIT_CONFIG,
