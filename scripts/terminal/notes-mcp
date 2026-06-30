@@ -1,0 +1,508 @@
+#!/usr/bin/env python3
+"""MCP stdio server: pure file ops over a nested tree of .md notes."""
+
+import asyncio
+import fnmatch
+import json
+import os
+import pathlib
+import sys
+import tempfile
+
+
+class UserError(Exception):
+    pass
+
+
+def json_dumps(data):
+    return json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True)
+
+
+def atomic_write(path, text):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        "w", dir=path.parent, delete=False, encoding="utf-8"
+    ) as handle:
+        temp_path = pathlib.Path(handle.name)
+        try:
+            handle.write(text)
+            handle.flush()
+            temp_path.replace(path)
+        finally:
+            try:
+                temp_path.unlink()
+            except FileNotFoundError:
+                pass
+
+
+def slice_lines(text, offset, limit):
+    if offset is None and limit is None:
+        return text
+    lines = text.splitlines()
+    start = (offset - 1) if offset else 0
+    end = (start + limit) if limit else None
+    return "\n".join(lines[start:end])
+
+
+class McpStdioServer:
+    """Reusable JSON-RPC-over-stdio MCP server. Subclass, implement register() to
+    declare tools via register_tool(), and set TOOL_ERROR to the exception handlers
+    raise for user-facing failures. All MCP protocol — framing, lifecycle, response
+    envelope, tool-descriptor shape — lives here; subclasses hold only app logic."""
+
+    PROTOCOL_VERSION = "2025-06-18"
+    TOOL_ERROR = Exception  # handlers raise this for a user-facing tool error
+    INSTRUCTIONS = (
+        None  # optional server-level guidance returned on initialize
+    )
+
+    def __init__(self, name, version="1"):
+        self.server_info = {"name": name, "version": version}
+        self._tools = {}
+        self.register()
+
+    def register(self):
+        """Override: declare tools by calling register_tool() once per tool."""
+        raise NotImplementedError
+
+    def register_tool(self, name, description, input_schema, handler):
+        """Register one MCP tool. handler(arguments) -> str. MCP envelope shape lives here."""
+        self._tools[name] = {
+            "descriptor": {
+                "name": name,
+                "description": description,
+                "inputSchema": input_schema,
+            },
+            "handler": handler,
+        }
+
+    @staticmethod
+    def send(message):
+        sys.stdout.write(f"{json.dumps(message)}\n")
+        sys.stdout.flush()
+
+    def dispatch(self, name, arguments):
+        """Return the text result for a tools/call; raise TOOL_ERROR on failure."""
+        tool = self._tools.get(name)
+        if tool is None:
+            raise self.TOOL_ERROR(f"unknown tool: {name}")
+        return tool["handler"](arguments or {})
+
+    def handle(self, message):
+        method = message.get("method")
+        rid = message.get("id")
+        if method is None or rid is None:  # response or notification: no reply
+            return
+
+        response = {
+            "jsonrpc": "2.0",
+            "id": rid,
+        }
+
+        match method:
+            case "initialize":
+                params = message.get("params") or {}
+                response["result"] = {
+                    "protocolVersion": params.get(
+                        "protocolVersion", self.PROTOCOL_VERSION
+                    ),
+                    "capabilities": {"tools": {}},
+                    "serverInfo": self.server_info,
+                }
+                if self.INSTRUCTIONS:
+                    response["result"]["instructions"] = self.INSTRUCTIONS
+            case "tools/list":
+                response["result"] = {
+                    "tools": [t["descriptor"] for t in self._tools.values()]
+                }
+            case "tools/call":
+                params = message.get("params") or {}
+                try:
+                    text = self.dispatch(
+                        params.get("name"), params.get("arguments")
+                    )
+                    response["result"] = {
+                        "content": [{"type": "text", "text": text}],
+                        "isError": False,
+                    }
+                except self.TOOL_ERROR as error:
+                    response["result"] = {
+                        "content": [
+                            {"type": "text", "text": f"error: {error}"}
+                        ],
+                        "isError": True,
+                    }
+                except (
+                    Exception
+                ) as error:  # a tool bug must not kill the server
+                    response["result"] = {
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": f"error: internal: {error}",
+                            }
+                        ],
+                        "isError": True,
+                    }
+            case "ping":
+                response["result"] = {}
+            case _:
+                response["error"] = {
+                    "code": -32601,
+                    "message": f"method not found: {method}",
+                }
+        self.send(response)
+
+    def serve(self):
+        for line in sys.stdin:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                message = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            self.handle(message)
+
+
+def resolve_root():
+    root = os.environ.get("NOTES_DIR")
+    if not root:
+        raise UserError("no notes dir set (set NOTES_DIR)")
+    return pathlib.Path(root).expanduser()
+
+
+class Vault:
+    SUFFIX = ".md"
+
+    def __init__(self, root):
+        self.root = root
+
+    def resolve(self, rel):
+        if not rel:
+            raise UserError("path required")
+        if rel.endswith("/") or not rel.endswith(self.SUFFIX):
+            raise UserError(f"path must be a {self.SUFFIX} file: '{rel}'")
+        path = (self.root / rel).resolve()
+        root = self.root.resolve()
+        if path != root and root not in path.parents:
+            raise UserError(f"path escapes notes root: '{rel}'")
+        return path
+
+    def read(self, rel):
+        path = self.resolve(rel)
+        if not path.is_file():
+            raise UserError(f"no note at '{rel}'")
+        try:
+            return path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            raise UserError(f"note is not valid utf-8: '{rel}'")
+
+    def write(self, rel, content):
+        atomic_write(self.resolve(rel), content)
+
+    def move(self, rel, dest, overwrite):
+        src = self.resolve(rel)
+        if not src.is_file():
+            raise UserError(f"no note at '{rel}'")
+        target = self.resolve(dest)
+        if target.exists() and not overwrite:
+            raise UserError(f"destination exists: '{dest}' (pass overwrite)")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        src.replace(target)
+
+    TRASH = ".trash"
+
+    def delete(self, rel):
+        path = self.resolve(rel)
+        if not path.is_file():
+            raise UserError(f"no note at '{rel}'")
+        if path.relative_to(self.root.resolve()).parts[0] == self.TRASH:
+            raise UserError(f"already in {self.TRASH}: '{rel}'")
+        trash = self._unique(self.root / self.TRASH / rel)
+        trash.parent.mkdir(parents=True, exist_ok=True)
+        path.replace(trash)
+        return str(trash.relative_to(self.root))
+
+    @staticmethod
+    def _unique(path):
+        candidate = path
+        count = 1
+        while candidate.exists():
+            candidate = path.with_name(f"{path.stem} {count}{path.suffix}")
+            count += 1
+        return candidate
+
+
+def path_matches(rel, glob):
+    """Glob matches the note's path or any ancestor dir (file or dir alike)."""
+    parts = rel.split("/")
+    candidates = ("/".join(parts[:i]) for i in range(1, len(parts) + 1))
+    return any(
+        fnmatch.fnmatchcase(candidate, glob) for candidate in candidates
+    )
+
+
+async def run(*cmd, cwd):
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            cwd=cwd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+    except FileNotFoundError:
+        raise UserError(f"{cmd[0]} not found")
+    stdout, stderr = await proc.communicate()
+    return proc.returncode, stdout.decode(), stderr.decode()
+
+
+class rg:
+    COMMON = ["--color", "never", "--no-ignore", "--hidden", "--glob", "*.md"]
+    MATCH = ["--no-heading", "--no-line-number", "--with-filename", "-i"]
+
+    @classmethod
+    async def files(cls, root, files):
+        code, out, err = await run("rg", "--files", *cls.COMMON, cwd=str(root))
+        if code not in (0, 1):  # 1 = nothing found
+            raise UserError(f"rg: {err.strip() or code}")
+        paths = sorted(out.splitlines())
+        if files:
+            glob = files.rstrip("/")
+            paths = [p for p in paths if path_matches(p, glob)]
+        return paths
+
+    @classmethod
+    async def _matches(cls, root, args, paths):
+        if not paths:
+            return ""
+        code, out, err = await run(
+            "rg",
+            *cls.COMMON,
+            *cls.MATCH,
+            "--sort",
+            "path",
+            *args,
+            "--",
+            *paths,
+            cwd=str(root),
+        )
+        if code == 1:  # no matches
+            return ""
+        if code != 0:
+            raise UserError(f"rg: {err.strip() or code}")
+        return out.rstrip("\n")
+
+    @classmethod
+    async def files_with_matches(cls, root, contents, paths):
+        out = await cls._matches(root, ["-l", "--regexp", contents], paths)
+        return out.splitlines()
+
+    @classmethod
+    async def search(cls, root, contents, context, paths):
+        return await cls._matches(
+            root, ["--context", str(context), "--regexp", contents], paths
+        )
+
+
+class NotesMcp(McpStdioServer):
+    TOOL_ERROR = UserError
+    INSTRUCTIONS = (
+        "File-backed notes store over a nested tree of .md files. Use these "
+        "tools to search, read, write, edit, move, and delete notes by "
+        "relative path (e.g. 'proj/ideas.md')."
+    )
+
+    def __init__(self, vault):
+        self.vault = vault
+        super().__init__(name="notes", version="1")
+
+    def register(self):
+        self.register_tool(
+            "SearchNotes",
+            "Search the notes tree. 'files': glob on the relative path. "
+            "'contents': regex matched per line. Both optional and combined "
+            "with AND; neither set lists all notes. 'lines' (default 1) adds "
+            "that many context lines around each content match. With lines=0 "
+            "(or no 'contents') returns matching paths, one per line. "
+            "Otherwise returns grep-style lines: 'path:text' for a match, "
+            "'path-text' for context, '--' between hunks.",
+            {
+                "type": "object",
+                "properties": {
+                    "files": {
+                        "type": "string",
+                        "description": "glob on relative path",
+                    },
+                    "contents": {
+                        "type": "string",
+                        "description": "regex matched per line",
+                    },
+                    "lines": {
+                        "type": "integer",
+                        "default": 1,
+                        "description": "context lines around each match",
+                    },
+                },
+            },
+            self._search,
+        )
+        self.register_tool(
+            "ReadNote",
+            "Read a note's text by relative path. Use offset/limit to page.",
+            {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "relative path, e.g. 'proj/ideas.md'",
+                    },
+                    "offset": {
+                        "type": "integer",
+                        "description": "1-based start line",
+                    },
+                    "limit": {"type": "integer", "description": "max lines"},
+                },
+                "required": ["path"],
+            },
+            self._read,
+        )
+        self.register_tool(
+            "WriteNote",
+            "Write a note, overwriting it. Creates parent directories.",
+            {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "relative path"},
+                    "content": {"type": "string", "description": "note text"},
+                },
+                "required": ["path", "content"],
+            },
+            self._write,
+        )
+        self.register_tool(
+            "EditNote",
+            "Revise a note in place via string-replace.",
+            {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "relative path"},
+                    "old_string": {
+                        "type": "string",
+                        "description": "exact string to replace",
+                    },
+                    "new_string": {
+                        "type": "string",
+                        "description": "replacement",
+                    },
+                    "replace_all": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "replace every occurrence",
+                    },
+                },
+                "required": ["path", "old_string", "new_string"],
+            },
+            self._edit,
+        )
+        self.register_tool(
+            "MoveNote",
+            "Move or rename a note within the tree. Creates parent dirs.",
+            {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "source path"},
+                    "dest": {
+                        "type": "string",
+                        "description": "destination path",
+                    },
+                    "overwrite": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "allow overwriting dest",
+                    },
+                },
+                "required": ["path", "dest"],
+            },
+            self._move,
+        )
+        self.register_tool(
+            "DeleteNote",
+            "Move a note to .trash/ (recoverable) by relative path.",
+            {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "relative path"}
+                },
+                "required": ["path"],
+            },
+            self._delete,
+        )
+
+    def _search(self, arguments):
+        return asyncio.run(self._search_async(arguments))
+
+    async def _search_async(self, arguments):
+        files = arguments.get("files")
+        contents = arguments.get("contents")
+        context = arguments.get("lines", 1)
+        root = self.vault.root
+        paths = await rg.files(root, files)
+        if not contents:
+            return "\n".join(paths)
+        if context == 0:
+            return "\n".join(
+                await rg.files_with_matches(root, contents, paths)
+            )
+        return await rg.search(root, contents, context, paths)
+
+    def _read(self, arguments):
+        return slice_lines(
+            self.vault.read(arguments.get("path", "")),
+            arguments.get("offset"),
+            arguments.get("limit"),
+        )
+
+    def _write(self, arguments):
+        rel = arguments.get("path", "")
+        self.vault.write(rel, arguments.get("content", ""))
+        return f"wrote {rel}"
+
+    def _edit(self, arguments):
+        rel = arguments.get("path", "")
+        content = self.vault.read(rel)
+        old = arguments.get("old_string", "")
+        count = content.count(old)
+        if count == 0:
+            raise UserError("old string not found")
+        if count > 1 and not arguments.get("replace_all"):
+            raise UserError(
+                f"old string not unique ({count} matches); pass replace_all"
+            )
+        self.vault.write(
+            rel, content.replace(old, arguments.get("new_string", ""))
+        )
+        return f"edited {rel}"
+
+    def _move(self, arguments):
+        rel = arguments.get("path", "")
+        dest = arguments.get("dest", "")
+        self.vault.move(rel, dest, arguments.get("overwrite", False))
+        return f"moved {rel} -> {dest}"
+
+    def _delete(self, arguments):
+        rel = arguments.get("path", "")
+        trash = self.vault.delete(rel)
+        return f"moved {rel} to {trash}"
+
+
+def main():
+    NotesMcp(Vault(resolve_root())).serve()
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except UserError as error:
+        print(f"error: {error}", file=sys.stderr)
+        sys.exit(1)
