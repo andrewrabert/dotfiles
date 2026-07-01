@@ -3,14 +3,17 @@
 # requires-python = ">=3.14"
 # dependencies = [
 #   "pydantic-settings>=2.6",
+#   "pyyaml>=6",
 # ]
 # ///
 """MCP stdio server + mirrored CLI: pure file ops over a tree of .md notes."""
 
 import base64
+import datetime
 import json
 import os
 import pathlib
+import platform
 import subprocess
 import sys
 import tempfile
@@ -18,6 +21,7 @@ import typing
 
 import pydantic
 import pydantic_settings
+import yaml
 
 
 class UserError(Exception):
@@ -182,6 +186,22 @@ def resolve_root():
     return pathlib.Path(root).expanduser()
 
 
+def resolve_source(explicit=None):
+    """Log source: the explicit -s/--source flag wins, else NOTES_SOURCE env,
+    else None (omitted from metadata)."""
+    return explicit or os.environ.get("NOTES_SOURCE") or None
+
+
+def log_metadata(now):
+    """System-generated log-entry metadata: creation time (with offset), cwd, host.
+    Nothing user-supplied."""
+    return {
+        "created": now.isoformat(),
+        "cwd": os.getcwd(),
+        "host": platform.node(),
+    }
+
+
 def ripgrep(root, pattern, base, context):
     """Run `rg --json` and parse its JSON Lines into
     {abs_path: {line_number: line_text}}. Match and context lines are merged."""
@@ -261,13 +281,20 @@ def walk_tree(base):
 
 class Notes:
     TRASH = ".trash"
+    LOG = "Log"
+    META_SUFFIX = ".md.meta"
 
-    def __init__(self, path):
+    def __init__(self, path, source=None):
         self.root_path = path
+        self.source = source
 
     @property
     def trash_path(self):
         return self.root_path / self.TRASH
+
+    @property
+    def log_path(self):
+        return self.root_path / self.LOG
 
     def get_path(self, path=None):
         if path is None:
@@ -285,19 +312,40 @@ class Notes:
     def _filter_paths(self, paths, trash=False):
         return [p for p in paths if self._in_trash(p) == trash]
 
+    def _under_log(self, path):
+        log_root = self.log_path.resolve()
+        return path == log_root or log_root in path.parents
+
+    def _is_meta(self, path):
+        """A log metadata sidecar: '<entry>.md.meta' under Log/ only. A stray
+        '*.md.meta' elsewhere in the tree is an ordinary note, not a sidecar."""
+        return path.name.endswith(self.META_SUFFIX) and self._under_log(path)
+
+    def _filter_meta(self, paths, meta=False):
+        return [p for p in paths if self._is_meta(p) == meta]
+
+    def _is_log(self, path):
+        """A log entry or its sidecar: anything under Log/."""
+        return self._under_log(path)
+
+    def _guard_log(self, path, rel):
+        if self._is_log(path):
+            raise UserError(f"log entries are immutable: '{rel}'")
+
     def _scoped_base(self, path, trash):
         base = self.trash_path if trash else self.root_path
         return self.get_path(base / path if path else base)
 
-    def grep(self, pattern, context=1, trash=False, prefix=None):
+    def grep(self, pattern, context=1, trash=False, prefix=None, meta=False):
         if not pattern:
             raise UserError("pattern required")
         base = self._scoped_base(prefix, trash)
         hits = ripgrep(self.root_path, pattern, base, context)
         keep = set(self._filter_paths(hits, trash=trash))
+        keep = set(self._filter_meta(keep, meta=meta))
         return {p: v for p, v in hits.items() if p in keep}
 
-    def match_path(self, pattern, trash=False, prefix=None):
+    def match_path(self, pattern, trash=False, prefix=None, meta=False):
         if not pattern:
             raise UserError("pattern required")
         base = self._scoped_base(prefix, trash)
@@ -306,6 +354,7 @@ class Notes:
             for p in self._filter_paths(walk_tree(base), trash=trash)
             if p.is_file()
         ]
+        files = self._filter_meta(files, meta=meta)
         by_rel = {rel_to(self, p): p for p in files}
         return {
             by_rel[rel]
@@ -336,13 +385,48 @@ class Notes:
             raise UserError(f"note is not valid utf-8: '{rel}'")
 
     def write(self, rel, content):
-        atomic_write(self._resolve_file(rel), content)
+        path = self._resolve_file(rel)
+        self._guard_log(path, rel)
+        atomic_write(path, content)
+
+    def create_log(self, body):
+        now = datetime.datetime.now().astimezone()
+        meta = log_metadata(now)
+        if (
+            self.source
+        ):  # server-lifecycle / CLI-invocation constant, omit if unset
+            meta["source"] = self.source
+        rel_dir = f"{self.LOG}/{now:%Y}/{now:%m}"
+        stamp = now.strftime("%Y-%m-%dT%H-%M-%S.%f")
+        rel_md, rel_meta = self._unique_log(rel_dir, stamp)
+        atomic_write(
+            self.get_path(rel_meta),
+            yaml.safe_dump(meta, sort_keys=False, allow_unicode=True),
+        )
+        atomic_write(
+            self.get_path(rel_md), body if body.endswith("\n") else body + "\n"
+        )
+        return rel_md
+
+    def _unique_log(self, rel_dir, stamp):
+        count = 0
+        while True:
+            suffix = "" if count == 0 else f"-{count}"
+            rel_md = f"{rel_dir}/{stamp}{suffix}.md"
+            rel_meta = rel_md + ".meta"
+            if not self.get_path(rel_md).exists() and not (
+                self.get_path(rel_meta).exists()
+            ):
+                return rel_md, rel_meta
+            count += 1
 
     def move(self, rel, dest, overwrite):
         src = self._resolve_movable(rel)
         if not src.exists():
             raise UserError(f"no note or folder at '{rel}'")
         target = self._resolve_movable(dest)
+        self._guard_log(src, rel)
+        self._guard_log(target, dest)
         if target == src:
             raise UserError("source and destination are the same")
         if src in target.parents:
@@ -359,6 +443,7 @@ class Notes:
         path = self._resolve_file(rel)
         if not path.is_file():
             raise UserError(f"no note at '{rel}'")
+        self._guard_log(path, rel)
         if self._in_trash(path):
             raise UserError(f"already in {self.TRASH}: '{rel}'")
         trash = self._unique(self.trash_path / rel)
@@ -381,7 +466,7 @@ def rel_to(notes, path):
 
 
 class SearchNotes(pydantic.BaseModel):
-    """Find notes by regex. 'pattern' is a ripgrep regex, smart-case (insensitive unless it contains an uppercase letter; use '(?i)'/'(?-i)' to force); defaults to '.' (matches everything, i.e. lists). 'mode' selects what it matches: 'any' (default) returns paths where the relative path OR the contents match; 'path' matches the relative path only, returning paths; 'content' matches contents only, returning 'path:lineno:text' lines ('--' between files) with 'context' surrounding lines (0 for matching paths only). 'prefix': literal relative subtree to scope to (default: whole tree), NOT a glob. 'trash': search only inside .trash/ (excluded by default)."""
+    """Find notes by regex. 'pattern' is a ripgrep regex, smart-case (insensitive unless it contains an uppercase letter; use '(?i)'/'(?-i)' to force); defaults to '.' (matches everything, i.e. lists). 'mode' selects what it matches: 'any' (default) returns paths where the relative path OR the contents match; 'path' matches the relative path only, returning paths; 'content' matches contents only, returning 'path:lineno:text' lines ('--' between files) with 'context' surrounding lines (0 for matching paths only). 'prefix': literal relative subtree to scope to (default: whole tree), NOT a glob. 'trash': search only inside .trash/ (excluded by default). 'meta': search only log metadata sidecars (*.md.meta), excluded by default; use it to query log entries by created/cwd/host/session_id."""
 
     pattern: pydantic_settings.CliPositionalArg[str] = pydantic.Field(
         ".", description="ripgrep regex (default '.': match everything)"
@@ -398,11 +483,14 @@ class SearchNotes(pydantic.BaseModel):
     trash: bool = pydantic.Field(
         False, description="search only inside .trash/"
     )
+    meta: bool = pydantic.Field(
+        False, description="search only log metadata sidecars (*.md.meta)"
+    )
 
     def run(self, notes):
         if self.mode == "content":
             hits = notes.grep(
-                self.pattern, self.context, self.trash, self.prefix
+                self.pattern, self.context, self.trash, self.prefix, self.meta
             )
             if self.context == 0:
                 return "\n".join(sorted(rel_to(notes, p) for p in hits))
@@ -416,10 +504,12 @@ class SearchNotes(pydantic.BaseModel):
                     )
                 )
             return "\n--\n".join(blocks)
-        paths = notes.match_path(self.pattern, self.trash, self.prefix)
+        paths = notes.match_path(
+            self.pattern, self.trash, self.prefix, self.meta
+        )
         if self.mode == "any":
             paths = paths | set(
-                notes.grep(self.pattern, 0, self.trash, self.prefix)
+                notes.grep(self.pattern, 0, self.trash, self.prefix, self.meta)
             )
         return "\n".join(sorted(rel_to(notes, p) for p in paths))
 
@@ -532,6 +622,30 @@ class DeleteNote(pydantic.BaseModel):
         print(self.run(Notes(resolve_root())))
 
 
+class LogNote(pydantic.BaseModel):
+    """Append an immutable, timestamped log entry. 'body' is free-form; all metadata (created time with offset, cwd, host) is captured automatically into a YAML sidecar — nothing to fill in. Entries are written under Log/YYYY/MM/ and CANNOT be edited, moved, or deleted through these tools; they are write-once. They still appear in SearchNotes (the sidecar metadata is searchable via SearchNotes' 'meta' flag).
+
+    IMPORTANT: You MUST end 'body' with an attribution trailer as its own final line, formatted EXACTLY as: '-- <who> · <session-id>' — set <who> to a short identifier of what you are (e.g. 'claude-code') and <session-id> to your current session id. The separator is a middle dot ' · '. Always append this trailer to every entry; it is the sole means of attributing the entry. Never omit it or change its format."""
+
+    body: pydantic_settings.CliPositionalArg[str] = pydantic.Field(
+        description="entry text (free-form); MUST end with the attribution trailer '-- <who> · <session-id>' on its own final line"
+    )
+    source: str | None = pydantic.Field(
+        None,
+        validation_alias=pydantic.AliasChoices("s", "source"),
+        description="optional source recorded in the entry metadata",
+        json_schema_extra={"mcp_exclude": True},
+    )
+
+    def run(self, notes):
+        return f"logged {notes.create_log(self.body)}"
+
+    def cli_cmd(self):
+        print(
+            self.run(Notes(resolve_root(), source=resolve_source(self.source)))
+        )
+
+
 TOOLS = [
     SearchNotes,
     ReadNote,
@@ -539,15 +653,23 @@ TOOLS = [
     EditNote,
     MoveNote,
     DeleteNote,
+    LogNote,
 ]
 
 
 def clean_schema(schema):
     """Reduce a pydantic model_json_schema to the MCP inputSchema shape:
-    strip 'title', collapse nullable anyOf, keep properties/required."""
+    strip 'title', collapse nullable anyOf, keep properties/required. Fields
+    marked json_schema_extra={'mcp_exclude': True} are CLI-only and dropped from
+    the MCP tool surface entirely."""
     properties = {}
+    required = list(schema.get("required", []))
     for name, spec in schema.get("properties", {}).items():
         spec = {k: v for k, v in spec.items() if k != "title"}
+        if spec.pop("mcp_exclude", False):
+            if name in required:
+                required.remove(name)
+            continue
         if "anyOf" in spec:
             types = [
                 option
@@ -558,8 +680,8 @@ def clean_schema(schema):
                 spec["type"] = types[0]["type"]
         properties[name] = spec
     cleaned = {"type": "object", "properties": properties}
-    if schema.get("required"):
-        cleaned["required"] = schema["required"]
+    if required:
+        cleaned["required"] = required
     return cleaned
 
 
@@ -567,12 +689,14 @@ class NotesMcp(McpStdioServer):
     TOOL_ERROR = UserError
     INSTRUCTIONS = (
         "This is the user's personal notes — the canonical place where they "
-        "keep and organize their own notes, ideas, todos, and journal entries "
+        "keep and organize their own notes, ideas, todos, and log entries "
         "as a nested tree of Markdown (.md) files. Whenever the user refers to "
         "'my notes', asks to look something up, record or jot something down, "
         "or check what they've written before, use these tools instead of "
         "guessing or answering from memory. Search, read, write, edit, move, "
-        "and delete notes by relative path (e.g. 'proj/ideas.md')."
+        "and delete notes by relative path (e.g. 'proj/ideas.md'). Use LogNote "
+        "to quickly capture an immutable, timestamped log entry (its "
+        "metadata is auto-generated and it cannot be edited or deleted)."
     )
 
     def __init__(self, notes):
@@ -602,8 +726,16 @@ class NotesMcp(McpStdioServer):
 class Mcp(pydantic.BaseModel):
     """Run the MCP stdio server (JSON-RPC over stdin/stdout)."""
 
+    source: str | None = pydantic.Field(
+        None,
+        validation_alias=pydantic.AliasChoices("s", "source"),
+        description="constant source recorded on every log entry created via this server",
+    )
+
     def cli_cmd(self):
-        NotesMcp(Notes(resolve_root())).serve()
+        NotesMcp(
+            Notes(resolve_root(), source=resolve_source(self.source))
+        ).serve()
 
 
 class App(pydantic_settings.BaseSettings):
@@ -619,6 +751,7 @@ class App(pydantic_settings.BaseSettings):
     edit: pydantic_settings.CliSubCommand[EditNote]
     move: pydantic_settings.CliSubCommand[MoveNote]
     delete: pydantic_settings.CliSubCommand[DeleteNote]
+    log: pydantic_settings.CliSubCommand[LogNote]
 
     def cli_cmd(self):
         pydantic_settings.CliApp.run_subcommand(self)
