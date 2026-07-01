@@ -277,7 +277,13 @@ class ClaudeConfig:
 
     def load_installed_plugins(self):
         data = load_json(self.installed_plugins_path)
-        return InstalledPlugins.model_validate(data)
+        ip = InstalledPlugins.model_validate(data)
+        ip.plugins = {
+            ref: recs
+            for ref, recs in ip.plugins.items()
+            if any(r.get("scope") == "user" for r in recs)
+        }
+        return ip
 
     def load_known_marketplaces(self):
         data = load_json(self.known_marketplaces_path)
@@ -535,8 +541,12 @@ class ClaudeCLI:
         return stdout.decode()
 
     @classmethod
+    async def _plugin(cls, command, *args, scope="user"):
+        await cls._run("plugin", command, *args, "--scope", scope)
+
+    @classmethod
     async def marketplace_add(cls, source):
-        await cls._run("plugin", "marketplace", "add", source)
+        await cls._plugin("marketplace", "add", source)
 
     @classmethod
     async def marketplace_update(cls, name):
@@ -544,11 +554,11 @@ class ClaudeCLI:
 
     @classmethod
     async def marketplace_remove(cls, name):
-        await cls._run("plugin", "marketplace", "remove", name)
+        await cls._plugin("marketplace", "remove", name)
 
     @classmethod
     async def plugin_install(cls, plugin_ref):
-        await cls._run("plugin", "install", plugin_ref)
+        await cls._plugin("install", plugin_ref)
 
     @classmethod
     async def plugin_update(cls, plugin_ref):
@@ -556,12 +566,12 @@ class ClaudeCLI:
 
     @classmethod
     async def plugin_uninstall(cls, plugin_ref):
-        await cls._run("plugin", "uninstall", plugin_ref)
+        await cls._plugin("uninstall", plugin_ref)
 
     @classmethod
     async def plugin_enable(cls, plugin_ref):
         try:
-            await cls._run("plugin", "enable", plugin_ref)
+            await cls._plugin("enable", plugin_ref)
         except CLIError as e:
             if "already enabled" not in str(e):
                 raise
@@ -569,7 +579,7 @@ class ClaudeCLI:
     @classmethod
     async def plugin_disable(cls, plugin_ref):
         try:
-            await cls._run("plugin", "disable", plugin_ref)
+            await cls._plugin("disable", plugin_ref)
         except CLIError as e:
             if "already disabled" not in str(e):
                 raise
