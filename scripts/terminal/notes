@@ -566,9 +566,13 @@ def clean_schema(schema):
 class NotesMcp(McpStdioServer):
     TOOL_ERROR = UserError
     INSTRUCTIONS = (
-        "File-backed notes store over a nested tree of .md files. Use these "
-        "tools to search, read, write, edit, move, and delete notes by "
-        "relative path (e.g. 'proj/ideas.md')."
+        "This is the user's personal notes — the canonical place where they "
+        "keep and organize their own notes, ideas, todos, and journal entries "
+        "as a nested tree of Markdown (.md) files. Whenever the user refers to "
+        "'my notes', asks to look something up, record or jot something down, "
+        "or check what they've written before, use these tools instead of "
+        "guessing or answering from memory. Search, read, write, edit, move, "
+        "and delete notes by relative path (e.g. 'proj/ideas.md')."
     )
 
     def __init__(self, notes):
