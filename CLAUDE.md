@@ -2,6 +2,8 @@
 
 Personal configuration files. Cross-platform (Arch Linux, macOS, other Linux). Desktop uses Arch + KDE Plasma.
 
+Use the `dotfiles` skill (`.claude/skills/dotfiles/`) for script placement, PATH setup, the full-update system, and repo structure.
+
 ## Structure
 
 **App Configs:** nvim/, zsh/, kde/, tmux/, yazi/, mpv/, foot/, pandoc/, etc.
