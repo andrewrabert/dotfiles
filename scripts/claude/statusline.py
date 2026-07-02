@@ -5,13 +5,13 @@ import sys
 
 DATA = json.load(sys.stdin)
 
-WORKSPACE_PROJECT_DIR = pathlib.Path(
-    DATA["workspace"]["project_dir"]
-).absolute()
+PROJECT_DIR = pathlib.Path(DATA["workspace"]["project_dir"]).absolute()
 CWD = pathlib.Path(DATA["cwd"]).absolute()
 SESSION_ID = DATA["session_id"]
 
 HOME = pathlib.Path.home().absolute()
+
+SESSION_SHORT = 6
 
 
 def grey(text):
@@ -20,10 +20,12 @@ def grey(text):
     return GREY + text + RESET
 
 
-if WORKSPACE_PROJECT_DIR.is_relative_to(HOME):
-    project = f"~/{WORKSPACE_PROJECT_DIR.relative_to(HOME)}/"
+if PROJECT_DIR == HOME:
+    project = "~"
+elif PROJECT_DIR.is_relative_to(HOME):
+    project = str(PROJECT_DIR.relative_to(HOME))
 else:
-    project = f"{WORKSPACE_PROJECT_DIR}/"
+    project = str(PROJECT_DIR)
 
-cwd = f"{CWD.relative_to(WORKSPACE_PROJECT_DIR)}/" if CWD != WORKSPACE_PROJECT_DIR else ""
-print(f"{grey(SESSION_ID[:8])} {project}{grey(cwd)}")
+cwd = f"{CWD.relative_to(PROJECT_DIR)}/" if CWD != PROJECT_DIR else ""
+print(f"{grey(SESSION_ID[:SESSION_SHORT])} {project}/{grey(cwd)}")
