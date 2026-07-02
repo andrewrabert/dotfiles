@@ -23,7 +23,7 @@ def grey(text):
 if PROJECT_DIR == HOME:
     project = "~"
 elif PROJECT_DIR.is_relative_to(HOME):
-    project = str(PROJECT_DIR.relative_to(HOME))
+    project = f"~/{PROJECT_DIR.relative_to(HOME)}"
 else:
     project = str(PROJECT_DIR)
 
