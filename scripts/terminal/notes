@@ -534,7 +534,7 @@ class ReadNote(pydantic.BaseModel):
 
 
 class WriteNote(pydantic.BaseModel):
-    """Write a note, overwriting it. Creates parent directories."""
+    """Write a note, overwriting it. Creates parent directories. Never use for logging or timestamped entries — those must go through LogNote."""
 
     path: pydantic_settings.CliPositionalArg[str] = pydantic.Field(
         description="relative path"
