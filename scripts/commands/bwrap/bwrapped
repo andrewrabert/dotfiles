@@ -154,12 +154,32 @@ def build_command(args, program_args):
         bwrap.tmpfs(p)
     for p in config["dir"]:
         bwrap.dir(p)
-    for p in config["bind"]["ro"] + extra.get("bind", {}).get("ro", []):
-        if pathlib.Path(p).exists():
-            bwrap.ro_bind(p)
-    for p in config["bind"]["rw"] + extra.get("bind", {}).get("rw", []):
-        if pathlib.Path(p).exists():
-            bwrap.bind(p)
+    ro_paths = config["bind"]["ro"] + extra.get("bind", {}).get("ro", [])
+    rw_paths = config["bind"]["rw"] + extra.get("bind", {}).get("rw", [])
+    if args.ro:
+        ro_paths = [*ro_paths, WORK_DIR]
+        rw_paths = [p for p in rw_paths if pathlib.Path(p) != WORK_DIR]
+
+    def add_bind(p, *, readonly):
+        p = pathlib.Path(p)
+        if not p.exists():
+            return
+        bind = bwrap.ro_bind if readonly else bwrap.bind
+        # A rw workdir mount already provides everything beneath it.
+        if not args.ro and p != WORK_DIR and p.is_relative_to(WORK_DIR):
+            return
+        # bwrap can't mount onto a symlink; bind the target, recreate the link.
+        if p.is_symlink():
+            target = p.resolve()
+            bind(target, target)
+            bwrap.symlink(target, p)
+        else:
+            bind(p, p)
+
+    for p in ro_paths:
+        add_bind(p, readonly=True)
+    for p in rw_paths:
+        add_bind(p, readonly=False)
 
     for src, dest in args.bind:
         src = pathlib.Path(src).resolve()
@@ -207,6 +227,11 @@ def main():
     parser.add_argument("program", help="Program to run inside the sandbox")
     parser.add_argument(
         "-h", "--help", action="store_true", help="Show this help"
+    )
+    parser.add_argument(
+        "--ro",
+        action="store_true",
+        help="Mount the working dir read-only",
     )
     parser.add_argument(
         "--bind",
