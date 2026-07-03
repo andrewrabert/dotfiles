@@ -1,0 +1,46 @@
+#!/usr/bin/env python3
+"""Forward a prompt to the `pi` CLI on a per-Claude-session pi session.
+
+Usage: claude-pi-agent [prompt]
+
+The prompt is taken from the positional argument, or read from stdin when it is
+omitted or stdin is piped, and handed to pi on stdin so no argument can ever
+reach pi as a flag. The pi
+session is keyed `claude-<CLAUDE_CODE_SESSION_ID>`, so every call within one
+Claude session continues the same pi conversation. A per-session flock rejects a
+second concurrent instance rather than racing the shared pi session.
+"""
+
+import argparse
+import fcntl
+import os
+import subprocess
+import sys
+import tempfile
+
+sid = os.environ["CLAUDE_CODE_SESSION_ID"]
+
+parser = argparse.ArgumentParser(description="Forward a prompt to the pi CLI.")
+parser.add_argument("prompt", nargs="?", help="prompt text (read from stdin if omitted or piped)")
+args = parser.parse_args()
+if args.prompt is not None and sys.stdin.isatty():
+    prompt = args.prompt
+else:
+    prompt = sys.stdin.read()
+
+lockdir = os.environ.get("XDG_RUNTIME_DIR") or tempfile.gettempdir()
+lock = open(os.path.join(lockdir, f"claude-pi-agent-{sid}.lock"), "w")
+try:
+    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+except BlockingIOError:
+    sys.exit(f"pi already running for session {sid}")
+
+result = subprocess.run(
+    ["pi", "--print", "--session-id", f"claude-{sid}"],
+    input=prompt,
+    text=True,
+    capture_output=True,
+)
+sys.stdout.write(result.stdout)
+sys.stderr.write(result.stderr)
+sys.exit(result.returncode)

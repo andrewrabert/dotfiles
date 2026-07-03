@@ -8,6 +8,7 @@
 import argparse
 import asyncio
 import contextlib
+import difflib
 import json
 import logging
 import os
@@ -39,7 +40,9 @@ class ConfigSpec(Config):
 
 PluginSet = typing.Annotated[
     set[str],
-    pydantic.PlainSerializer(lambda v: sorted(v, key=str.lower), return_type=list[str]),
+    pydantic.PlainSerializer(
+        lambda v: sorted(v, key=str.lower), return_type=list[str]
+    ),
 ]
 
 
@@ -75,7 +78,9 @@ class MarketplaceSource(pydantic.BaseModel):
 
 class KnownMarketplace(pydantic.BaseModel):
     model_config = pydantic.ConfigDict(extra="ignore")
-    source: MarketplaceSource = pydantic.Field(default_factory=MarketplaceSource)
+    source: MarketplaceSource = pydantic.Field(
+        default_factory=MarketplaceSource
+    )
     installLocation: str = ""
 
     def get_source_string(self):
@@ -182,7 +187,6 @@ class Spec(pydantic.BaseModel):
         None, alias="mcpServers"
     )
     marketplaces: MarketplaceList = pydantic.Field(default_factory=list)
-    claude_md: str | None = pydantic.Field(None, alias="CLAUDE.md")
 
     def model_dump(self, **kwargs) -> dict:
         kwargs.setdefault("exclude_none", True)
@@ -198,7 +202,9 @@ def load_yaml(text):
 class _YamlDumper(yaml.SafeDumper):
     def represent_str(self, data):
         style = "|" if "\n" in data else None
-        return self.represent_scalar("tag:yaml.org,2002:str", data, style=style)
+        return self.represent_scalar(
+            "tag:yaml.org,2002:str", data, style=style
+        )
 
 
 _YamlDumper.add_representer(str, _YamlDumper.represent_str)
@@ -209,7 +215,7 @@ def dump_yaml(data):
         data,
         Dumper=_YamlDumper,
         default_flow_style=False,
-        sort_keys=False,
+        sort_keys=True,
         allow_unicode=True,
         width=float("inf"),
     )
@@ -239,9 +245,88 @@ def load_json(path):
     return json.loads(path.read_text())
 
 
-def save_json(path, data):
-    text = json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
-    safe_write_bytes(path, text.encode())
+def dump_json(data):
+    return (
+        json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    )
+
+
+def write_bytes_if_different(path, data):
+    """Write bytes to path only if they differ from the file's current contents.
+
+    Reads the existing file first; writes when it's absent or its bytes differ
+    from `data`, and does nothing when they already match.
+    """
+    try:
+        if path.read_bytes() == data:
+            return
+    except FileNotFoundError:
+        pass
+    safe_write_bytes(path, data)
+    log.info("wrote %s", path)
+
+
+def iter_tree_files(root):
+    """Map relative path -> absolute path for every file under root."""
+    if not root.exists():
+        return {}
+    return {p.relative_to(root): p for p in root.rglob("*") if p.is_file()}
+
+
+def prune_empty_dirs(root):
+    """Remove empty directories under root, and root itself if left empty."""
+    if not root.exists():
+        return
+    dirs = sorted(
+        (p for p in root.rglob("*") if p.is_dir()),
+        key=lambda p: len(p.parts),
+        reverse=True,
+    )
+    for p in dirs:
+        if not any(p.iterdir()):
+            p.rmdir()
+    if not any(root.iterdir()):
+        root.rmdir()
+
+
+def mirror_tree(src, dst, dry_run=False):
+    """Make dst an exact copy of src: add/update changed files, delete extras.
+
+    An absent src empties dst. Returns the number of files changed or removed.
+    """
+    src_files = iter_tree_files(src)
+    dst_files = iter_tree_files(dst)
+    changes = 0
+
+    for rel, spath in sorted(src_files.items()):
+        data = spath.read_bytes()
+        dpath = dst / rel
+        try:
+            if dpath.read_bytes() == data:
+                continue
+        except FileNotFoundError:
+            pass
+        changes += 1
+        if dry_run:
+            log.info("would write %s", dpath)
+            continue
+        dpath.parent.mkdir(parents=True, exist_ok=True)
+        safe_write_bytes(dpath, data)
+        dpath.chmod(spath.stat().st_mode)
+        log.info("wrote %s", dpath)
+
+    for rel in sorted(set(dst_files) - set(src_files)):
+        dpath = dst_files[rel]
+        changes += 1
+        if dry_run:
+            log.info("would remove %s", dpath)
+            continue
+        dpath.unlink()
+        log.info("removed %s", dpath)
+
+    if not dry_run:
+        prune_empty_dirs(dst)
+    return changes
 
 
 class ClaudeConfig:
@@ -256,9 +341,14 @@ class ClaudeConfig:
         else:
             self.config_path = pathlib.Path.home() / ".claude.json"
         self.settings_path = self.dir / "settings.json"
-        self.installed_plugins_path = self.dir / "plugins" / "installed_plugins.json"
-        self.known_marketplaces_path = self.dir / "plugins" / "known_marketplaces.json"
+        self.installed_plugins_path = (
+            self.dir / "plugins" / "installed_plugins.json"
+        )
+        self.known_marketplaces_path = (
+            self.dir / "plugins" / "known_marketplaces.json"
+        )
         self.claude_md_path = self.dir / "CLAUDE.md"
+        self.keybindings_path = self.dir / "keybindings.json"
         self.plugin_cache_path = self.dir / "plugins" / "cache"
 
     def load_config(self):
@@ -267,13 +357,13 @@ class ClaudeConfig:
         return data
 
     def save_config(self, data):
-        save_json(self.config_path, data)
+        write_bytes_if_different(self.config_path, dump_json(data).encode())
 
     def load_settings(self):
         return load_json(self.settings_path)
 
     def save_settings(self, data):
-        save_json(self.settings_path, data)
+        write_bytes_if_different(self.settings_path, dump_json(data).encode())
 
     def load_installed_plugins(self):
         data = load_json(self.installed_plugins_path)
@@ -287,7 +377,9 @@ class ClaudeConfig:
 
     def load_known_marketplaces(self):
         data = load_json(self.known_marketplaces_path)
-        parsed = {k: KnownMarketplace.model_validate(v) for k, v in data.items()}
+        parsed = {
+            k: KnownMarketplace.model_validate(v) for k, v in data.items()
+        }
         return KnownMarketplaces(parsed)
 
     def load_manifest(self, path):
@@ -299,7 +391,9 @@ class ClaudeConfig:
         known = self.load_known_marketplaces()
         installed = self.load_installed_plugins()
         settings = self.load_settings()
-        enabled_plugins = settings.get("enabledPlugins", {}) if settings else {}
+        enabled_plugins = (
+            settings.get("enabledPlugins", {}) if settings else {}
+        )
 
         state: dict[str, MarketplaceState] = {}
         for name, info in known.items():
@@ -329,7 +423,9 @@ class ClaudeConfig:
         if not install_location:
             return set()
         manifest_path = (
-            pathlib.Path(install_location) / ".claude-plugin" / "marketplace.json"
+            pathlib.Path(install_location)
+            / ".claude-plugin"
+            / "marketplace.json"
         )
         manifest = self.load_manifest(manifest_path)
         return {p.name for p in manifest.plugins}
@@ -363,7 +459,9 @@ class ClaudeConfig:
         if plugin:
             to_remove = [str(PluginRef(plugin, marketplace))]
         else:
-            to_remove = [r for r in enabled_plugins if r.endswith(f"@{marketplace}")]
+            to_remove = [
+                r for r in enabled_plugins if r.endswith(f"@{marketplace}")
+            ]
 
         for ref in to_remove:
             enabled_plugins.pop(ref, None)
@@ -415,17 +513,44 @@ def apply_mcp_servers(spec_mcp_servers, loader, saver):
         saver(current)
 
 
+def resolve_spec_path(path):
+    """Resolve a directory arg to claude-config.yaml within it."""
+    if path.is_dir():
+        return path / SPEC_FILENAME
+    return path
+
+
+SPEC_FILENAME = "claude-config.yaml"
+CLAUDE_MD_FILENAME = "CLAUDE.md"
+KEYBINDINGS_FILENAME = "keybindings.json"
+
+# User-authored artifact directories mirrored verbatim between the spec
+# directory and CLAUDE_CONFIG_DIR (full mirror: spec is the source of truth).
+ARTIFACT_DIRS = (
+    "agents",
+    "commands",
+    "skills",
+    "output-styles",
+    "rules",
+    "workflows",
+    "themes",
+)
+
+
+def require_spec_dir(arg):
+    """Resolve a command argument to an existing spec directory."""
+    directory = pathlib.Path(arg)
+    if not directory.is_dir():
+        raise UserError(f"not a directory: {directory}")
+    return directory
+
+
 def load_spec_file(path):
-    """Load and parse YAML spec file."""
+    """Load and parse YAML spec file, or claude-config.yaml within a directory."""
+    path = resolve_spec_path(path)
     if not path.exists():
         raise UserError(f"spec file not found: {path}")
     return load_yaml(path.read_text())
-
-
-def write_spec_file(path, data):
-    """Write YAML spec file."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    safe_write_bytes(path, dump_yaml(data).encode())
 
 
 def normalize_source(source):
@@ -510,7 +635,9 @@ def compute_changes(current_state: dict[str, MarketplaceState], spec: Spec):
                 plugins_to_update.append((marketplace, plugin))
         else:
             # New marketplace
-            marketplaces_to_add.append((d.source, list(d.enabled), list(d.disabled)))
+            marketplaces_to_add.append(
+                (d.source, list(d.enabled), list(d.disabled))
+            )
 
     return (
         marketplaces_to_add,
@@ -606,42 +733,57 @@ def parse_args():
     parser = argparse.ArgumentParser(
         description="Manage Claude Code marketplaces and plugins."
     )
-    parser.add_argument(
+    verbosity = parser.add_mutually_exclusive_group()
+    verbosity.add_argument(
         "-v",
         "--verbose",
-        action="count",
-        default=0,
-        help="Increase verbosity (-v for info, -vv for debug)",
+        action="store_true",
+        help="Enable debug logging",
+    )
+    verbosity.add_argument(
+        "-q",
+        "--quiet",
+        action="store_true",
+        help="Only log warnings and errors",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     # apply subcommand
     apply_parser = subparsers.add_parser(
         "apply",
-        help="Reconcile installed state to match spec file",
+        help="Reconcile installed state to match spec directory",
     )
     apply_parser.add_argument(
-        "spec",
-        nargs="?",
-        help="Spec file path",
+        "dir",
+        help="Spec directory (contains claude-config.yaml and CLAUDE.md)",
     )
 
-    # show subcommand
-    show_parser = subparsers.add_parser(
-        "show",
-        help="Show spec from current installed state",
+    # export subcommand
+    export_parser = subparsers.add_parser(
+        "export",
+        help="Write spec from current installed state to a directory",
     )
-    show_parser.add_argument(
+    export_parser.add_argument(
+        "dir",
+        help="Output directory (writes claude-config.yaml and CLAUDE.md)",
+    )
+    export_parser.add_argument(
         "-a",
         "--all",
         action="store_true",
         help="Include available (not installed) plugins in output",
     )
-    show_parser.add_argument(
-        "-o",
-        "--output",
-        type=pathlib.Path,
-        help="Output file path (default: stdout)",
+    export_parser.add_argument(
+        "-f",
+        "--force",
+        action="store_true",
+        help="Overwrite existing files",
+    )
+    export_parser.add_argument(
+        "-n",
+        "--dry-run",
+        action="store_true",
+        help="Show changes without writing",
     )
 
     # validate subcommand
@@ -704,7 +846,9 @@ async def install_all_plugins(cfg, marketplace, plugins, force=False):
     """Install all plugins sequentially. Returns failure count."""
     failures = 0
     for plugin in plugins:
-        success, error = await install_or_update_plugin(cfg, marketplace, plugin, force)
+        success, error = await install_or_update_plugin(
+            cfg, marketplace, plugin, force
+        )
         if not success:
             print(f"error: {plugin}@{marketplace}: {error}", file=sys.stderr)
             failures += 1
@@ -712,19 +856,16 @@ async def install_all_plugins(cfg, marketplace, plugins, force=False):
 
 
 async def cmd_apply(args, cfg):
-    """Handle apply subcommand - reconcile to match spec file."""
+    """Handle apply subcommand - reconcile to match spec directory."""
+    directory = require_spec_dir(args.dir)
     try:
-        if args.spec:
-            data = load_spec_file(pathlib.Path(args.spec))
-        elif not sys.stdin.isatty():
-            data = load_yaml(sys.stdin.read())
-        else:
-            raise UserError("spec file required (provide path or pipe to stdin)")
+        data = load_spec_file(directory)
     except yaml.YAMLError as e:
         print(f"error: invalid YAML: {e}", file=sys.stderr)
         return 1
 
     spec = Spec.model_validate(data)
+    spec_md_path = directory / CLAUDE_MD_FILENAME
 
     current = cfg.get_current_state()
     (
@@ -739,15 +880,24 @@ async def cmd_apply(args, cfg):
 
     err_count = 0
 
-    # Apply CLAUDE.md
-    if spec.claude_md is not None:
-        current = (
-            cfg.claude_md_path.read_text() if cfg.claude_md_path.exists() else None
-        )
-        if spec.claude_md != current:
-            safe_write_bytes(cfg.claude_md_path, spec.claude_md.encode())
+    # Apply CLAUDE.md from the spec directory
+    if spec_md_path.exists():
+        write_bytes_if_different(cfg.claude_md_path, spec_md_path.read_bytes())
     elif cfg.claude_md_path.exists():
         cfg.claude_md_path.unlink()
+
+    # Mirror artifact directories (agents, skills, output-styles, etc.)
+    for name in ARTIFACT_DIRS:
+        mirror_tree(directory / name, cfg.dir / name)
+
+    # Apply keybindings.json from the spec directory
+    spec_kb_path = directory / KEYBINDINGS_FILENAME
+    if spec_kb_path.exists():
+        write_bytes_if_different(
+            cfg.keybindings_path, spec_kb_path.read_bytes()
+        )
+    elif cfg.keybindings_path.exists():
+        cfg.keybindings_path.unlink()
 
     # Apply config and settings
     apply_spec_dict(spec.config, cfg.load_config, cfg.save_config)
@@ -796,7 +946,9 @@ async def cmd_apply(args, cfg):
         # Enable only the enabled plugins (installed plugins are disabled by default)
         for plugin in enabled:
             try:
-                await ClaudeCLI.plugin_enable(str(PluginRef(plugin, marketplace_name)))
+                await ClaudeCLI.plugin_enable(
+                    str(PluginRef(plugin, marketplace_name))
+                )
             except CLIError as e:
                 print(f"error: {e}", file=sys.stderr)
                 err_count += 1
@@ -813,7 +965,9 @@ async def cmd_apply(args, cfg):
     # Remove plugins from existing marketplaces
     for marketplace, plugin in plugins_to_remove:
         try:
-            await ClaudeCLI.plugin_uninstall(str(PluginRef(plugin, marketplace)))
+            await ClaudeCLI.plugin_uninstall(
+                str(PluginRef(plugin, marketplace))
+            )
         except CLIError as e:
             print(f"error: {e}", file=sys.stderr)
             err_count += 1
@@ -829,7 +983,9 @@ async def cmd_apply(args, cfg):
         for plugin in plugins:
             if plugin in spec_enabled:
                 try:
-                    await ClaudeCLI.plugin_enable(str(PluginRef(plugin, marketplace)))
+                    await ClaudeCLI.plugin_enable(
+                        str(PluginRef(plugin, marketplace))
+                    )
                 except CLIError as e:
                     print(f"error: {e}", file=sys.stderr)
                     err_count += 1
@@ -873,17 +1029,21 @@ async def cmd_apply(args, cfg):
     return 1 if err_count else 0
 
 
-async def cmd_show(args, cfg):
-    """Handle show subcommand - output spec from current installed state."""
-    claude_md = cfg.claude_md_path.read_text() if cfg.claude_md_path.exists() else None
-
+def build_current_spec(cfg, include_available=False):
+    """Build a Spec from the current installed state."""
     config_data = cfg.load_config()
-    config_filtered = {k: v for k, v in config_data.items() if k in Config.model_fields}
-    config = ConfigSpec.model_validate(config_filtered) if config_filtered else None
+    config_filtered = {
+        k: v for k, v in config_data.items() if k in Config.model_fields
+    }
+    config = (
+        ConfigSpec.model_validate(config_filtered) if config_filtered else None
+    )
 
     settings_data = cfg.load_settings()
     exclude = {"$schema", "enabledPlugins", "extraKnownMarketplaces"}
-    settings = {k: v for k, v in settings_data.items() if k not in exclude} or None
+    settings = {
+        k: v for k, v in settings_data.items() if k not in exclude
+    } or None
 
     mcp_servers = config_data.get("mcpServers") or None
 
@@ -898,7 +1058,7 @@ async def cmd_show(args, cfg):
             else info.source
         )
 
-        valid = cfg.get_valid_plugins(name) if args.all else set()
+        valid = cfg.get_valid_plugins(name) if include_available else set()
         available = valid - info.installed
 
         marketplaces.append(
@@ -908,23 +1068,111 @@ async def cmd_show(args, cfg):
                 source=source_str,
                 enabled=info.enabled,
                 disabled=info.disabled,
-                available=available if args.all else set(),
+                available=available if include_available else set(),
             )
         )
 
-    spec = Spec(
-        claude_md=claude_md,
+    return Spec(
         config=config,
         settings=settings,
         mcp_servers=mcp_servers,
         marketplaces=marketplaces,
     )
 
-    if args.output:
-        write_spec_file(args.output, spec.model_dump())
-        print(f"Wrote spec to {args.output}")
-    else:
-        print(dump_yaml(spec.model_dump()), end="")
+
+def diff_baseline_yaml(text):
+    """Canonicalize an existing spec file for use as a diff baseline ONLY.
+
+    Validates with the same strict Spec as apply/validate. If the on-disk file
+    predates the current schema (e.g. a legacy inline CLAUDE.md), the validation
+    error is ignored and the raw parsed data is re-dumped, so the baseline still
+    renders instead of aborting the diff.
+    """
+    data = load_yaml(text)
+    try:
+        data = Spec.model_validate(data).model_dump()
+    except pydantic.ValidationError:
+        pass
+    return dump_yaml(data)
+
+
+def file_diff(name, current, desired):
+    """Return unified diff lines between two file contents."""
+    return difflib.unified_diff(
+        current.splitlines(keepends=True),
+        desired.splitlines(keepends=True),
+        fromfile=name,
+        tofile=name,
+    )
+
+
+async def cmd_export(args, cfg):
+    """Handle export subcommand - write current state spec to a directory."""
+    directory = pathlib.Path(args.dir)
+    if directory.exists() and not directory.is_dir():
+        raise UserError(f"not a directory: {directory}")
+
+    yaml_path = directory / SPEC_FILENAME
+    md_path = directory / CLAUDE_MD_FILENAME
+    kb_path = directory / KEYBINDINGS_FILENAME
+
+    spec = build_current_spec(cfg, include_available=args.all)
+    desired_yaml = dump_yaml(spec.model_dump())
+    desired_md = (
+        cfg.claude_md_path.read_text() if cfg.claude_md_path.exists() else None
+    )
+    desired_kb = (
+        cfg.keybindings_path.read_bytes()
+        if cfg.keybindings_path.exists()
+        else None
+    )
+
+    if log.isEnabledFor(logging.INFO):
+        baseline_yaml = (
+            diff_baseline_yaml(yaml_path.read_text())
+            if yaml_path.exists()
+            else ""
+        )
+        baseline_md = md_path.read_text() if md_path.exists() else ""
+        sys.stdout.writelines(
+            file_diff(SPEC_FILENAME, baseline_yaml, desired_yaml)
+        )
+        sys.stdout.writelines(
+            file_diff(CLAUDE_MD_FILENAME, baseline_md, desired_md or "")
+        )
+
+    if args.dry_run:
+        for name in ARTIFACT_DIRS:
+            mirror_tree(cfg.dir / name, directory / name, dry_run=True)
+        return 0
+
+    existing = [
+        p
+        for p in (
+            yaml_path,
+            md_path,
+            kb_path,
+            *(directory / n for n in ARTIFACT_DIRS),
+        )
+        if p.exists()
+    ]
+    if existing and not args.force:
+        raise UserError(f"path exists (use -f to overwrite): {existing[0]}")
+
+    directory.mkdir(parents=True, exist_ok=True)
+    write_bytes_if_different(yaml_path, desired_yaml.encode())
+    if desired_md is not None:
+        write_bytes_if_different(md_path, desired_md.encode())
+    elif md_path.exists():
+        md_path.unlink()
+
+    if desired_kb is not None:
+        write_bytes_if_different(kb_path, desired_kb)
+    elif kb_path.exists():
+        kb_path.unlink()
+
+    for name in ARTIFACT_DIRS:
+        mirror_tree(cfg.dir / name, directory / name)
 
     return 0
 
@@ -937,7 +1185,9 @@ async def cmd_validate(args):
         elif not sys.stdin.isatty():
             spec = load_yaml(sys.stdin.read())
         else:
-            raise UserError("spec file required (provide path or pipe to stdin)")
+            raise UserError(
+                "spec file required (provide path or pipe to stdin)"
+            )
     except yaml.YAMLError as e:
         print(f"error: invalid YAML: {e}", file=sys.stderr)
         return 1
@@ -973,22 +1223,29 @@ async def cmd_update(cfg):
             log.error("%s", e)
             err_count += 1
 
-    print(f"{len(known)} marketplaces, {len(plugin_refs)} plugins, {err_count} errors")
+    print(
+        f"{len(known)} marketplaces, {len(plugin_refs)} plugins, {err_count} errors"
+    )
     return 1 if err_count else 0
 
 
 async def main():
     """Main entry point."""
     args = parse_args()
-    level = {0: logging.WARNING, 1: logging.INFO}.get(args.verbose, logging.DEBUG)
+    if args.quiet:
+        level = logging.WARNING
+    elif args.verbose:
+        level = logging.DEBUG
+    else:
+        level = logging.INFO
     logging.basicConfig(format="%(message)s", level=level)
     config = ClaudeConfig()
 
     match args.command:
         case "apply":
             return await cmd_apply(args, config)
-        case "show":
-            return await cmd_show(args, config)
+        case "export":
+            return await cmd_export(args, config)
         case "update":
             return await cmd_update(config)
         case "validate":
