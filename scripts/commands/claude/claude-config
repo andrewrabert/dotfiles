@@ -183,9 +183,6 @@ class Spec(pydantic.BaseModel):
     model_config = pydantic.ConfigDict(extra="forbid", populate_by_name=True)
     config: ConfigSpec | None = None
     settings: dict[str, typing.Any] | None = None
-    mcp_servers: dict[str, typing.Any] | None = pydantic.Field(
-        None, alias="mcpServers"
-    )
     marketplaces: MarketplaceList = pydantic.Field(default_factory=list)
 
     def model_dump(self, **kwargs) -> dict:
@@ -327,6 +324,53 @@ def mirror_tree(src, dst, dry_run=False):
     if not dry_run:
         prune_empty_dirs(dst)
     return changes
+
+
+def load_mcp_dir(directory):
+    """Load directory/mcp/<name>.yaml files into an mcpServers dict."""
+    mcp_dir = directory / MCP_DIRNAME
+    if not mcp_dir.exists():
+        return {}
+    return {
+        path.stem: load_yaml(path.read_text())
+        for path in sorted(mcp_dir.glob("*.yaml"))
+    }
+
+
+def mirror_mcp(directory, mcp_servers, dry_run=False):
+    """Mirror mcp_servers into directory/mcp/<name>.yaml, pruning stale files."""
+    mcp_dir = directory / MCP_DIRNAME
+    desired = {
+        f"{name}.yaml": dump_yaml(config).encode()
+        for name, config in mcp_servers.items()
+    }
+    existing = {
+        p.name for p in mcp_dir.glob("*.yaml")
+    } if mcp_dir.exists() else set()
+
+    for fname, data in sorted(desired.items()):
+        path = mcp_dir / fname
+        if dry_run:
+            try:
+                if path.read_bytes() == data:
+                    continue
+            except FileNotFoundError:
+                pass
+            log.info("would write %s", path)
+            continue
+        mcp_dir.mkdir(parents=True, exist_ok=True)
+        write_bytes_if_different(path, data)
+
+    for fname in sorted(existing - set(desired)):
+        path = mcp_dir / fname
+        if dry_run:
+            log.info("would remove %s", path)
+            continue
+        path.unlink()
+        log.info("removed %s", path)
+
+    if not dry_run:
+        prune_empty_dirs(mcp_dir)
 
 
 class ClaudeConfig:
@@ -503,13 +547,15 @@ def apply_settings(spec_settings, loader, saver):
         saver(updated)
 
 
-def apply_mcp_servers(spec_mcp_servers, loader, saver):
-    """Apply mcpServers declaratively to config."""
-    if spec_mcp_servers is None:
-        return
+def apply_mcp_servers(mcp_servers, loader, saver):
+    """Apply mcpServers declaratively to config; an empty mapping clears it."""
     current = loader()
-    if current.get("mcpServers") != spec_mcp_servers:
-        current["mcpServers"] = spec_mcp_servers
+    new = mcp_servers or None
+    if current.get("mcpServers") != new:
+        if new is None:
+            current.pop("mcpServers", None)
+        else:
+            current["mcpServers"] = new
         saver(current)
 
 
@@ -523,6 +569,7 @@ def resolve_spec_path(path):
 SPEC_FILENAME = "claude-config.yaml"
 CLAUDE_MD_FILENAME = "CLAUDE.md"
 KEYBINDINGS_FILENAME = "keybindings.json"
+MCP_DIRNAME = "mcp"
 
 # User-authored artifact directories mirrored verbatim between the spec
 # directory and CLAUDE_CONFIG_DIR (full mirror: spec is the source of truth).
