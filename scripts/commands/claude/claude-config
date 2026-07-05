@@ -1,11 +1,10 @@
 #!/usr/bin/env -S uv run --script
 # /// script
 # requires-python = ">=3.12"
-# dependencies = ["pyyaml", "pydantic"]
+# dependencies = ["pyyaml", "pydantic", "pydantic-settings"]
 # ///
 """Manage Claude Code plugins via declarative spec files."""
 
-import argparse
 import asyncio
 import contextlib
 import difflib
@@ -20,6 +19,15 @@ import typing
 
 import pydantic
 import yaml
+from pydantic import AliasChoices, Field
+from pydantic_settings import (
+    BaseSettings,
+    CliApp,
+    CliPositionalArg,
+    CliSubCommand,
+    CliToggleFlag,
+    SettingsConfigDict,
+)
 
 log = logging.getLogger(__name__)
 
@@ -581,7 +589,9 @@ def apply_settings(spec_settings, loader, saver):
         return
     current = loader()
     updated = {k: v for k, v in current.items() if k in UNMANAGED_SETTINGS}
-    for key in sorted(current.keys() - UNMANAGED_SETTINGS - spec_settings.keys()):
+    for key in sorted(
+        current.keys() - UNMANAGED_SETTINGS - spec_settings.keys()
+    ):
         log.warning("removing settings key not in spec: %s", key)
     updated.update(spec_settings)
     if updated != current:
@@ -845,75 +855,79 @@ def collapse_home(path):
         return pathlib.Path(path)
 
 
-def parse_args():
-    """Parse command line arguments."""
-    parser = argparse.ArgumentParser(
-        description="Manage Claude Code marketplaces and plugins."
-    )
-    verbosity = parser.add_mutually_exclusive_group()
-    verbosity.add_argument(
-        "-v",
-        "--verbose",
-        action="store_true",
-        help="Enable debug logging",
-    )
-    verbosity.add_argument(
-        "-q",
-        "--quiet",
-        action="store_true",
-        help="Only log warnings and errors",
-    )
-    subparsers = parser.add_subparsers(dest="command", required=True)
+class ApplyCmd(pydantic.BaseModel):
+    """Reconcile installed state to match spec directory."""
 
-    # apply subcommand
-    apply_parser = subparsers.add_parser(
-        "apply",
-        help="Reconcile installed state to match spec directory",
+    dir: CliPositionalArg[str]
+
+    async def cli_cmd(self):
+        raise SystemExit(await cmd_apply(self, ClaudeConfig()))
+
+
+class ExportCmd(pydantic.BaseModel):
+    """Write spec from current installed state to a directory."""
+
+    dir: CliPositionalArg[str]
+    force: CliToggleFlag[bool] = Field(
+        False, validation_alias=AliasChoices("force", "f")
     )
-    apply_parser.add_argument(
-        "dir",
-        help="Spec directory (contains claude-config.yaml and CLAUDE.md)",
+    dry_run: CliToggleFlag[bool] = Field(
+        False, validation_alias=AliasChoices("dry-run", "n")
     )
 
-    # export subcommand
-    export_parser = subparsers.add_parser(
-        "export",
-        help="Write spec from current installed state to a directory",
-    )
-    export_parser.add_argument(
-        "dir",
-        help="Output directory (writes claude-config.yaml and CLAUDE.md)",
-    )
-    export_parser.add_argument(
-        "-f",
-        "--force",
-        action="store_true",
-        help="Overwrite existing files",
-    )
-    export_parser.add_argument(
-        "-n",
-        "--dry-run",
-        action="store_true",
-        help="Show changes without writing",
-    )
+    async def cli_cmd(self):
+        raise SystemExit(await cmd_export(self, ClaudeConfig()))
 
-    # validate subcommand
-    validate_parser = subparsers.add_parser(
-        "validate",
-        help="Validate spec file syntax",
-    )
-    validate_parser.add_argument(
-        "spec",
-        nargs="?",
-        help="Spec file path",
-    )
 
-    subparsers.add_parser(
-        "update",
-        help="Update all marketplaces and installed plugins",
-    )
+class ValidateCmd(pydantic.BaseModel):
+    """Validate spec file syntax."""
 
-    return parser.parse_args()
+    spec: CliPositionalArg[str | None] = None
+
+    async def cli_cmd(self):
+        raise SystemExit(await cmd_validate(self))
+
+
+class UpdateCmd(pydantic.BaseModel):
+    """Update all marketplaces and installed plugins."""
+
+    async def cli_cmd(self):
+        raise SystemExit(await cmd_update(ClaudeConfig()))
+
+
+class App(BaseSettings):
+    """Manage Claude Code marketplaces and plugins."""
+
+    model_config = SettingsConfigDict(
+        cli_parse_args=True,
+        cli_kebab_case=True,
+    )
+    verbose: CliToggleFlag[bool] = Field(
+        False, validation_alias=AliasChoices("verbose", "v")
+    )
+    quiet: CliToggleFlag[bool] = Field(
+        False, validation_alias=AliasChoices("quiet", "q")
+    )
+    apply: CliSubCommand[ApplyCmd]
+    export: CliSubCommand[ExportCmd]
+    validate_spec: CliSubCommand[ValidateCmd] = Field(alias="validate")
+    update: CliSubCommand[UpdateCmd]
+
+    @pydantic.model_validator(mode="after")
+    def _check_verbosity(self):
+        if self.verbose and self.quiet:
+            raise ValueError("verbose and quiet are mutually exclusive")
+        return self
+
+    def cli_cmd(self):
+        if self.quiet:
+            level = logging.WARNING
+        elif self.verbose:
+            level = logging.DEBUG
+        else:
+            level = logging.INFO
+        logging.basicConfig(format="%(message)s", level=level)
+        CliApp.run_subcommand(self)
 
 
 async def add_marketplace(source):
@@ -966,9 +980,9 @@ async def install_all_plugins(cfg, marketplace, plugins, force=False):
     return failures
 
 
-async def cmd_apply(args, cfg):
+async def cmd_apply(cmd, cfg):
     """Handle apply subcommand - reconcile to match spec directory."""
-    directory = require_spec_dir(args.dir)
+    directory = require_spec_dir(cmd.dir)
     try:
         data = load_spec_file(directory)
     except yaml.YAMLError as e:
@@ -1157,9 +1171,7 @@ def build_current_spec(cfg):
 
     settings_data = cfg.load_settings()
     settings = {
-        k: v
-        for k, v in settings_data.items()
-        if k not in UNMANAGED_SETTINGS
+        k: v for k, v in settings_data.items() if k not in UNMANAGED_SETTINGS
     } or None
 
     current = cfg.get_current_state()
@@ -1233,9 +1245,9 @@ def diff_yaml_dir(directory, dirname, mapping):
         )
 
 
-async def cmd_export(args, cfg):
+async def cmd_export(cmd, cfg):
     """Handle export subcommand - write current state spec to a directory."""
-    directory = pathlib.Path(args.dir)
+    directory = pathlib.Path(cmd.dir)
     if directory.exists() and not directory.is_dir():
         raise UserError(f"not a directory: {directory}")
 
@@ -1280,7 +1292,7 @@ async def cmd_export(args, cfg):
         diff_yaml_dir(directory, MCP_DIRNAME, mcp_servers)
         diff_yaml_dir(directory, MARKETPLACES_DIRNAME, marketplaces)
 
-    if args.dry_run:
+    if cmd.dry_run:
         for name in ARTIFACT_DIRS:
             mirror_tree(cfg.dir / name, directory / name, dry_run=True)
         mirror_yaml_dir(directory, MCP_DIRNAME, mcp_servers, dry_run=True)
@@ -1301,7 +1313,7 @@ async def cmd_export(args, cfg):
         )
         if p.exists()
     ]
-    if existing and not args.force:
+    if existing and not cmd.force:
         raise UserError(f"path exists (use -f to overwrite): {existing[0]}")
 
     directory.mkdir(parents=True, exist_ok=True)
@@ -1324,11 +1336,11 @@ async def cmd_export(args, cfg):
     return 0
 
 
-async def cmd_validate(args):
+async def cmd_validate(cmd):
     """Handle validate subcommand - check spec syntax."""
     try:
-        if args.spec:
-            spec = load_spec_file(pathlib.Path(args.spec))
+        if cmd.spec:
+            spec = load_spec_file(pathlib.Path(cmd.spec))
         elif not sys.stdin.isatty():
             spec = load_yaml(sys.stdin.read())
         else:
@@ -1376,34 +1388,9 @@ async def cmd_update(cfg):
     return 1 if err_count else 0
 
 
-async def main():
-    """Main entry point."""
-    args = parse_args()
-    if args.quiet:
-        level = logging.WARNING
-    elif args.verbose:
-        level = logging.DEBUG
-    else:
-        level = logging.INFO
-    logging.basicConfig(format="%(message)s", level=level)
-    config = ClaudeConfig()
-
-    match args.command:
-        case "apply":
-            return await cmd_apply(args, config)
-        case "export":
-            return await cmd_export(args, config)
-        case "update":
-            return await cmd_update(config)
-        case "validate":
-            return await cmd_validate(args)
-
-    return 1
-
-
 if __name__ == "__main__":
     try:
-        sys.exit(asyncio.run(main()))
+        CliApp.run(App)
     except UserError as e:
         print(f"error: {e}", file=sys.stderr)
         sys.exit(1)
