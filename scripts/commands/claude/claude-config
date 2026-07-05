@@ -49,7 +49,9 @@ PluginSet = typing.Annotated[
 class MarketplaceEntry(pydantic.BaseModel):
     model_config = pydantic.ConfigDict(extra="forbid")
     name: str | None = None
-    type: typing.Literal["github", "git", "directory"]
+    type: typing.Literal[
+        "github", "git", "directory", "local", "url", "npm", "git-subdir"
+    ]
     source: str
     enabled: PluginSet = pydantic.Field(default_factory=set)
     disabled: PluginSet = pydantic.Field(default_factory=set)
@@ -62,6 +64,8 @@ class MarketplaceEntry(pydantic.BaseModel):
             raise ValueError(
                 f"plugins in both enabled and disabled: {', '.join(sorted(overlap))}"
             )
+        # enabled/disabled (installed) win over a stale available listing
+        self.available = self.available - (self.enabled | self.disabled)
         return self
 
 
@@ -167,23 +171,10 @@ class PluginRef(typing.NamedTuple):
         return f"{self.plugin}@{self.marketplace}"
 
 
-MarketplaceList = typing.Annotated[
-    list[MarketplaceEntry],
-    pydantic.PlainSerializer(
-        lambda v: sorted(
-            (m.model_dump(exclude_defaults=True) for m in v),
-            key=lambda x: (x.get("name") or "").lower(),
-        ),
-        return_type=list[dict],
-    ),
-]
-
-
 class Spec(pydantic.BaseModel):
     model_config = pydantic.ConfigDict(extra="forbid", populate_by_name=True)
     config: ConfigSpec | None = None
     settings: dict[str, typing.Any] | None = None
-    marketplaces: MarketplaceList = pydantic.Field(default_factory=list)
 
     def model_dump(self, **kwargs) -> dict:
         kwargs.setdefault("exclude_none", True)
@@ -207,15 +198,50 @@ class _YamlDumper(yaml.SafeDumper):
 _YamlDumper.add_representer(str, _YamlDumper.represent_str)
 
 
-def dump_yaml(data):
+def dump_yaml(data, sort_keys=True):
     return yaml.dump(
         data,
         Dumper=_YamlDumper,
         default_flow_style=False,
-        sort_keys=True,
+        sort_keys=sort_keys,
         allow_unicode=True,
         width=float("inf"),
     )
+
+
+def deep_sort(obj):
+    """Recursively sort mapping keys; list order is preserved."""
+    if isinstance(obj, dict):
+        return {k: deep_sort(obj[k]) for k in sorted(obj)}
+    if isinstance(obj, list):
+        return [deep_sort(v) for v in obj]
+    return obj
+
+
+def order_keys(data, order):
+    """Reorder a mapping's top-level keys by `order`; deep-sort everything else.
+
+    Keys not listed in `order` follow, in sorted order. Nested mappings are
+    always sorted, so only the top level honors the explicit sequence.
+    """
+    data = deep_sort(data)
+    ordered = {k: data[k] for k in order if k in data}
+    ordered.update({k: v for k, v in data.items() if k not in ordered})
+    return ordered
+
+
+def scaffold_mcp(conf):
+    """Fill in the full key set for an MCP server so every key is present.
+
+    A remote server (has `url`, or an http/sse `type`) always shows
+    type/url/headers; a stdio server always shows command/args/env. Existing
+    values win over the empty scaffolds.
+    """
+    if "url" in conf or conf.get("type") in ("http", "sse"):
+        template = {"type": "http", "url": "", "headers": {}}
+    else:
+        template = {"command": "", "args": [], "env": {}}
+    return {**template, **conf}
 
 
 def safe_write_bytes(path, data):
@@ -326,30 +352,39 @@ def mirror_tree(src, dst, dry_run=False):
     return changes
 
 
-def load_mcp_dir(directory):
-    """Load directory/mcp/<name>.yaml files into an mcpServers dict."""
-    mcp_dir = directory / MCP_DIRNAME
-    if not mcp_dir.exists():
+def load_yaml_dir(directory, dirname):
+    """Load directory/<dirname>/<name>.yaml files into a {stem: data} dict."""
+    subdir = directory / dirname
+    if not subdir.exists():
         return {}
     return {
         path.stem: load_yaml(path.read_text())
-        for path in sorted(mcp_dir.glob("*.yaml"))
+        for path in sorted(subdir.glob("*.yaml"))
     }
 
 
-def mirror_mcp(directory, mcp_servers, dry_run=False):
-    """Mirror mcp_servers into directory/mcp/<name>.yaml, pruning stale files."""
-    mcp_dir = directory / MCP_DIRNAME
+def load_marketplaces_dir(directory):
+    """Reconstruct MarketplaceEntry list from marketplaces/<name>.yaml files."""
+    entries = []
+    for name, data in load_yaml_dir(directory, MARKETPLACES_DIRNAME).items():
+        data["name"] = name
+        entries.append(MarketplaceEntry.model_validate(data))
+    return entries
+
+
+def mirror_yaml_dir(directory, dirname, mapping, dry_run=False):
+    """Mirror {name: data} into directory/<dirname>/<name>.yaml, pruning stale files."""
+    subdir = directory / dirname
     desired = {
-        f"{name}.yaml": dump_yaml(config).encode()
-        for name, config in mcp_servers.items()
+        f"{name}.yaml": dump_yaml(data, sort_keys=False).encode()
+        for name, data in mapping.items()
     }
-    existing = {
-        p.name for p in mcp_dir.glob("*.yaml")
-    } if mcp_dir.exists() else set()
+    existing = (
+        {p.name for p in subdir.glob("*.yaml")} if subdir.exists() else set()
+    )
 
     for fname, data in sorted(desired.items()):
-        path = mcp_dir / fname
+        path = subdir / fname
         if dry_run:
             try:
                 if path.read_bytes() == data:
@@ -358,11 +393,11 @@ def mirror_mcp(directory, mcp_servers, dry_run=False):
                 pass
             log.info("would write %s", path)
             continue
-        mcp_dir.mkdir(parents=True, exist_ok=True)
+        subdir.mkdir(parents=True, exist_ok=True)
         write_bytes_if_different(path, data)
 
     for fname in sorted(existing - set(desired)):
-        path = mcp_dir / fname
+        path = subdir / fname
         if dry_run:
             log.info("would remove %s", path)
             continue
@@ -370,7 +405,7 @@ def mirror_mcp(directory, mcp_servers, dry_run=False):
         log.info("removed %s", path)
 
     if not dry_run:
-        prune_empty_dirs(mcp_dir)
+        prune_empty_dirs(subdir)
 
 
 class ClaudeConfig:
@@ -536,12 +571,18 @@ def apply_spec_dict(spec_data, loader, saver):
 
 
 def apply_settings(spec_settings, loader, saver):
-    """Apply settings declaratively: remove non-protected keys not in spec."""
+    """Apply settings declaratively: spec is the source of truth.
+
+    Claude-managed keys (UNMANAGED_SETTINGS) are preserved. Every other key not
+    in the spec is removed — but logged first, so runtime state Claude writes
+    that we don't yet know about never vanishes silently.
+    """
     if spec_settings is None:
         return
     current = loader()
-    protected = {"$schema", "enabledPlugins", "extraKnownMarketplaces"}
-    updated = {k: v for k, v in current.items() if k in protected}
+    updated = {k: v for k, v in current.items() if k in UNMANAGED_SETTINGS}
+    for key in sorted(current.keys() - UNMANAGED_SETTINGS - spec_settings.keys()):
+        log.warning("removing settings key not in spec: %s", key)
     updated.update(spec_settings)
     if updated != current:
         saver(updated)
@@ -570,6 +611,32 @@ SPEC_FILENAME = "claude-config.yaml"
 CLAUDE_MD_FILENAME = "CLAUDE.md"
 KEYBINDINGS_FILENAME = "keybindings.json"
 MCP_DIRNAME = "mcp"
+MARKETPLACES_DIRNAME = "marketplaces"
+MARKETPLACE_KEY_ORDER = ("type", "source", "enabled", "disabled", "available")
+MCP_KEY_ORDER = ("type", "url", "headers", "command", "args", "env")
+
+# settings.json is a mixed file. These keys are managed by Claude Code itself —
+# plugin/marketplace state and toggles written from its own menus (/model,
+# /effort, /config). They are never authored in the spec: preserved on apply,
+# excluded on export. Anything outside this set is the spec's to control.
+PROTECTED_SETTINGS = frozenset(
+    {"$schema", "enabledPlugins", "extraKnownMarketplaces"}
+)
+RUNTIME_SETTINGS = frozenset(
+    {
+        "model",
+        "advisorModel",
+        "enableArtifact",
+        "askUserQuestionTimeout",
+        "autoUpdatesChannel",
+        "preferredNotifChannel",
+        "autoScrollEnabled",
+        "autoMemoryEnabled",
+        "autoCompactEnabled",
+        "alwaysThinkingEnabled",
+    }
+)
+UNMANAGED_SETTINGS = PROTECTED_SETTINGS | RUNTIME_SETTINGS
 
 # User-authored artifact directories mirrored verbatim between the spec
 # directory and CLAUDE_CONFIG_DIR (full mirror: spec is the source of truth).
@@ -618,8 +685,11 @@ class DesiredState(pydantic.BaseModel):
         return self.enabled | self.disabled
 
 
-def compute_changes(current_state: dict[str, MarketplaceState], spec: Spec):
-    """Compute changes needed to reach desired spec state.
+def compute_changes(
+    current_state: dict[str, MarketplaceState],
+    marketplaces: list[MarketplaceEntry],
+):
+    """Compute changes needed to reach desired marketplace state.
 
     Returns:
         - marketplaces_to_add: [(source, enabled, disabled)]
@@ -630,9 +700,9 @@ def compute_changes(current_state: dict[str, MarketplaceState], spec: Spec):
         - plugins_to_disable: [(marketplace, plugin)]
         - plugins_to_update: [(marketplace, plugin)]
     """
-    # Build desired state from spec
+    # Build desired state from marketplace entries
     desired: dict[str, DesiredState] = {}
-    for entry in spec.marketplaces:
+    for entry in marketplaces:
         norm = normalize_source(entry.source)
         desired[norm] = DesiredState(
             source=entry.source,
@@ -815,12 +885,6 @@ def parse_args():
         help="Output directory (writes claude-config.yaml and CLAUDE.md)",
     )
     export_parser.add_argument(
-        "-a",
-        "--all",
-        action="store_true",
-        help="Include available (not installed) plugins in output",
-    )
-    export_parser.add_argument(
         "-f",
         "--force",
         action="store_true",
@@ -912,6 +976,7 @@ async def cmd_apply(args, cfg):
         return 1
 
     spec = Spec.model_validate(data)
+    marketplaces = load_marketplaces_dir(directory)
     spec_md_path = directory / CLAUDE_MD_FILENAME
 
     current = cfg.get_current_state()
@@ -923,7 +988,7 @@ async def cmd_apply(args, cfg):
         plugins_to_enable,
         plugins_to_disable,
         plugins_to_update,
-    ) = compute_changes(current, spec)
+    ) = compute_changes(current, marketplaces)
 
     err_count = 0
 
@@ -949,7 +1014,11 @@ async def cmd_apply(args, cfg):
     # Apply config and settings
     apply_spec_dict(spec.config, cfg.load_config, cfg.save_config)
     apply_settings(spec.settings, cfg.load_settings, cfg.save_settings)
-    apply_mcp_servers(spec.mcp_servers, cfg.load_config, cfg.save_config)
+    apply_mcp_servers(
+        load_yaml_dir(directory, MCP_DIRNAME),
+        cfg.load_config,
+        cfg.save_config,
+    )
 
     # Remove marketplaces (and their plugins)
     for name in marketplaces_to_remove:
@@ -1020,7 +1089,7 @@ async def cmd_apply(args, cfg):
             err_count += 1
 
     # Install new plugins (need to check spec to determine if enabled or disabled)
-    spec_enabled = {p for entry in spec.marketplaces for p in entry.enabled}
+    spec_enabled = {p for entry in marketplaces for p in entry.enabled}
 
     by_marketplace = {}
     for marketplace, plugin in plugins_to_install:
@@ -1076,8 +1145,8 @@ async def cmd_apply(args, cfg):
     return 1 if err_count else 0
 
 
-def build_current_spec(cfg, include_available=False):
-    """Build a Spec from the current installed state."""
+def build_current_spec(cfg):
+    """Build a Spec and marketplace entries from the current installed state."""
     config_data = cfg.load_config()
     config_filtered = {
         k: v for k, v in config_data.items() if k in Config.model_fields
@@ -1087,12 +1156,11 @@ def build_current_spec(cfg, include_available=False):
     )
 
     settings_data = cfg.load_settings()
-    exclude = {"$schema", "enabledPlugins", "extraKnownMarketplaces"}
     settings = {
-        k: v for k, v in settings_data.items() if k not in exclude
+        k: v
+        for k, v in settings_data.items()
+        if k not in UNMANAGED_SETTINGS
     } or None
-
-    mcp_servers = config_data.get("mcpServers") or None
 
     current = cfg.get_current_state()
     marketplaces = []
@@ -1105,8 +1173,7 @@ def build_current_spec(cfg, include_available=False):
             else info.source
         )
 
-        valid = cfg.get_valid_plugins(name) if include_available else set()
-        available = valid - info.installed
+        available = cfg.get_valid_plugins(name) - info.installed
 
         marketplaces.append(
             MarketplaceEntry(
@@ -1115,16 +1182,11 @@ def build_current_spec(cfg, include_available=False):
                 source=source_str,
                 enabled=info.enabled,
                 disabled=info.disabled,
-                available=available if include_available else set(),
+                available=available,
             )
         )
 
-    return Spec(
-        config=config,
-        settings=settings,
-        mcp_servers=mcp_servers,
-        marketplaces=marketplaces,
-    )
+    return Spec(config=config, settings=settings), marketplaces
 
 
 def diff_baseline_yaml(text):
@@ -1153,6 +1215,24 @@ def file_diff(name, current, desired):
     )
 
 
+def diff_yaml_dir(directory, dirname, mapping):
+    """Write per-file diffs for a directory/<dirname>/<name>.yaml mirror."""
+    subdir = directory / dirname
+    desired = {
+        f"{name}.yaml": dump_yaml(data, sort_keys=False)
+        for name, data in mapping.items()
+    }
+    existing = (
+        {p.name for p in subdir.glob("*.yaml")} if subdir.exists() else set()
+    )
+    for fname in sorted(set(desired) | existing):
+        path = subdir / fname
+        baseline = path.read_text() if path.exists() else ""
+        sys.stdout.writelines(
+            file_diff(f"{dirname}/{fname}", baseline, desired.get(fname, ""))
+        )
+
+
 async def cmd_export(args, cfg):
     """Handle export subcommand - write current state spec to a directory."""
     directory = pathlib.Path(args.dir)
@@ -1163,7 +1243,7 @@ async def cmd_export(args, cfg):
     md_path = directory / CLAUDE_MD_FILENAME
     kb_path = directory / KEYBINDINGS_FILENAME
 
-    spec = build_current_spec(cfg, include_available=args.all)
+    spec, entries = build_current_spec(cfg)
     desired_yaml = dump_yaml(spec.model_dump())
     desired_md = (
         cfg.claude_md_path.read_text() if cfg.claude_md_path.exists() else None
@@ -1173,6 +1253,16 @@ async def cmd_export(args, cfg):
         if cfg.keybindings_path.exists()
         else None
     )
+    mcp_servers = {
+        name: order_keys(scaffold_mcp(conf), MCP_KEY_ORDER)
+        for name, conf in (cfg.load_config().get("mcpServers") or {}).items()
+    }
+    marketplaces = {
+        e.name: order_keys(
+            e.model_dump(exclude={"name"}), MARKETPLACE_KEY_ORDER
+        )
+        for e in entries
+    }
 
     if log.isEnabledFor(logging.INFO):
         baseline_yaml = (
@@ -1187,10 +1277,16 @@ async def cmd_export(args, cfg):
         sys.stdout.writelines(
             file_diff(CLAUDE_MD_FILENAME, baseline_md, desired_md or "")
         )
+        diff_yaml_dir(directory, MCP_DIRNAME, mcp_servers)
+        diff_yaml_dir(directory, MARKETPLACES_DIRNAME, marketplaces)
 
     if args.dry_run:
         for name in ARTIFACT_DIRS:
             mirror_tree(cfg.dir / name, directory / name, dry_run=True)
+        mirror_yaml_dir(directory, MCP_DIRNAME, mcp_servers, dry_run=True)
+        mirror_yaml_dir(
+            directory, MARKETPLACES_DIRNAME, marketplaces, dry_run=True
+        )
         return 0
 
     existing = [
@@ -1199,6 +1295,8 @@ async def cmd_export(args, cfg):
             yaml_path,
             md_path,
             kb_path,
+            directory / MCP_DIRNAME,
+            directory / MARKETPLACES_DIRNAME,
             *(directory / n for n in ARTIFACT_DIRS),
         )
         if p.exists()
@@ -1220,6 +1318,8 @@ async def cmd_export(args, cfg):
 
     for name in ARTIFACT_DIRS:
         mirror_tree(cfg.dir / name, directory / name)
+    mirror_yaml_dir(directory, MCP_DIRNAME, mcp_servers)
+    mirror_yaml_dir(directory, MARKETPLACES_DIRNAME, marketplaces)
 
     return 0
 
