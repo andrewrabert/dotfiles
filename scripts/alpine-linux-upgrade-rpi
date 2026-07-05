@@ -1,0 +1,347 @@
+#!/usr/bin/env python3
+"""Update a Raspberry Pi's Alpine boot partition to match a fresh image.
+
+`source` is a positional arg: either the extracted contents of a fresh
+alpine-rpi image or the release archive itself (e.g.
+alpine-rpi-3.24.1-aarch64.tar.gz), which is extracted to a temp dir. The remote
+(--host:--remote-dir) is a running Pi's FAT boot partition. rsync --delete
+makes the remote match the source, removing stale image files the new release
+no longer ships (old firmware, device trees, kernel artifacts) — but the Pi's
+diskless persistent state does NOT live in the fresh image and must never be
+touched:
+
+  *.apkovl.tar.gz   the lbu config overlay, named per hostname
+  cache/            apk cache used to restore packages at boot without network
+  usercfg.txt       user config included by config.txt
+
+These are excluded, which protects them from both deletion and being pushed.
+
+The sync runs by default; pass --dry-run to preview without modifying the
+remote.
+
+rsync's %i change-code field is a fixed 11 characters, so the path is sliced
+by column rather than split on a delimiter: rsync escapes all control chars
+(including newlines, as \\nnn octal) but NOT tabs, so no single delimiter is
+safe against arbitrary filenames.
+"""
+
+import argparse
+import contextlib
+import fnmatch
+import os
+import shlex
+import subprocess
+import sys
+import tarfile
+import tempfile
+
+DEFAULT_REMOTE_DIR = "/media/mmcblk0p1/"
+SRC = None  # set from --source in main()
+DEST = None  # set from --host / --remote-dir in main()
+ICODE_WIDTH = 11
+
+# Anchored to the transfer root ('/'). Excluding protects from deletion AND
+# skips transfer. *.apkovl.tar.gz is a glob so it holds for any hostname.
+PROTECT = [
+    "/*.apkovl.tar.gz",
+    "/cache/",
+    "/usercfg.txt",
+]
+
+# Top-level dirs and files wholly owned by the Alpine release. A deletion is
+# expected only if its top-level path component matches one of these (globs
+# allowed). Anything else is flagged as an unexpected deletion to investigate
+# before applying. Deep paths do not belong here — only top-level entries.
+SAFE_TO_DELETE = [
+    ".alpine-release",
+    "apks",
+    "boot",
+    "overlays",
+    "bootcode.bin",
+    "cmdline.txt",
+    "config.txt",
+    "fixup*.dat",
+    "start*.elf",
+    "*.dtb",
+]
+
+
+def is_expected_deletion(path):
+    top = path.split("/", 1)[0]
+    return any(fnmatch.fnmatch(top, pat) for pat in SAFE_TO_DELETE)
+
+
+def rsync_cmd(apply):
+    # The remote is a FAT partition: it can't store ownership/permissions, and
+    # a non-root remote user can't chown, so --archive's -o/-g/-p raise EPERM.
+    # Sync content + mtime only; --modify-window absorbs FAT's 2s time
+    # granularity so files aren't needlessly re-sent.
+    cmd = [
+        "rsync",
+        "--recursive",
+        "--times",
+        "--no-owner",
+        "--no-group",
+        "--no-perms",
+        "--modify-window=1",
+        "--verbose",
+        "--delete",
+        "--out-format=%i%n",
+    ]
+    if not apply:
+        cmd.append("--dry-run")
+    cmd += [f"--exclude={p}" for p in PROTECT]
+    cmd += [SRC, DEST]
+    return cmd
+
+
+def classify(code):
+    """Map an rsync %i change-code to add / update / delete / None."""
+    if code.startswith("*deleting"):
+        return "delete"
+    if not code or code[0] not in "<>ch.":
+        return None  # messages, dir-not-changed markers, etc.
+    # A newly created item has '+++++++++' in the attribute columns.
+    if code[2:].startswith("+++++++"):
+        return "add"
+    return "update"
+
+
+def remote_probe():
+    """Return (alpine_release_present: bool, apkovl_count: int) for DEST."""
+    host, sep, path = DEST.partition(":")
+    remote = (
+        f"cd {shlex.quote(path or '.')} 2>/dev/null || exit 3; "
+        "[ -e .alpine-release ] && echo REL; "
+        'n=0; for m in *.apkovl.tar.gz; do [ -e "$m" ] && n=$((n+1)); done; '
+        'echo "OVL $n"'
+    )
+    cmd = ["ssh", host, remote] if sep else ["sh", "-c", remote]
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    if proc.returncode == 3:
+        sys.stderr.write(f"error: cannot access {DEST}\n")
+        sys.exit(1)
+    if proc.returncode != 0:
+        sys.stderr.write(proc.stderr)
+        sys.exit(proc.returncode)
+    words = proc.stdout.split()
+    count = int(words[words.index("OVL") + 1]) if "OVL" in words else 0
+    return "REL" in words, count
+
+
+def preflight(require_single_apkovl, force):
+    """Guard against pointing at a wrong or non-Alpine target."""
+    rel, count = remote_probe()
+    problems = []
+    if not rel:
+        problems.append(f".alpine-release not found on {DEST} — wrong target?")
+    if require_single_apkovl and count != 1:
+        problems.append(
+            f"expected exactly one *.apkovl.tar.gz on {DEST}, found {count}"
+        )
+    for msg in problems:
+        if force:
+            sys.stderr.write(f"WARNING (forced): {msg}\n")
+        else:
+            sys.stderr.write(f"error: {msg} (use --force to override)\n")
+    if problems and not force:
+        sys.exit(1)
+
+
+def protected_status():
+    """For each PROTECT pattern, return (pattern, [matches on destination]).
+
+    Emits one block per pattern in order, delimited by a RS (\\036) sentinel,
+    so patterns with no match come back as an empty list rather than being
+    silently dropped.
+    """
+    host, sep, path = DEST.partition(":")
+    # PROTECT entries are trusted constants and must stay UNQUOTED so the
+    # remote shell expands their globs (e.g. *.apkovl.tar.gz).
+    blocks = "; ".join(
+        f'printf "\\036\\n"; for m in {p.strip("/")}; do '
+        f'[ -e "$m" ] && du -sh -- "$m"; done'
+        for p in PROTECT
+    )
+    remote = f"cd {shlex.quote(path or '.')} 2>/dev/null || exit 0; {blocks}; exit 0"
+    cmd = ["ssh", host, remote] if sep else ["sh", "-c", remote]
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    if proc.returncode != 0:
+        sys.stderr.write(proc.stderr)
+        sys.exit(proc.returncode)
+    out = []
+    for pat, block in zip(PROTECT, proc.stdout.split("\036")[1:]):
+        out.append(
+            (pat, [ln.strip() for ln in block.splitlines() if ln.strip()])
+        )
+    return out
+
+
+def print_protected():
+    print(
+        f"\n=== PROTECTED on {DEST} (kept, or absent — never deleted/overwritten) ==="
+    )
+    for pat, matches in protected_status():
+        if matches:
+            for m in matches:
+                print(f"  {pat:18} kept   {m}")
+        else:
+            print(f"  {pat:18} absent")
+
+
+def preview():
+    proc = subprocess.run(
+        rsync_cmd(apply=False), capture_output=True, text=True
+    )
+    if proc.returncode != 0:
+        sys.stderr.write(proc.stderr)
+        sys.exit(proc.returncode)
+
+    groups = {"add": [], "update": [], "delete": []}
+    for line in proc.stdout.splitlines():
+        code, name = line[:ICODE_WIDTH], line[ICODE_WIDTH:]
+        kind = classify(code)
+        if kind:
+            groups[kind].append(name)
+
+    # Adds and safe deletions are intentional and noisy; only deletions
+    # outside SAFE_TO_DELETE are worth listing. Counts stay in the summary.
+    unexpected = [d for d in groups["delete"] if not is_expected_deletion(d)]
+    if unexpected:
+        print(
+            f"\n!!! UNEXPECTED deletions ({len(unexpected)}) — NOT in "
+            f"SAFE_TO_DELETE, investigate before syncing !!!"
+        )
+        for name in unexpected:
+            print(f"  {name}")
+
+    print_protected()
+
+    sys.stderr.write(
+        f"\nSummary: {len(groups['add'])} add, "
+        f"{len(groups['update'])} update, "
+        f"{len(groups['delete'])} delete "
+        f"({len(unexpected)} unexpected).\n"
+    )
+    return groups, unexpected
+
+
+def apply(force):
+    _, unexpected = preview()
+    if unexpected and not force:
+        sys.stderr.write(
+            "\nRefusing to sync: unexpected deletions present. "
+            "Review them, then re-run with --force to override.\n"
+        )
+        sys.exit(1)
+    sys.stderr.write("\nSyncing...\n")
+    rc = subprocess.run(rsync_cmd(apply=True)).returncode
+    sys.exit(rc)
+
+
+def validate_source(src):
+    """A valid source is an extracted alpine-rpi image, not just any dir."""
+    checks = [
+        (".alpine-release", os.path.isfile),
+        ("apks", os.path.isdir),
+        ("boot", os.path.isdir),
+        ("overlays", os.path.isdir),
+    ]
+    missing = [name for name, ok in checks if not ok(os.path.join(src, name))]
+    if missing:
+        sys.stderr.write(
+            f"error: source {src!r} is not an alpine-rpi image "
+            f"(missing: {', '.join(missing)})\n"
+        )
+        sys.exit(1)
+
+
+def resolve_source(path, stack):
+    """Return a directory of image contents; extract if given an archive.
+
+    A dir is used as-is. A file is treated as a release tarball and extracted
+    (stdlib tarfile) into a temp dir tied to `stack`'s lifetime. Fails loudly
+    on anything else or an unreadable archive.
+    """
+    if os.path.isdir(path):
+        return path
+    if os.path.isfile(path):
+        tmp = stack.enter_context(tempfile.TemporaryDirectory())
+        try:
+            with tarfile.open(path, "r:*") as tar:
+                tar.extractall(tmp, filter="data")
+        except (tarfile.TarError, OSError) as e:
+            sys.stderr.write(f"error: cannot extract archive {path!r}: {e}\n")
+            sys.exit(1)
+        return tmp
+    sys.stderr.write(
+        f"error: source {path!r} is neither a directory nor a file\n"
+    )
+    sys.exit(1)
+
+
+def slash(path):
+    return path if path.endswith("/") else path + "/"
+
+
+UPGRADE_HELP = """\
+Upgrading releases:
+  1. Edit /etc/apk/repositories
+  2. lbu ci
+  3. apk upgrade -Ua
+  4. apk fix -sv
+  5. On a Raspberry Pi, download the latest Pi image and overwrite the boot
+     partition contents (excluding the lbu overlay) -- this is what this
+     script does.
+  6. reboot
+  7. apk cache clean -ua
+"""
+
+
+def main():
+    ap = argparse.ArgumentParser(
+        description=__doc__.splitlines()[0],
+        epilog=UPGRADE_HELP,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    ap.add_argument("--host", required=True, help="destination Pi (ssh host)")
+    ap.add_argument(
+        "source",
+        help="extracted alpine-rpi image dir, or a release archive "
+        "(e.g. alpine-rpi-3.24.1-aarch64.tar.gz)",
+    )
+    ap.add_argument(
+        "--remote-dir",
+        default=DEFAULT_REMOTE_DIR,
+        help=f"remote boot partition dir (default: {DEFAULT_REMOTE_DIR})",
+    )
+    ap.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="preview only; do not modify the remote",
+    )
+    ap.add_argument(
+        "--force",
+        action="store_true",
+        help="bypass safety checks (preflight, unexpected deletions)",
+    )
+    if len(sys.argv) == 1:
+        ap.print_help()
+        sys.exit(0)
+    args = ap.parse_args()
+
+    global SRC, DEST
+    with contextlib.ExitStack() as stack:
+        SRC = slash(resolve_source(args.source, stack))
+        DEST = f"{args.host}:{slash(args.remote_dir)}"
+
+        validate_source(SRC)
+        preflight(require_single_apkovl=not args.dry_run, force=args.force)
+        if args.dry_run:
+            preview()
+        else:
+            apply(args.force)
+
+
+if __name__ == "__main__":
+    main()
