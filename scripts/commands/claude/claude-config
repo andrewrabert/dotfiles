@@ -15,6 +15,7 @@ import pathlib
 import shutil
 import sys
 import tempfile
+import types
 import typing
 
 import pydantic
@@ -75,6 +76,26 @@ class MarketplaceEntry(pydantic.BaseModel):
         # enabled/disabled (installed) win over a stale available listing
         self.available = self.available - (self.enabled | self.disabled)
         return self
+
+
+class McpStdioServer(pydantic.BaseModel):
+    model_config = pydantic.ConfigDict(extra="forbid")
+    type: typing.Literal["stdio"] = "stdio"
+    command: str
+    args: list[str] = pydantic.Field(default_factory=list)
+    env: dict[str, str] = pydantic.Field(default_factory=dict)
+
+
+class McpRemoteServer(pydantic.BaseModel):
+    model_config = pydantic.ConfigDict(extra="forbid")
+    type: typing.Literal["http", "sse"]
+    url: str
+    headers: dict[str, str] = pydantic.Field(default_factory=dict)
+
+
+McpServer = typing.Annotated[
+    McpStdioServer | McpRemoteServer, pydantic.Field(discriminator="type")
+]
 
 
 # Models for Claude's JSON files (extra="ignore" to allow unknown keys)
@@ -238,18 +259,23 @@ def order_keys(data, order):
     return ordered
 
 
-def scaffold_mcp(conf):
-    """Fill in the full key set for an MCP server so every key is present.
+def parse_mcp(conf):
+    """Validate a raw MCP server mapping into an McpServer model.
 
-    A remote server (has `url`, or an http/sse `type`) always shows
-    type/url/headers; a stdio server always shows command/args/env. Existing
-    values win over the empty scaffolds.
+    Infers the `stdio`/`http`/`sse` discriminator when absent: a `url` or an
+    http/sse `type` means remote, otherwise stdio.
     """
-    if "url" in conf or conf.get("type") in ("http", "sse"):
-        template = {"type": "http", "url": "", "headers": {}}
-    else:
-        template = {"command": "", "args": [], "env": {}}
-    return {**template, **conf}
+    if "type" not in conf:
+        conf = {
+            **conf,
+            "type": "http" if "url" in conf else "stdio",
+        }
+    return pydantic.TypeAdapter(McpServer).validate_python(conf)
+
+
+def dump_mcp(server):
+    """Serialize an McpServer to an ordered mapping with every key present."""
+    return order_keys(server.model_dump(), MCP_KEY_ORDER)
 
 
 def safe_write_bytes(path, data):
@@ -895,6 +921,30 @@ class UpdateCmd(pydantic.BaseModel):
         raise SystemExit(await cmd_update(ClaudeConfig()))
 
 
+class NewMarketplaceCmd(pydantic.BaseModel):
+    """Print a commented marketplace spec template to stdout."""
+
+    async def cli_cmd(self):
+        raise SystemExit(cmd_new_marketplace())
+
+
+class NewMcpCmd(pydantic.BaseModel):
+    """Print a commented mcp server spec template to stdout."""
+
+    async def cli_cmd(self):
+        raise SystemExit(cmd_new_mcp())
+
+
+class NewCmd(pydantic.BaseModel):
+    """Create a new mcp or marketplace spec file."""
+
+    mcp: CliSubCommand[NewMcpCmd]
+    marketplace: CliSubCommand[NewMarketplaceCmd]
+
+    def cli_cmd(self):
+        CliApp.run_subcommand(self)
+
+
 class App(BaseSettings):
     """Manage Claude Code marketplaces and plugins."""
 
@@ -910,6 +960,7 @@ class App(BaseSettings):
     )
     apply: CliSubCommand[ApplyCmd]
     export: CliSubCommand[ExportCmd]
+    new: CliSubCommand[NewCmd]
     validate_spec: CliSubCommand[ValidateCmd] = Field(alias="validate")
     update: CliSubCommand[UpdateCmd]
 
@@ -1029,7 +1080,10 @@ async def cmd_apply(cmd, cfg):
     apply_spec_dict(spec.config, cfg.load_config, cfg.save_config)
     apply_settings(spec.settings, cfg.load_settings, cfg.save_settings)
     apply_mcp_servers(
-        load_yaml_dir(directory, MCP_DIRNAME),
+        {
+            name: dump_mcp(parse_mcp(conf))
+            for name, conf in load_yaml_dir(directory, MCP_DIRNAME).items()
+        },
         cfg.load_config,
         cfg.save_config,
     )
@@ -1266,7 +1320,7 @@ async def cmd_export(cmd, cfg):
         else None
     )
     mcp_servers = {
-        name: order_keys(scaffold_mcp(conf), MCP_KEY_ORDER)
+        name: dump_mcp(parse_mcp(conf))
         for name, conf in (cfg.load_config().get("mcpServers") or {}).items()
     }
     marketplaces = {
@@ -1386,6 +1440,75 @@ async def cmd_update(cfg):
         f"{len(known)} marketplaces, {len(plugin_refs)} plugins, {err_count} errors"
     )
     return 1 if err_count else 0
+
+
+def field_placeholder(annotation):
+    """Return (choices_comment, example_value) for a model field annotation."""
+    origin = typing.get_origin(annotation)
+    args = typing.get_args(annotation)
+    if origin is typing.Literal:
+        opts = [str(a) for a in args]
+        return (" | ".join(opts) if len(opts) > 1 else ""), opts[0]
+    if origin in (typing.Union, types.UnionType):
+        non_none = [a for a in args if a is not type(None)]
+        return field_placeholder(non_none[0])
+    if origin in (list, tuple, set):
+        return "", "[]"
+    if origin is dict:
+        return "", "{}"
+    return "", ""
+
+
+def commented_template(header, sections, key_order, exclude=()):
+    """Render a fully commented YAML template from one or more models.
+
+    `sections` is a list of (label, model_cls). Fields are emitted in
+    `key_order`, then any remaining fields, skipping `exclude`.
+    """
+    blocks = []
+    for label, model_cls in sections:
+        lines = [f"# {label}"] if label else []
+        fields = model_cls.model_fields
+        ordered = [k for k in key_order if k in fields and k not in exclude]
+        ordered += [k for k in fields if k not in ordered and k not in exclude]
+        for name in ordered:
+            choices, example = field_placeholder(fields[name].annotation)
+            line = f"# {name}: {example}".rstrip()
+            if choices:
+                line += f"  # {choices}"
+            lines.append(line)
+        blocks.append("\n".join(lines))
+    return f"# {header}\n" + "\n\n".join(blocks) + "\n"
+
+
+def cmd_new_marketplace():
+    """Handle new marketplace subcommand - print a template to stdout."""
+    print(
+        commented_template(
+            "marketplace spec - name comes from the filename",
+            [("", MarketplaceEntry)],
+            MARKETPLACE_KEY_ORDER,
+            exclude={"name"},
+        ),
+        end="",
+    )
+    return 0
+
+
+def cmd_new_mcp():
+    """Handle new mcp subcommand - print a template to stdout."""
+    print(
+        commented_template(
+            "mcp server spec - uncomment one section",
+            [
+                ("stdio server", McpStdioServer),
+                ("remote server", McpRemoteServer),
+            ],
+            MCP_KEY_ORDER,
+        ),
+        end="",
+    )
+    return 0
 
 
 if __name__ == "__main__":
