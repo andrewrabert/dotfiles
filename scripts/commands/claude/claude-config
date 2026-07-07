@@ -98,6 +98,193 @@ McpServer = typing.Annotated[
 ]
 
 
+# Plugin specs (plugins/<name>.yaml) and the generated hidden marketplace
+# manifest that wraps them. Each spec type pairs with a marketplace.json
+# source model; to_source/to_plugin convert between the two representations.
+
+HIDDEN_MARKETPLACE_NAME = "claude-config"
+HIDDEN_MARKETPLACE_DESCRIPTION = (
+    "managed by claude-config (github.com/andrewrabert) - do not edit"
+)
+
+
+class PluginSpecBase(pydantic.BaseModel):
+    model_config = pydantic.ConfigDict(extra="forbid")
+    source: str
+    enabled: bool = True
+
+
+class GithubPlugin(PluginSpecBase):
+    type: typing.Literal["github"]
+    ref: str | None = None
+    sha: str | None = None
+
+    def to_source(self):
+        return GithubSource(
+            source="github", repo=self.source, ref=self.ref, sha=self.sha
+        )
+
+
+class GitPlugin(PluginSpecBase):
+    type: typing.Literal["git"]
+    ref: str | None = None
+    sha: str | None = None
+
+    def to_source(self):
+        return GitSource(
+            source="git", url=self.source, ref=self.ref, sha=self.sha
+        )
+
+
+class GitSubdirPlugin(PluginSpecBase):
+    type: typing.Literal["git-subdir"]
+    path: str
+    ref: str | None = None
+    sha: str | None = None
+
+    def to_source(self):
+        return GitSubdirSource(
+            source="git-subdir",
+            url=self.source,
+            path=self.path,
+            ref=self.ref,
+            sha=self.sha,
+        )
+
+
+class NpmPlugin(PluginSpecBase):
+    type: typing.Literal["npm"]
+    version: str | None = None
+    registry: str | None = None
+
+    def to_source(self):
+        return NpmSource(
+            source="npm",
+            package=self.source,
+            version=self.version,
+            registry=self.registry,
+        )
+
+
+PluginSpec = typing.Annotated[
+    GithubPlugin | GitPlugin | GitSubdirPlugin | NpmPlugin,
+    pydantic.Field(discriminator="type"),
+]
+
+
+class GithubSource(pydantic.BaseModel):
+    model_config = pydantic.ConfigDict(extra="forbid")
+    source: typing.Literal["github"]
+    repo: str
+    ref: str | None = None
+    sha: str | None = None
+
+    def to_plugin(self, enabled):
+        return GithubPlugin(
+            type="github",
+            source=self.repo,
+            ref=self.ref,
+            sha=self.sha,
+            enabled=enabled,
+        )
+
+
+class GitSource(pydantic.BaseModel):
+    model_config = pydantic.ConfigDict(extra="forbid")
+    source: typing.Literal["git"]
+    url: str
+    ref: str | None = None
+    sha: str | None = None
+
+    def to_plugin(self, enabled):
+        return GitPlugin(
+            type="git",
+            source=self.url,
+            ref=self.ref,
+            sha=self.sha,
+            enabled=enabled,
+        )
+
+
+class GitSubdirSource(pydantic.BaseModel):
+    model_config = pydantic.ConfigDict(extra="forbid")
+    source: typing.Literal["git-subdir"]
+    url: str
+    path: str
+    ref: str | None = None
+    sha: str | None = None
+
+    def to_plugin(self, enabled):
+        return GitSubdirPlugin(
+            type="git-subdir",
+            source=self.url,
+            path=self.path,
+            ref=self.ref,
+            sha=self.sha,
+            enabled=enabled,
+        )
+
+
+class NpmSource(pydantic.BaseModel):
+    model_config = pydantic.ConfigDict(extra="forbid")
+    source: typing.Literal["npm"]
+    package: str
+    version: str | None = None
+    registry: str | None = None
+
+    def to_plugin(self, enabled):
+        return NpmPlugin(
+            type="npm",
+            source=self.package,
+            version=self.version,
+            registry=self.registry,
+            enabled=enabled,
+        )
+
+
+PluginSource = typing.Annotated[
+    GithubSource | GitSource | GitSubdirSource | NpmSource,
+    pydantic.Field(discriminator="source"),
+]
+
+
+class HiddenManifestPlugin(pydantic.BaseModel):
+    model_config = pydantic.ConfigDict(extra="forbid")
+    name: str
+    source: PluginSource
+
+
+class HiddenManifest(pydantic.BaseModel):
+    model_config = pydantic.ConfigDict(extra="forbid")
+    name: str = HIDDEN_MARKETPLACE_NAME
+    owner: dict[str, str] = pydantic.Field(
+        default_factory=lambda: {"name": HIDDEN_MARKETPLACE_NAME}
+    )
+    metadata: dict[str, str] = pydantic.Field(
+        default_factory=lambda: {"description": HIDDEN_MARKETPLACE_DESCRIPTION}
+    )
+    plugins: list[HiddenManifestPlugin] = pydantic.Field(default_factory=list)
+
+    @classmethod
+    def from_specs(cls, plugin_specs):
+        return cls(
+            plugins=[
+                HiddenManifestPlugin(name=name, source=spec.to_source())
+                for name, spec in sorted(plugin_specs.items())
+            ]
+        )
+
+    @classmethod
+    def load(cls, path):
+        return cls.model_validate(load_json(path))
+
+    def sources(self):
+        return {p.name: p.source for p in self.plugins}
+
+    def dump_bytes(self):
+        return dump_json(self.model_dump(exclude_none=True)).encode()
+
+
 # Models for Claude's JSON files (extra="ignore" to allow unknown keys)
 
 
@@ -125,7 +312,7 @@ class KnownMarketplace(pydantic.BaseModel):
             case "directory":
                 return src.path or self.installLocation
             case "local":
-                return self.installLocation
+                return src.path or self.installLocation
             case "git":
                 return src.url
             case _:
@@ -158,6 +345,26 @@ class KnownMarketplaces:
             if normalize_source(info.get_source_string()) == norm:
                 return name
         return None
+
+    def find_by_path(self, path):
+        """Find marketplace name whose source path or install location is `path`."""
+        target = pathlib.Path(path).expanduser().resolve()
+        for name, info in self._data.items():
+            for candidate in (info.source.path, info.installLocation):
+                if (
+                    candidate
+                    and pathlib.Path(candidate).expanduser().resolve()
+                    == target
+                ):
+                    return name
+        return None
+
+
+class Settings(pydantic.BaseModel):
+    """settings.json - extra="allow" so unmanaged keys round-trip on save."""
+
+    model_config = pydantic.ConfigDict(extra="allow")
+    enabledPlugins: dict[str, bool] = pydantic.Field(default_factory=dict)
 
 
 class InstalledPlugins(pydantic.BaseModel):
@@ -406,6 +613,19 @@ def load_marketplaces_dir(directory):
     return entries
 
 
+def load_plugins_dir(directory):
+    """Reconstruct {name: PluginSpec} from plugins/<name>.yaml files."""
+    specs = {}
+    for name, data in load_yaml_dir(directory, PLUGINS_DIRNAME).items():
+        try:
+            specs[name] = pydantic.TypeAdapter(PluginSpec).validate_python(
+                data
+            )
+        except pydantic.ValidationError as e:
+            raise UserError(f"{PLUGINS_DIRNAME}/{name}.yaml: {e}") from e
+    return specs
+
+
 def mirror_yaml_dir(directory, dirname, mapping, dry_run=False):
     """Mirror {name: data} into directory/<dirname>/<name>.yaml, pruning stale files."""
     subdir = directory / dirname
@@ -463,6 +683,11 @@ class ClaudeConfig:
         self.claude_md_path = self.dir / "CLAUDE.md"
         self.keybindings_path = self.dir / "keybindings.json"
         self.plugin_cache_path = self.dir / "plugins" / "cache"
+        self.hidden_root = self.dir / "claude-config"
+        self.hidden_marketplace_dir = self.hidden_root / "marketplace"
+        self.hidden_manifest_path = (
+            self.hidden_marketplace_dir / ".claude-plugin" / "marketplace.json"
+        )
 
     def load_config(self):
         data = load_json(self.config_path)
@@ -473,10 +698,13 @@ class ClaudeConfig:
         write_bytes_if_different(self.config_path, dump_json(data).encode())
 
     def load_settings(self):
-        return load_json(self.settings_path)
+        return Settings.model_validate(load_json(self.settings_path))
 
-    def save_settings(self, data):
-        write_bytes_if_different(self.settings_path, dump_json(data).encode())
+    def save_settings(self, settings):
+        write_bytes_if_different(
+            self.settings_path,
+            dump_json(settings.model_dump(exclude_defaults=True)).encode(),
+        )
 
     def load_installed_plugins(self):
         data = load_json(self.installed_plugins_path)
@@ -503,10 +731,7 @@ class ClaudeConfig:
         """Get marketplace states keyed by name."""
         known = self.load_known_marketplaces()
         installed = self.load_installed_plugins()
-        settings = self.load_settings()
-        enabled_plugins = (
-            settings.get("enabledPlugins", {}) if settings else {}
-        )
+        enabled_plugins = self.load_settings().enabledPlugins
 
         state: dict[str, MarketplaceState] = {}
         for name, info in known.items():
@@ -548,11 +773,17 @@ class ClaudeConfig:
         known = self.load_known_marketplaces()
         if marketplace not in known:
             return False
-        return known[marketplace].source.source == "local"
+        return known[marketplace].source.source in ("local", "directory")
 
     def find_marketplace_by_source(self, source):
         """Find marketplace name by normalized source."""
         return self.load_known_marketplaces().find_by_source(source)
+
+    def find_hidden_marketplace(self):
+        """Registered name of the generated hidden marketplace, or None."""
+        return self.load_known_marketplaces().find_by_path(
+            self.hidden_marketplace_dir
+        )
 
     def clear_plugin_cache(self, marketplace, plugin):
         """Delete cached plugin versions to force fresh install."""
@@ -560,25 +791,21 @@ class ClaudeConfig:
         if cache_dir.exists():
             shutil.rmtree(cache_dir)
 
-    def remove_from_settings(self, marketplace, plugin=None):
-        """Remove plugin/marketplace from enabledPlugins in settings."""
+    def prune_enabled_plugins(self):
+        """Drop enabledPlugins entries with no matching installed plugin.
+
+        Orphaned entries linger when a plugin's install record vanishes
+        outside our flow, and a stale entry for the same plugin name under
+        another marketplace makes `claude plugin uninstall` fail with a bogus
+        scope error.
+        """
         settings = self.load_settings()
-        if not settings:
-            return
-        enabled_plugins = settings.get("enabledPlugins", {})
-        if not enabled_plugins:
-            return
-
-        if plugin:
-            to_remove = [str(PluginRef(plugin, marketplace))]
-        else:
-            to_remove = [
-                r for r in enabled_plugins if r.endswith(f"@{marketplace}")
-            ]
-
-        for ref in to_remove:
-            enabled_plugins.pop(ref, None)
-        if to_remove:
+        installed = self.load_installed_plugins()
+        orphans = settings.enabledPlugins.keys() - installed.plugins.keys()
+        for ref in sorted(orphans):
+            log.warning("pruning orphaned enabledPlugins entry: %s", ref)
+            del settings.enabledPlugins[ref]
+        if orphans:
             self.save_settings(settings)
 
 
@@ -613,7 +840,7 @@ def apply_settings(spec_settings, loader, saver):
     """
     if spec_settings is None:
         return
-    current = loader()
+    current = loader().model_dump(exclude_defaults=True)
     updated = {k: v for k, v in current.items() if k in UNMANAGED_SETTINGS}
     for key in sorted(
         current.keys() - UNMANAGED_SETTINGS - spec_settings.keys()
@@ -621,7 +848,7 @@ def apply_settings(spec_settings, loader, saver):
         log.warning("removing settings key not in spec: %s", key)
     updated.update(spec_settings)
     if updated != current:
-        saver(updated)
+        saver(Settings.model_validate(updated))
 
 
 def apply_mcp_servers(mcp_servers, loader, saver):
@@ -648,8 +875,19 @@ CLAUDE_MD_FILENAME = "CLAUDE.md"
 KEYBINDINGS_FILENAME = "keybindings.json"
 MCP_DIRNAME = "mcp"
 MARKETPLACES_DIRNAME = "marketplaces"
+PLUGINS_DIRNAME = "plugins"
 MARKETPLACE_KEY_ORDER = ("type", "source", "enabled", "disabled", "available")
 MCP_KEY_ORDER = ("type", "url", "headers", "command", "args", "env")
+PLUGIN_KEY_ORDER = (
+    "type",
+    "source",
+    "path",
+    "ref",
+    "sha",
+    "version",
+    "registry",
+    "enabled",
+)
 
 # settings.json is a mixed file. These keys are managed by Claude Code itself —
 # plugin/marketplace state and toggles written from its own menus (/model,
@@ -935,11 +1173,19 @@ class NewMcpCmd(pydantic.BaseModel):
         raise SystemExit(cmd_new_mcp())
 
 
+class NewPluginCmd(pydantic.BaseModel):
+    """Print a commented plugin spec template to stdout."""
+
+    async def cli_cmd(self):
+        raise SystemExit(cmd_new_plugin())
+
+
 class NewCmd(pydantic.BaseModel):
-    """Create a new mcp or marketplace spec file."""
+    """Create a new mcp, marketplace, or plugin spec file."""
 
     mcp: CliSubCommand[NewMcpCmd]
     marketplace: CliSubCommand[NewMarketplaceCmd]
+    plugin: CliSubCommand[NewPluginCmd]
 
     def cli_cmd(self):
         CliApp.run_subcommand(self)
@@ -1042,8 +1288,42 @@ async def cmd_apply(cmd, cfg):
 
     spec = Spec.model_validate(data)
     marketplaces = load_marketplaces_dir(directory)
+    if any(e.name == HIDDEN_MARKETPLACE_NAME for e in marketplaces):
+        raise UserError(
+            f"{MARKETPLACES_DIRNAME}/{HIDDEN_MARKETPLACE_NAME}.yaml is"
+            f" reserved; declare plugins in {PLUGINS_DIRNAME}/ instead"
+        )
+    plugin_specs = load_plugins_dir(directory)
     spec_md_path = directory / CLAUDE_MD_FILENAME
 
+    known = cfg.load_known_marketplaces()
+    hidden_name = known.find_by_path(cfg.hidden_marketplace_dir)
+    if (
+        HIDDEN_MARKETPLACE_NAME in known
+        and hidden_name != HIDDEN_MARKETPLACE_NAME
+    ):
+        raise UserError(
+            f"marketplace {HIDDEN_MARKETPLACE_NAME!r} is registered but does"
+            f" not point at {cfg.hidden_marketplace_dir}; refusing to adopt"
+            " or remove it"
+        )
+
+    if plugin_specs:
+        manifest = HiddenManifest.from_specs(plugin_specs)
+        cfg.hidden_manifest_path.parent.mkdir(parents=True, exist_ok=True)
+        write_bytes_if_different(
+            cfg.hidden_manifest_path, manifest.dump_bytes()
+        )
+        marketplaces.append(
+            MarketplaceEntry(
+                type="directory",
+                source=str(cfg.hidden_marketplace_dir),
+                enabled={n for n, s in plugin_specs.items() if s.enabled},
+                disabled={n for n, s in plugin_specs.items() if not s.enabled},
+            )
+        )
+
+    cfg.prune_enabled_plugins()
     current = cfg.get_current_state()
     (
         marketplaces_to_add,
@@ -1103,7 +1383,15 @@ async def cmd_apply(cmd, cfg):
         except CLIError as e:
             print(f"error: {e}", file=sys.stderr)
             err_count += 1
-        cfg.remove_from_settings(name)
+
+    # Delete the generated hidden marketplace dir once deregistered
+    if (
+        not plugin_specs
+        and cfg.hidden_root.exists()
+        and cfg.find_hidden_marketplace() is None
+    ):
+        shutil.rmtree(cfg.hidden_root)
+        log.info("removed %s", cfg.hidden_root)
 
     # Add new marketplaces
     for source, enabled, disabled in marketplaces_to_add:
@@ -1199,6 +1487,8 @@ async def cmd_apply(cmd, cfg):
             print(f"error: {e}", file=sys.stderr)
             err_count += 1
 
+    cfg.prune_enabled_plugins()
+
     print(
         f"{len(marketplaces_to_add)} added, "
         f"{len(marketplaces_to_remove)} removed, "
@@ -1223,15 +1513,35 @@ def build_current_spec(cfg):
         ConfigSpec.model_validate(config_filtered) if config_filtered else None
     )
 
-    settings_data = cfg.load_settings()
+    settings_data = cfg.load_settings().model_dump(exclude_defaults=True)
     settings = {
         k: v for k, v in settings_data.items() if k not in UNMANAGED_SETTINGS
     } or None
 
     current = cfg.get_current_state()
+    hidden_name = cfg.find_hidden_marketplace()
     marketplaces = []
+    plugins = {}
 
     for name, info in current.items():
+        if name == hidden_name:
+            sources = HiddenManifest.load(cfg.hidden_manifest_path).sources()
+            missing = info.installed - sources.keys()
+            if missing:
+                raise UserError(
+                    f"plugins installed from {name} but missing from"
+                    f" {cfg.hidden_manifest_path}: {', '.join(sorted(missing))}"
+                )
+            plugins.update(
+                {
+                    pname: sources[pname].to_plugin(
+                        enabled=pname in info.enabled
+                    )
+                    for pname in info.installed
+                }
+            )
+            continue
+
         source_type = info.source_type or "git"
         source_str = (
             str(collapse_home(info.source))
@@ -1252,7 +1562,7 @@ def build_current_spec(cfg):
             )
         )
 
-    return Spec(config=config, settings=settings), marketplaces
+    return Spec(config=config, settings=settings), marketplaces, plugins
 
 
 def diff_baseline_yaml(text):
@@ -1309,7 +1619,7 @@ async def cmd_export(cmd, cfg):
     md_path = directory / CLAUDE_MD_FILENAME
     kb_path = directory / KEYBINDINGS_FILENAME
 
-    spec, entries = build_current_spec(cfg)
+    spec, entries, plugin_specs = build_current_spec(cfg)
     desired_yaml = dump_yaml(spec.model_dump())
     desired_md = (
         cfg.claude_md_path.read_text() if cfg.claude_md_path.exists() else None
@@ -1329,6 +1639,13 @@ async def cmd_export(cmd, cfg):
         )
         for e in entries
     }
+    plugins = {
+        name: order_keys(
+            spec_model.model_dump(exclude_none=True, exclude_defaults=True),
+            PLUGIN_KEY_ORDER,
+        )
+        for name, spec_model in plugin_specs.items()
+    }
 
     if log.isEnabledFor(logging.INFO):
         baseline_yaml = (
@@ -1345,6 +1662,7 @@ async def cmd_export(cmd, cfg):
         )
         diff_yaml_dir(directory, MCP_DIRNAME, mcp_servers)
         diff_yaml_dir(directory, MARKETPLACES_DIRNAME, marketplaces)
+        diff_yaml_dir(directory, PLUGINS_DIRNAME, plugins)
 
     if cmd.dry_run:
         for name in ARTIFACT_DIRS:
@@ -1353,6 +1671,7 @@ async def cmd_export(cmd, cfg):
         mirror_yaml_dir(
             directory, MARKETPLACES_DIRNAME, marketplaces, dry_run=True
         )
+        mirror_yaml_dir(directory, PLUGINS_DIRNAME, plugins, dry_run=True)
         return 0
 
     existing = [
@@ -1363,6 +1682,7 @@ async def cmd_export(cmd, cfg):
             kb_path,
             directory / MCP_DIRNAME,
             directory / MARKETPLACES_DIRNAME,
+            directory / PLUGINS_DIRNAME,
             *(directory / n for n in ARTIFACT_DIRS),
         )
         if p.exists()
@@ -1386,6 +1706,7 @@ async def cmd_export(cmd, cfg):
         mirror_tree(cfg.dir / name, directory / name)
     mirror_yaml_dir(directory, MCP_DIRNAME, mcp_servers)
     mirror_yaml_dir(directory, MARKETPLACES_DIRNAME, marketplaces)
+    mirror_yaml_dir(directory, PLUGINS_DIRNAME, plugins)
 
     return 0
 
@@ -1412,6 +1733,7 @@ async def cmd_validate(cmd):
 async def cmd_update(cfg):
     """Handle update subcommand - update all marketplaces and plugins."""
     err_count = 0
+    cfg.prune_enabled_plugins()
 
     # Update all marketplaces
     known = cfg.load_known_marketplaces()
@@ -1505,6 +1827,28 @@ def cmd_new_mcp():
                 ("remote server", McpRemoteServer),
             ],
             MCP_KEY_ORDER,
+        ),
+        end="",
+    )
+    return 0
+
+
+def cmd_new_plugin():
+    """Handle new plugin subcommand - print a template to stdout."""
+    print(
+        commented_template(
+            "plugin spec - name comes from the filename and must match the"
+            " repo's plugin.json name; uncomment one section",
+            [
+                ("github (source: owner/repo)", GithubPlugin),
+                ("git (source: git url)", GitPlugin),
+                (
+                    "git-subdir (source: git url, path: subdir)",
+                    GitSubdirPlugin,
+                ),
+                ("npm (source: package name)", NpmPlugin),
+            ],
+            PLUGIN_KEY_ORDER,
         ),
         end="",
     )
