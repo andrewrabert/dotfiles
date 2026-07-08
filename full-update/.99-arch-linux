@@ -852,8 +852,10 @@ EXPECTED_SERVICES = {
 
 if HOSTNAME in ("mars", "phobos"):
     EXPECTED_SERVICES.update(
-        "cups.service",
-        "plasmalogin.service",
+        {
+            "cups.service",
+            "plasmalogin.service",
+        }
     )
 
 EFI_SHELL_HOSTS = ("mars", "phobos", "lounge-htpc", "sol")
