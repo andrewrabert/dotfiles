@@ -553,7 +553,6 @@ if HOSTNAME in ("mars", "phobos"):
             "podman",
             "powertop",
             "print-manager",
-            "python-pytorch-opt-rocm",
             "qt6-doc",
             "radeontop",
             "realtime-privileges",
