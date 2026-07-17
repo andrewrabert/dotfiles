@@ -5,7 +5,7 @@
 #     "rich",
 # ]
 # ///
-"""Download, extract, and install the latest macOS arm64 Jellyfin Desktop nightly."""
+"""Download, extract, and install the latest macOS arm64 Jellium Desktop nightly."""
 
 import asyncio
 import pathlib
@@ -18,10 +18,10 @@ import zipfile
 import httpx
 import rich.progress
 
-URL = "https://nightly.link/jellyfin/jellyfin-desktop/workflows/build-macos/main/macos-arm64.zip"
+URL = "https://nightly.link/andrewrabert/jellium-desktop/workflows/build-macos/main/macos-arm64.zip"
 APPLICATIONS = pathlib.Path("/Applications")
-APP_NAME = "Jellyfin Desktop.app"
-ETAG_XATTR = "org.jellyfin.nightly.etag"
+APP_NAME = "Jellium Desktop.app"
+ETAG_XATTR = "net.nullsum.nightly.etag"
 
 
 class UserError(Exception):

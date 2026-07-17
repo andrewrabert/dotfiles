@@ -479,7 +479,7 @@ if HOSTNAME in ("mars", "phobos", "lounge-htpc"):
             "gamescope",
             "gwenview",
             "haruna",
-            "jellyfin-desktop-git",
+            "jellium-desktop-git",
             "kwalletmanager",
             "noto-fonts",
             "steam",
