@@ -411,7 +411,6 @@ if HOSTNAME in ("sol", "mars", "phobos"):
             "nsz",
             "ntfs-3g",
             "openbsd-netcat",
-            "opencode",
             "openssh",
             "opus-tools",
             "oxipng",
