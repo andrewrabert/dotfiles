@@ -15,12 +15,18 @@ Takes one positional argument selecting the build:
     flatpak - x86_64 Linux flatpak, installed with `flatpak install --user`
     macos   - arm64 macOS app, installed into /Applications
 
-Intended to be run directly on the target host."""
+By default the build is installed on the machine running this script. Pass
+`--ssh <host>` to install on a remote host instead: the download and extraction
+still happen locally (only this machine needs Python/uv), and the extracted
+artifact is pushed to the remote where the install commands run over SSH."""
 
+import abc
 import asyncio
 import os
 import pathlib
 import plistlib
+import re
+import shlex
 import shutil
 import sys
 import tempfile
@@ -49,7 +55,7 @@ class ProcessError(Exception):
         return text
 
 
-async def run(*args):
+async def run_bytes(*args):
     proc = await asyncio.create_subprocess_exec(
         *(str(arg) for arg in args),
         stdout=asyncio.subprocess.PIPE,
@@ -58,7 +64,129 @@ async def run(*args):
     stdout, stderr = await proc.communicate()
     if proc.returncode:
         raise ProcessError(proc, stderr.decode().strip())
-    return stdout.decode()
+    return stdout
+
+
+async def run(*args):
+    return (await run_bytes(*args)).decode()
+
+
+class Host(abc.ABC):
+    """The set of target-host operations the installers need. `LocalHost`
+    performs them on this machine; `SshHost` performs them on a remote host
+    over SSH so the remote never needs Python."""
+
+    label: str
+
+    @abc.abstractmethod
+    async def run(self, *args):
+        """Run a command on the host, returning its stdout."""
+
+    @abc.abstractmethod
+    async def read_bytes(self, path):
+        """Return the raw contents of a file on the host."""
+
+    @abc.abstractmethod
+    async def push(self, local, dest_dir):
+        """Copy a local file into `dest_dir` on the host, returning its path."""
+
+    @abc.abstractmethod
+    async def mkdtemp(self):
+        """Create and return a fresh temporary directory on the host."""
+
+    @abc.abstractmethod
+    async def exists(self, path):
+        pass
+
+    @abc.abstractmethod
+    async def is_dir(self, path):
+        pass
+
+    @abc.abstractmethod
+    async def mkdir(self, path):
+        pass
+
+    @abc.abstractmethod
+    async def rmtree(self, path):
+        pass
+
+
+class LocalHost(Host):
+    label = "local"
+
+    async def run(self, *args):
+        return await run(*args)
+
+    async def read_bytes(self, path):
+        return pathlib.Path(path).read_bytes()
+
+    async def push(self, local, dest_dir):
+        return local
+
+    async def mkdtemp(self):
+        return pathlib.Path(tempfile.mkdtemp())
+
+    async def exists(self, path):
+        return pathlib.Path(path).exists()
+
+    async def is_dir(self, path):
+        return pathlib.Path(path).is_dir()
+
+    async def mkdir(self, path):
+        pathlib.Path(path).mkdir(parents=True, exist_ok=True)
+
+    async def rmtree(self, path):
+        shutil.rmtree(path)
+
+
+class SshHost(Host):
+    def __init__(self, host):
+        self.label = host
+        self._host = host
+
+    async def _run_bytes(self, *args):
+        # A tty is needed only for the sudo password prompt; it would mangle
+        # binary output, so cat/other reads deliberately go without one.
+        tty = bool(args) and str(args[0]) == "sudo"
+        remote = " ".join(shlex.quote(str(arg)) for arg in args)
+        cmd = ["ssh"]
+        if tty:
+            cmd.append("-tt")
+        cmd += [self._host, remote]
+        return await run_bytes(*cmd)
+
+    async def run(self, *args):
+        return (await self._run_bytes(*args)).decode()
+
+    async def read_bytes(self, path):
+        return await self._run_bytes("cat", path)
+
+    async def push(self, local, dest_dir):
+        dest = pathlib.PurePosixPath(dest_dir) / pathlib.PurePosixPath(local).name
+        await run("scp", "-q", local, f"{self._host}:{dest}")
+        return dest
+
+    async def mkdtemp(self):
+        return pathlib.PurePosixPath((await self.run("mktemp", "-d")).strip())
+
+    async def _test(self, flag, path):
+        try:
+            await self.run("test", flag, path)
+            return True
+        except ProcessError:
+            return False
+
+    async def exists(self, path):
+        return await self._test("-e", path)
+
+    async def is_dir(self, path):
+        return await self._test("-d", path)
+
+    async def mkdir(self, path):
+        await self.run("mkdir", "-p", path)
+
+    async def rmtree(self, path):
+        await self.run("rm", "-rf", path)
 
 
 def sole_file(directory):
@@ -80,17 +208,21 @@ class Build(pydantic.BaseModel):
 class Nightly:
     """A downloadable nightly artifact: knows its URL, streams it with a
     progress bar, and caches the last-installed ETag in a host-appropriate
-    cache dir so repeat runs short-circuit."""
+    cache dir so repeat runs short-circuit. The cache lives on this machine
+    and is keyed by target host, so local and remote installs stay separate."""
 
     BASE = "https://nightly.link/andrewrabert/jellium-desktop/workflows"
 
-    def __init__(self, build):
+    def __init__(self, build, label="local"):
         self.url = pydantic.HttpUrl(
             f"{self.BASE}/{build.workflow}/main/{build.archive_name}"
         )
         self.archive_name = build.archive_name
+        safe = re.sub(r"[^A-Za-z0-9._-]", "_", label)
         self._etag_file = (
-            self._cache_dir() / "jellium-desktop-nightly" / f"{build.key}.etag"
+            self._cache_dir()
+            / "jellium-desktop-nightly"
+            / f"{build.key}.{safe}.etag"
         )
         self._etag = None
 
@@ -156,9 +288,9 @@ class Flatpak:
             raise UserError(f"expected a .flatpak, got {path.name}")
         self.path = path
 
-    async def install(self):
+    async def install(self, host):
         print("Installing...")
-        await run(
+        await host.run(
             "flatpak",
             "install",
             "--user",
@@ -173,7 +305,7 @@ class Dmg:
     """The single .dmg from a macOS download; its contents are constant."""
 
     APP_NAME = "Jellium Desktop.app"
-    applications = pathlib.Path("/Applications")
+    applications = pathlib.PurePosixPath("/Applications")
 
     def __init__(self, path):
         if path.suffix != ".dmg":
@@ -181,11 +313,10 @@ class Dmg:
         self.path = path
 
     @staticmethod
-    def _version(app):
+    async def _version(host, app):
         """Return the full version string from an app's Info.plist."""
         info = app / "Contents" / "Info.plist"
-        with info.open("rb") as handle:
-            plist = plistlib.load(handle)
+        plist = plistlib.loads(await host.read_bytes(info))
         short = plist.get("CFBundleShortVersionString")
         build = plist.get("CFBundleVersion")
         if short and build and short != build:
@@ -193,18 +324,18 @@ class Dmg:
         return short or build or "unknown"
 
     @staticmethod
-    async def _is_quarantined(app):
+    async def _is_quarantined(host, app):
         """Return True if any file under the app carries the Gatekeeper
         quarantine attribute. com.apple.provenance is ignored - macOS re-adds it
         on launch and cannot be cleared, so it is not a meaningful signal."""
-        output = await run("xattr", "-r", app)
+        output = await host.run("xattr", "-r", app)
         return "com.apple.quarantine" in output
 
-    async def install(self):
+    async def install(self, host):
         mount = self.path.parent / "mnt"
-        mount.mkdir()
+        await host.mkdir(mount)
         try:
-            await run(
+            await host.run(
                 "hdiutil",
                 "attach",
                 "-nobrowse",
@@ -213,39 +344,47 @@ class Dmg:
                 self.path,
             )
             app = mount / self.APP_NAME
-            if not app.is_dir():
+            if not await host.is_dir(app):
                 raise UserError(
                     f"{self.APP_NAME} not found in {self.path.name}"
                 )
 
-            version = self._version(app)
+            version = await self._version(host, app)
             print(f"Version: {version}")
 
             dest = self.applications / app.name
-            installed = self._version(dest) if dest.exists() else None
+            installed = (
+                await self._version(host, dest)
+                if await host.exists(dest)
+                else None
+            )
             if installed == version:
                 print(f"Already installed: {dest}")
             else:
                 if installed is not None:
                     print(f"Replacing installed version {installed}")
                 print(f"Installing to {dest}...")
-                if dest.exists():
-                    shutil.rmtree(dest)
-                await run("ditto", app, dest)
+                if await host.exists(dest):
+                    await host.rmtree(dest)
+                await host.run("ditto", app, dest)
                 print(f"Installed: {dest}")
         finally:
-            await run("hdiutil", "detach", mount)
+            await host.run("hdiutil", "detach", mount)
 
-        if await self._is_quarantined(dest):
+        if await self._is_quarantined(host, dest):
             print("Clearing quarantine (sudo)...")
-            await run("sudo", "xattr", "-dr", "com.apple.quarantine", dest)
+            await host.run("sudo", "xattr", "-dr", "com.apple.quarantine", dest)
 
 
 class Platform(pydantic.BaseModel):
-    """Base for platform subcommands: shares the download/extract flow."""
+    """Base for platform subcommands: shares the download/extract flow and the
+    `--ssh` target selection."""
+
+    ssh: str | None = None
 
     def cli_cmd(self):
-        asyncio.run(run_install(self))
+        host = SshHost(self.ssh) if self.ssh else LocalHost()
+        asyncio.run(run_install(self, host))
 
 
 class FlatpakCmd(Platform):
@@ -266,8 +405,8 @@ class MacosCmd(Platform):
     payload: typing.ClassVar[type] = Dmg
 
 
-async def run_install(cmd):
-    nightly = Nightly(cmd.build)
+async def run_install(cmd, host):
+    nightly = Nightly(cmd.build, host.label)
     with tempfile.TemporaryDirectory() as tmp:
         work = pathlib.Path(tmp)
         archive = work / nightly.archive_name
@@ -281,19 +420,28 @@ async def run_install(cmd):
         with zipfile.ZipFile(archive) as zf:
             zf.extractall(extracted)
 
-        await cmd.payload(sole_file(extracted)).install()
-        nightly.commit()
+        staging = await host.mkdtemp()
+        try:
+            path = await host.push(sole_file(extracted), staging)
+            await cmd.payload(path).install(host)
+            nightly.commit()
+        finally:
+            await host.rmtree(staging)
 
 
 class App(pydantic_settings.BaseSettings):
     """Download and install the latest Jellium Desktop nightly."""
 
     model_config = pydantic_settings.SettingsConfigDict(cli_parse_args=True)
+    ssh: str | None = None
     flatpak: pydantic_settings.CliSubCommand[FlatpakCmd]
     macos: pydantic_settings.CliSubCommand[MacosCmd]
 
     def cli_cmd(self):
-        pydantic_settings.CliApp.run_subcommand(self)
+        sub = pydantic_settings.get_subcommand(self)
+        if self.ssh:
+            sub.ssh = self.ssh
+        sub.cli_cmd()
 
 
 if __name__ == "__main__":
