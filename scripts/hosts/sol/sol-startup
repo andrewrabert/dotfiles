@@ -27,7 +27,7 @@ sudo mount --bind /storage/Games                         /srv/smb/storage/Games
 sudo mount --bind /storage/Public                        /srv/smb/public
 sudo mount --bind /storage/Software                      /srv/smb/storage/Software
 sudo mount --bind /storage/Video                         /srv/smb/storage/Video
-sudo mount --bind /storage/Shared/Brother-MFC-L8730CDW   /srv/smb/Brother-MFC-L8730CDW
+sudo mount --bind /storage/Brother\ MFC-L8730CDW   /srv/smb/Brother\ MFC-L8730CDW
 sudo systemctl restart smb.service
 
 echo Starting systemd units ...
