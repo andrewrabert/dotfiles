@@ -1,0 +1,8 @@
+#!/usr/bin/env sh
+set -e 
+if [ "$HOST_DOTFILES" != 'sol' ]; then
+    exit
+fi
+
+
+exec "${DOTFILES}/scripts/install-jellium-desktop-nightly" flatpak

@@ -1,0 +1,300 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.12"
+# dependencies = [
+#     "httpx2",
+#     "pydantic",
+#     "pydantic-settings",
+#     "rich",
+# ]
+# ///
+"""Download and install the latest Jellium Desktop nightly.
+
+Takes one positional argument selecting the build:
+
+    flatpak - x86_64 Linux flatpak, installed with `flatpak install --user`
+    macos   - arm64 macOS app, installed into /Applications
+
+Intended to be run directly on the target host."""
+
+import asyncio
+import os
+import pathlib
+import plistlib
+import shutil
+import sys
+import tempfile
+import typing
+import zipfile
+
+import httpx2
+import pydantic
+import pydantic_settings
+import rich.progress
+
+
+class UserError(Exception):
+    pass
+
+
+class ProcessError(Exception):
+    def __init__(self, process, message=None):
+        self.process = process
+        self.message = message
+
+    def __str__(self):
+        text = f"exit {self.process.returncode}"
+        if self.message:
+            text = f"{text} - {self.message}"
+        return text
+
+
+async def run(*args):
+    proc = await asyncio.create_subprocess_exec(
+        *(str(arg) for arg in args),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await proc.communicate()
+    if proc.returncode:
+        raise ProcessError(proc, stderr.decode().strip())
+    return stdout.decode()
+
+
+def sole_file(directory):
+    """Return the single file under `directory`, erroring on any other count."""
+    files = sorted(p for p in directory.rglob("*") if p.is_file())
+    if len(files) != 1:
+        raise UserError(
+            f"expected exactly one file in download, found {len(files)}"
+        )
+    return files[0]
+
+
+class Build(pydantic.BaseModel):
+    workflow: str
+    archive_name: str
+    key: str
+
+
+class Nightly:
+    """A downloadable nightly artifact: knows its URL, streams it with a
+    progress bar, and caches the last-installed ETag in a host-appropriate
+    cache dir so repeat runs short-circuit."""
+
+    BASE = "https://nightly.link/andrewrabert/jellium-desktop/workflows"
+
+    def __init__(self, build):
+        self.url = pydantic.HttpUrl(
+            f"{self.BASE}/{build.workflow}/main/{build.archive_name}"
+        )
+        self.archive_name = build.archive_name
+        self._etag_file = (
+            self._cache_dir() / "jellium-desktop-nightly" / f"{build.key}.etag"
+        )
+        self._etag = None
+
+    @staticmethod
+    def _cache_dir():
+        if sys.platform == "darwin":
+            return pathlib.Path.home() / "Library" / "Caches"
+        return pathlib.Path(
+            os.environ.get("XDG_CACHE_HOME") or pathlib.Path.home() / ".cache"
+        )
+
+    def _stored_etag(self):
+        try:
+            return self._etag_file.read_text().strip()
+        except FileNotFoundError:
+            return None
+
+    async def fetch(self, dest):
+        """Stream the artifact to `dest`. Returns True if a new build was
+        downloaded, False when the cached ETag is still current."""
+        known = self._stored_etag()
+        async with httpx2.AsyncClient() as client:
+            async with client.stream(
+                "GET", str(self.url), follow_redirects=True
+            ) as response:
+                response.raise_for_status()
+                self._etag = response.headers.get("etag")
+                if self._etag and self._etag == known:
+                    return False
+                await self._download(response, dest)
+                return True
+
+    def commit(self):
+        """Persist the fetched build's ETag after a successful install."""
+        if self._etag:
+            self._etag_file.parent.mkdir(parents=True, exist_ok=True)
+            self._etag_file.write_text(self._etag)
+            print(f"Stored etag {self._etag}")
+
+    @staticmethod
+    async def _download(response, dest):
+        total = int(response.headers.get("content-length", 0)) or None
+        columns = (
+            rich.progress.TextColumn("Downloading"),
+            rich.progress.BarColumn(),
+            rich.progress.DownloadColumn(),
+            rich.progress.TransferSpeedColumn(),
+            rich.progress.TimeRemainingColumn(),
+        )
+        with rich.progress.Progress(*columns) as progress:
+            task = progress.add_task("download", total=total)
+            with dest.open("wb") as handle:
+                async for chunk in response.aiter_bytes():
+                    handle.write(chunk)
+                    progress.update(task, advance=len(chunk))
+
+
+class Flatpak:
+    """The single .flatpak bundle from a linux-flatpak download."""
+
+    def __init__(self, path):
+        if path.suffix != ".flatpak":
+            raise UserError(f"expected a .flatpak, got {path.name}")
+        self.path = path
+
+    async def install(self):
+        print("Installing...")
+        await run(
+            "flatpak",
+            "install",
+            "--user",
+            "--noninteractive",
+            "--or-update",
+            self.path,
+        )
+        print("Installed")
+
+
+class Dmg:
+    """The single .dmg from a macOS download; its contents are constant."""
+
+    APP_NAME = "Jellium Desktop.app"
+    applications = pathlib.Path("/Applications")
+
+    def __init__(self, path):
+        if path.suffix != ".dmg":
+            raise UserError(f"expected a .dmg, got {path.name}")
+        self.path = path
+
+    @staticmethod
+    def _version(app):
+        """Return the full version string from an app's Info.plist."""
+        info = app / "Contents" / "Info.plist"
+        with info.open("rb") as handle:
+            plist = plistlib.load(handle)
+        short = plist.get("CFBundleShortVersionString")
+        build = plist.get("CFBundleVersion")
+        if short and build and short != build:
+            return f"{short} ({build})"
+        return short or build or "unknown"
+
+    @staticmethod
+    async def _is_quarantined(app):
+        """Return True if any file under the app carries the Gatekeeper
+        quarantine attribute. com.apple.provenance is ignored - macOS re-adds it
+        on launch and cannot be cleared, so it is not a meaningful signal."""
+        output = await run("xattr", "-r", app)
+        return "com.apple.quarantine" in output
+
+    async def install(self):
+        mount = self.path.parent / "mnt"
+        mount.mkdir()
+        try:
+            await run(
+                "hdiutil",
+                "attach",
+                "-nobrowse",
+                "-mountpoint",
+                mount,
+                self.path,
+            )
+            app = mount / self.APP_NAME
+            if not app.is_dir():
+                raise UserError(
+                    f"{self.APP_NAME} not found in {self.path.name}"
+                )
+
+            version = self._version(app)
+            print(f"Version: {version}")
+
+            dest = self.applications / app.name
+            installed = self._version(dest) if dest.exists() else None
+            if installed == version:
+                print(f"Already installed: {dest}")
+            else:
+                if installed is not None:
+                    print(f"Replacing installed version {installed}")
+                print(f"Installing to {dest}...")
+                if dest.exists():
+                    shutil.rmtree(dest)
+                await run("ditto", app, dest)
+                print(f"Installed: {dest}")
+        finally:
+            await run("hdiutil", "detach", mount)
+
+        if await self._is_quarantined(dest):
+            print("Clearing quarantine (sudo)...")
+            await run("sudo", "xattr", "-dr", "com.apple.quarantine", dest)
+
+
+class Platform(pydantic.BaseModel):
+    """Base for platform subcommands: shares the download/extract flow."""
+
+    def cli_cmd(self):
+        asyncio.run(run_install(self))
+
+
+class FlatpakCmd(Platform):
+    build: typing.ClassVar[Build] = Build(
+        workflow="build-linux-flatpak",
+        archive_name="linux-flatpak-x86_64.zip",
+        key="flatpak",
+    )
+    payload: typing.ClassVar[type] = Flatpak
+
+
+class MacosCmd(Platform):
+    build: typing.ClassVar[Build] = Build(
+        workflow="build-macos",
+        archive_name="macos-arm64.zip",
+        key="macos",
+    )
+    payload: typing.ClassVar[type] = Dmg
+
+
+async def run_install(cmd):
+    nightly = Nightly(cmd.build)
+    with tempfile.TemporaryDirectory() as tmp:
+        work = pathlib.Path(tmp)
+        archive = work / nightly.archive_name
+
+        if not await nightly.fetch(archive):
+            print("Already up to date")
+            return
+
+        print("Extracting...")
+        extracted = work / "extracted"
+        with zipfile.ZipFile(archive) as zf:
+            zf.extractall(extracted)
+
+        await cmd.payload(sole_file(extracted)).install()
+        nightly.commit()
+
+
+class App(pydantic_settings.BaseSettings):
+    """Download and install the latest Jellium Desktop nightly."""
+
+    model_config = pydantic_settings.SettingsConfigDict(cli_parse_args=True)
+    flatpak: pydantic_settings.CliSubCommand[FlatpakCmd]
+    macos: pydantic_settings.CliSubCommand[MacosCmd]
+
+    def cli_cmd(self):
+        pydantic_settings.CliApp.run_subcommand(self)
+
+
+if __name__ == "__main__":
+    pydantic_settings.CliApp.run(App)
