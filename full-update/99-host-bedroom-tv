@@ -7,4 +7,4 @@ fi
 if ! command uv > /dev/null; then
     full-update 35-uv --force
 fi
-exec "${DOTFILES}/scripts/install-jellium-desktop-nightly" flatpak
+"${DOTFILES}/scripts/install-jellium-desktop-nightly" flatpak
