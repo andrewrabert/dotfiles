@@ -1,10 +1,65 @@
 #!/usr/bin/env sh
 set -e
 
-if command -v uv >/dev/null; then
-    echo "Upgrading all uv tool installs..."
-    uv tool upgrade --all
+show_help() {
+    cat << EOF
+usage:
+    -f, --force     force installation
+    --uv-sh         install uv via astral.sh even if pacman is present
+    --help          show help and exit
+EOF
+}
 
-    echo "Updating uv PEP 723 scripts in dotfiles..."
-    uv-update-all "${DOTFILES}/.local/bin" || exit 0
+FORCE=
+UV_SH=
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -f|--force)
+            FORCE=1
+            shift
+            ;;
+        --uv-sh)
+            UV_SH=1
+            shift
+            ;;
+        --help)
+            show_help
+            exit
+            ;;
+        *)
+            echo 'error: unknown argument(s)' >&2
+            exit 1
+    esac
+done
+
+if [ -z "$FORCE" ] && ! command -v uv > /dev/null; then
+    exit
 fi
+
+if ! command -v uv > /dev/null; then
+    if [ -z "$UV_SH" ] && command -v pacman > /dev/null; then
+        echo 'Installing uv via pacman'
+        sudo pacman -S --needed --noconfirm uv
+    else
+        cleanup() {
+            rm -f "${TEMP_FILE}"
+        }
+        trap cleanup EXIT
+        TEMP_FILE="$(mktemp)"
+
+        URL='https://astral.sh/uv/install.sh'
+        printf 'Installing uv from %s\n' "${URL}"
+        curl -LsSf "${URL}" > "${TEMP_FILE}"
+        chmod +x "${TEMP_FILE}"
+        INSTALLER_NO_MODIFY_PATH=1 "${TEMP_FILE}"
+
+        echo 'Successfully installed uv'
+        export PATH="${HOME}/.local/bin:${PATH}"
+    fi
+fi
+
+echo "Upgrading all uv tool installs..."
+uv tool upgrade --all
+
+echo "Updating uv PEP 723 scripts in dotfiles..."
+uv-update-all "${DOTFILES}/.local/bin" || exit 0
