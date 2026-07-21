@@ -50,7 +50,7 @@ sudo systemctl enable --now wg-quick@wormhole
 
 echo Starting Docker ...
 sudo systemctl enable --now docker
-sol-docker up -d
+sol-docker start
 
 echo Starting podman ...
 podman system migrate || true
