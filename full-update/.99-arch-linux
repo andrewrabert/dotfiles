@@ -851,6 +851,7 @@ EXPECTED_SERVICES = {
 if HOSTNAME in ("mars", "phobos"):
     EXPECTED_SERVICES.update(
         {
+            "avahi-daemon.service",
             "cups.service",
             "plasmalogin.service",
         }
