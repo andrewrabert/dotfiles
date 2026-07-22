@@ -846,8 +846,9 @@ async def convert_to_jpeg_cjpeg(source, dest):
         "cjpeg",
         "-quality",
         str(CONFIG.jpeg.quality),
-        source,
+        "-outfile",
         dest,
+        source,
     ]
     proc = await asyncio.create_subprocess_exec(
         *args,
@@ -1508,7 +1509,7 @@ async def _process_convert(path, source_mimetype, target_mimetype, **options):
                             path, svg_png, max_w, max_h, scale=scale
                         )
                         await convert_to_jpeg(svg_png, temp_path)
-                    case "image/heif" | "image/webp":
+                    case "image/heif" | "image/tiff" | "image/webp":
                         temp_path_2 = stack.enter_context(
                             TempPath(
                                 dir=dest_dir,
