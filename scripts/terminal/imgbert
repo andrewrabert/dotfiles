@@ -714,6 +714,11 @@ _DEFAULT_TYPES = {
     "png",
 }
 
+# target mimetypes that can hold multiple pages in one file (--combine)
+_MULTIPAGE_TARGET_MIMES = {
+    "image/tiff",
+}
+
 # source mimetypes whose metadata should be copied into a JPEG target
 _JPEG_METADATA_SOURCES = {
     "image/heif",
@@ -793,6 +798,40 @@ async def is_animated_gif(path):
     if vips_loader != "gifloader":
         raise ValueError("not a gif file")
     return int(n_pages) > 1
+
+
+async def get_tiff_num_pages(path):
+    proc = await asyncio.create_subprocess_exec(
+        "vipsheader",
+        "--field=n-pages",
+        "--",
+        path,
+        stdout=asyncio.subprocess.PIPE,
+    )
+    stdout, _ = await proc.communicate()
+    if proc.returncode:
+        raise ProcessError(proc)
+    return int(stdout.decode())
+
+
+async def extract_tiff_page(source, page, dest):
+    args = ["vips", "copy", f"{source}[page={page}]", os.fspath(dest)]
+    proc = await asyncio.create_subprocess_exec(*args)
+    await proc.wait()
+    if proc.returncode != 0:
+        raise ProcessError(proc)
+
+
+async def combine_to_file(sources, dest):
+    # magick expands any multi-page input into its frames, so a mix of
+    # single images and multi-page files flattens into one ordered sequence
+    args = ["magick", *(os.fspath(s) for s in sources), os.fspath(dest)]
+    proc = await asyncio.create_subprocess_exec(
+        *args, stderr=asyncio.subprocess.PIPE
+    )
+    _, stderr = await proc.communicate()
+    if proc.returncode != 0:
+        raise ProcessError(proc, stderr=stderr.decode().strip() or None)
 
 
 async def convert_to_jpeg(*args, **kwargs):
@@ -1519,6 +1558,25 @@ async def _process_convert(path, source_mimetype, target_mimetype, **options):
     return original_path, dest
 
 
+async def _process_convert_page(
+    source, page, target_mimetype, output_dir, output_name, **options
+):
+    dest_dir = output_dir or source.parent
+    with TempPath(
+        dir=dest_dir, prefix=".imgconvert_page_", suffix=".png"
+    ) as page_png:
+        await extract_tiff_page(source, page, page_png)
+        _, dest = await _process_convert(
+            page_png,
+            source_mimetype="image/png",
+            target_mimetype=target_mimetype,
+            output_dir=dest_dir,
+            output_name=output_name,
+            **options,
+        )
+    return source, dest
+
+
 class SizeDiffPrinter:
     def __init__(self, num_items):
         self._before_total = 0
@@ -1748,6 +1806,12 @@ def add_convert_parser(subparsers):
     )
     parser.add_argument("--fast", action="store_true")
     parser.add_argument(
+        "--combine",
+        action="store_true",
+        help="merge all inputs (and every page of a multi-page input) into a "
+        "single multi-page output file; requires -f and -o FILENAME",
+    )
+    parser.add_argument(
         "paths", metavar="path", nargs="+", type=_parser_path_file
     )
 
@@ -1812,6 +1876,56 @@ def add_convert_parser(subparsers):
     )
 
 
+async def _run_combine(args, output_dir, output_name):
+    target_mimetype = _TYPE_TO_MIME.get(args.format)
+    if target_mimetype not in _MULTIPAGE_TARGET_MIMES:
+        formats = ", ".join(
+            sorted(
+                t
+                for t, m in _TYPE_TO_MIME.items()
+                if m in _MULTIPAGE_TARGET_MIMES
+            )
+        )
+        sys.exit(
+            f"imgbert convert: error: --combine requires a multi-page output "
+            f"format (-f {formats})"
+        )
+    if output_name is None:
+        sys.exit(
+            "imgbert convert: error: --combine requires -o with a filename"
+        )
+
+    target_suffixes = _MIME_SUFFIXES[target_mimetype]
+    name = output_name
+    if not any(name.lower().endswith(s) for s in target_suffixes):
+        name = name + target_suffixes[0]
+    dest = output_dir / name
+
+    if not args.force and dest.exists():
+        if any(dest.samefile(p) for p in args.paths):
+            raise DestinationIsSourceError(dest)
+        sys.exit(
+            f"imgbert convert: error: output already exists "
+            f"(use --force to overwrite): {dest}"
+        )
+
+    with TempPath(
+        dir=output_dir, prefix=".imgconvert_combine_", suffix=name
+    ) as tmp:
+        await combine_to_file(args.paths, tmp)
+        tmp.replace(dest)
+
+    print(", ".join(str(p) for p in args.paths), "->", dest)
+
+    if args.rm:
+        for path in args.paths:
+            if path != dest:
+                try:
+                    path.unlink()
+                except FileNotFoundError:
+                    pass
+
+
 async def cmd_convert(args):
     has_resize = (
         args.width is not None
@@ -1829,6 +1943,8 @@ async def cmd_convert(args):
         parser.error("--scale cannot be used with --width or --height")
 
     output = args.output
+    output_dir = None
+    output_name = None
     if output is not None:
         if output.is_dir():
             output_dir = output
@@ -1840,7 +1956,7 @@ async def cmd_convert(args):
                 parser.error(
                     f"output parent directory does not exist: {output_dir}"
                 )
-            if len(args.paths) > 1:
+            if len(args.paths) > 1 and not args.combine:
                 parser.error(
                     "-o as a filename requires exactly one input file"
                 )
@@ -1853,7 +1969,14 @@ async def cmd_convert(args):
     if args.fast:
         CONFIG.jxl.effort = "7"
 
+    if args.combine:
+        await _run_combine(args, output_dir, output_name)
+        return
+
     executor = async_executor.AsyncExecutor(args.num_procs)
+    # source path -> number of outputs still pending, so --rm only unlinks a
+    # source once every page derived from it has been written
+    remaining = {}
     for path in args.paths:
         try:
             mimetype, _ = determine_mime(path)
@@ -1864,9 +1987,8 @@ async def cmd_convert(args):
         target_mimetype = (
             _TYPE_TO_MIME[args.format] if args.format else mimetype
         )
-        submit_kwargs = dict(
-            source_mimetype=mimetype,
-            target_mimetype=target_mimetype,
+
+        page_options = dict(
             max_w=args.width,
             max_h=args.height,
             scale=args.scale,
@@ -1874,10 +1996,44 @@ async def cmd_convert(args):
             resize_mode=args.resize_mode,
             force=args.force,
         )
+
+        if (
+            mimetype == "image/tiff"
+            and (num_pages := await get_tiff_num_pages(path)) > 1
+        ):
+            if output_name is not None:
+                sys.exit(
+                    "imgbert convert: error: cannot write a multi-page TIFF "
+                    "to a single -o filename; pass a directory instead"
+                )
+            width = len(str(num_pages))
+            target_suffix = _MIME_SUFFIXES[target_mimetype][0]
+            remaining[path] = num_pages
+            for page in range(num_pages):
+                page_name = (
+                    f"{path.stem}_{str(page + 1).zfill(width)}{target_suffix}"
+                )
+                executor.submit(
+                    _process_convert_page,
+                    path,
+                    page,
+                    target_mimetype=target_mimetype,
+                    output_dir=output_dir,
+                    output_name=page_name,
+                    **page_options,
+                )
+            continue
+
+        submit_kwargs = dict(
+            source_mimetype=mimetype,
+            target_mimetype=target_mimetype,
+            **page_options,
+        )
         if output is not None:
             submit_kwargs["output_dir"] = output_dir
             submit_kwargs["output_name"] = output_name
 
+        remaining[path] = 1
         executor.submit(_process_convert, path, **submit_kwargs)
 
     has_error = False
@@ -1898,11 +2054,13 @@ async def cmd_convert(args):
             has_error = True
             continue
         print(source, "->", dest)
-        try:
-            if args.rm and source != dest:
+        if source in remaining:
+            remaining[source] -= 1
+        if args.rm and source != dest and remaining.get(source, 1) <= 0:
+            try:
                 source.unlink()
-        except FileNotFoundError:
-            pass
+            except FileNotFoundError:
+                pass
     if has_error:
         sys.exit(1)
 
