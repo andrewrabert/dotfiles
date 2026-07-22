@@ -562,7 +562,6 @@ if HOSTNAME in ("mars", "phobos"):
             "rocm-opencl-runtime",
             "spectacle",
             "stern",
-            "talosctl",
             "thunderbird",
             "typst",
             "udiskie",
