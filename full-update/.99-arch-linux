@@ -359,7 +359,6 @@ if HOSTNAME in ("sol", "mars", "phobos"):
             "cabextract",
             "cdemu-client",
             "clang",  # for clang-format
-            "claude-agent-acp",
             "claude-code",
             "crun",
             "cuetools",
