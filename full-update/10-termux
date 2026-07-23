@@ -17,6 +17,9 @@ if [ "$(realpath ~/bin)" != "$DOTFILES/termux/bin" ]; then
     ln -s "${DOTFILES}/termux/bin" ~/bin
 fi
 
+pkg install -y openssh termux-services
+sv-enable sshd
+
 if [ -f '/data/data/com.termux/files/usr/etc/ssh/sshd_config' ]; then
     echo "Linking sshd configuration ..."
     cat > /data/data/com.termux/files/usr/etc/ssh/sshd_config << EOF
