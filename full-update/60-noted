@@ -1,0 +1,55 @@
+#!/usr/bin/env sh
+set -e
+
+show_help() {
+    cat << EOF
+usage:
+    -f, --force     build/install noted even if not already present
+    --help          show help and exit
+EOF
+}
+
+FORCE=
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -f|--force)
+            FORCE=1
+            shift
+            ;;
+        --help)
+            show_help
+            exit
+            ;;
+        *)
+            echo 'error: unknown argument(s)' >&2
+            exit 1
+            ;;
+    esac
+done
+
+BIN="${DOTFILES}/.local/noted/bin/noted"
+REPO_DIR="${DOTFILES}/.local/noted/git"
+
+if [ -z "${FORCE}" ] && ! [ -d "${REPO_DIR}" ]; then
+    exit
+fi
+
+if ! [ -d "${REPO_DIR}" ]; then
+    git clone -q 'https://github.com/andrewrabert/noted' "${REPO_DIR}"
+fi
+cd "${REPO_DIR}"
+
+branch="$(git ls-remote --symref origin HEAD \
+    | awk '/^ref:/ { sub(/^refs\/heads\//, "", $2); print $2; exit }')"
+before="$(git rev-parse HEAD 2>/dev/null || true)"
+git fetch -q origin
+git checkout -q "${branch}" 2>/dev/null \
+    || git checkout -q -b "${branch}" --track "origin/${branch}"
+git reset --hard -q "origin/${branch}"
+
+if [ "$(git rev-parse HEAD)" = "${before}" ] && [ -e "${BIN}" ]; then
+    exit
+fi
+
+cargo build --release
+install -D -m 755 target/release/noted "${BIN}"

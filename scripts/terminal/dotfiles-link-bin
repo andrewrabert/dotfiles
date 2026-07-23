@@ -53,6 +53,8 @@ def main():
             sources.append(path)
 
     sources.append(dotfiles / "scripts/terminal")
+    noted_bin = dotfiles / ".local/noted/bin"
+    sources.append(noted_bin)
     for d in other_dotfiles:
         sources.append(d / "scripts/terminal")
 
