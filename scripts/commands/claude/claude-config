@@ -36,6 +36,7 @@ log = logging.getLogger(__name__)
 class Config(pydantic.BaseModel):
     model_config = pydantic.ConfigDict(extra="ignore")
     autoConnectIde: bool | None = None
+    autoMemoryEnabled: bool | None = None
     bypassPermissionsModeAccepted: bool | None = None
     editorMode: str | None = None
     lspRecommendationDisabled: bool | None = None
@@ -45,6 +46,7 @@ class Config(pydantic.BaseModel):
 
 class ConfigSpec(Config):
     model_config = pydantic.ConfigDict(extra="forbid")
+    hasTrustDialogAccepted: bool | None = None
 
 
 PluginSet = typing.Annotated[
@@ -365,6 +367,32 @@ class Settings(pydantic.BaseModel):
 
     model_config = pydantic.ConfigDict(extra="allow")
     enabledPlugins: dict[str, bool] = pydantic.Field(default_factory=dict)
+
+
+class ProjectEntry(pydantic.BaseModel):
+    """A projects/<path> entry. extra="allow" so unmanaged keys round-trip."""
+
+    model_config = pydantic.ConfigDict(extra="allow")
+    hasTrustDialogAccepted: bool | None = None
+
+
+class ClaudeJson(pydantic.BaseModel):
+    """.claude.json - extra="allow" so unmanaged keys round-trip on save."""
+
+    model_config = pydantic.ConfigDict(extra="allow")
+    projects: dict[str, ProjectEntry] = pydantic.Field(default_factory=dict)
+
+    @property
+    def trust_all(self):
+        entry = self.projects.get(TRUST_PATH)
+        return bool(entry and entry.hasTrustDialogAccepted)
+
+    @trust_all.setter
+    def trust_all(self, value):
+        entry = self.projects.setdefault(TRUST_PATH, ProjectEntry())
+        entry.hasTrustDialogAccepted = value or None
+        if not entry.model_dump(exclude_none=True):
+            del self.projects[TRUST_PATH]
 
 
 class InstalledPlugins(pydantic.BaseModel):
@@ -692,10 +720,13 @@ class ClaudeConfig:
     def load_config(self):
         data = load_json(self.config_path)
         Config.model_validate(data)
-        return data
+        return ClaudeJson.model_validate(data)
 
     def save_config(self, data):
-        write_bytes_if_different(self.config_path, dump_json(data).encode())
+        write_bytes_if_different(
+            self.config_path,
+            dump_json(data.model_dump(exclude_none=True)).encode(),
+        )
 
     def load_settings(self):
         return Settings.model_validate(load_json(self.settings_path))
@@ -826,7 +857,7 @@ def apply_spec_dict(spec_data, loader, saver):
         updates = spec_data
     else:
         updates = spec_data.model_dump(exclude_none=True)
-    updated = {**current, **updates}
+    updated = current.model_copy(update=updates)
     if updated != current:
         saver(updated)
 
@@ -851,16 +882,21 @@ def apply_settings(spec_settings, loader, saver):
         saver(Settings.model_validate(updated))
 
 
+def apply_trust(value, loader, saver):
+    """Add or remove projects[TRUST_PATH].hasTrustDialogAccepted."""
+    if value is None:
+        return
+    data = loader()
+    data.trust_all = value
+    saver(data)
+
+
 def apply_mcp_servers(mcp_servers, loader, saver):
     """Apply mcpServers declaratively to config; an empty mapping clears it."""
     current = loader()
-    new = mcp_servers or None
-    if current.get("mcpServers") != new:
-        if new is None:
-            current.pop("mcpServers", None)
-        else:
-            current["mcpServers"] = new
-        saver(current)
+    updated = current.model_copy(update={"mcpServers": mcp_servers or None})
+    if updated != current:
+        saver(updated)
 
 
 def resolve_spec_path(path):
@@ -877,6 +913,12 @@ MCP_DIRNAME = "mcp"
 MARKETPLACES_DIRNAME = "marketplaces"
 PLUGINS_DIRNAME = "plugins"
 MARKETPLACE_KEY_ORDER = ("type", "source", "enabled", "disabled", "available")
+# Claude's trust check walks cwd's ancestors to the filesystem root looking for
+# projects[<path>].hasTrustDialogAccepted, so the "/" entry trusts everything.
+TRUST_PATH = "/"
+# Config keys authored in the spec that expand to something other than a
+# top-level .claude.json key, so they must not ride the passthrough merge.
+VIRTUAL_CONFIG_KEYS = frozenset({"hasTrustDialogAccepted"})
 MCP_KEY_ORDER = ("type", "url", "headers", "command", "args", "env")
 PLUGIN_KEY_ORDER = (
     "type",
@@ -905,9 +947,7 @@ RUNTIME_SETTINGS = frozenset(
         "autoUpdatesChannel",
         "preferredNotifChannel",
         "autoScrollEnabled",
-        "autoMemoryEnabled",
         "autoCompactEnabled",
-        "alwaysThinkingEnabled",
     }
 )
 UNMANAGED_SETTINGS = PROTECTED_SETTINGS | RUNTIME_SETTINGS
@@ -1357,7 +1397,18 @@ async def cmd_apply(cmd, cfg):
         cfg.keybindings_path.unlink()
 
     # Apply config and settings
-    apply_spec_dict(spec.config, cfg.load_config, cfg.save_config)
+    apply_spec_dict(
+        spec.config.model_dump(exclude_none=True, exclude=VIRTUAL_CONFIG_KEYS)
+        if spec.config
+        else None,
+        cfg.load_config,
+        cfg.save_config,
+    )
+    apply_trust(
+        spec.config.hasTrustDialogAccepted if spec.config else None,
+        cfg.load_config,
+        cfg.save_config,
+    )
     apply_settings(spec.settings, cfg.load_settings, cfg.save_settings)
     apply_mcp_servers(
         {
@@ -1505,10 +1556,12 @@ async def cmd_apply(cmd, cfg):
 
 def build_current_spec(cfg):
     """Build a Spec and marketplace entries from the current installed state."""
-    config_data = cfg.load_config()
+    claude_json = cfg.load_config()
+    config_data = claude_json.model_dump(exclude_none=True)
     config_filtered = {
         k: v for k, v in config_data.items() if k in Config.model_fields
     }
+    config_filtered["hasTrustDialogAccepted"] = claude_json.trust_all
     config = (
         ConfigSpec.model_validate(config_filtered) if config_filtered else None
     )
@@ -1631,7 +1684,9 @@ async def cmd_export(cmd, cfg):
     )
     mcp_servers = {
         name: dump_mcp(parse_mcp(conf))
-        for name, conf in (cfg.load_config().get("mcpServers") or {}).items()
+        for name, conf in (
+            getattr(cfg.load_config(), "mcpServers", None) or {}
+        ).items()
     }
     marketplaces = {
         e.name: order_keys(
