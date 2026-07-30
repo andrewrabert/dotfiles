@@ -1,0 +1,5 @@
+#!/usr/bin/env zsh
+set -eu
+exec claude \
+    --append-system-prompt-file="${DOTFILES}/claude-args/append-system-prompt/plan.md" \
+    "$@"
