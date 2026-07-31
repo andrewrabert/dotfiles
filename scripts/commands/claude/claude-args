@@ -1,6 +1,7 @@
 #!/bin/sh
 set -eu
 NAME="$1"
+shift
 BIN="${DOTFILES}/claude-args/bin/${NAME}"
 if ! [ -f "${BIN}" ]; then
     echo 'error: mode not found' >&2
