@@ -555,7 +555,6 @@ if HOSTNAME in ("mars", "phobos"):
             "radeontop",
             "realtime-privileges",
             "rawtherapee",
-            "redumper",
             "rife-ncnn-vulkan-bin",
             "rocm-hip-sdk",
             "rocm-opencl-runtime",
