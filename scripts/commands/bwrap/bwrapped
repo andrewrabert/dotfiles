@@ -2,9 +2,17 @@
 """Run a program inside a bubblewrap sandbox with filesystem isolation."""
 
 import argparse
+import collections.abc
+import ctypes
 import os
 import pathlib
+import selectors
 import shutil
+import signal
+import subprocess
+import sys
+import time
+import types
 
 
 class Bubblewrap:
@@ -66,6 +74,20 @@ class Bubblewrap:
 
 
 HOME = pathlib.Path.home()
+NOTED_BIN = "noted"
+NOTED_SERVER_CWD = pathlib.Path("/")
+ENDPOINT_SCHEME = "unix://"
+ENDPOINT_TIMEOUT = 10.0
+SERVER_GRACE = 5.0
+SANDBOX_UNSETENV = [
+    "NOTED_DIR",
+    "NOTED_ENV_FILE",
+    "NOTED_POLICY",
+    "NOTED_SCOPE",
+    "NOTED_SOURCE",
+]
+PR_SET_PDEATHSIG = 1
+LIBC = ctypes.CDLL(None, use_errno=True)
 WORK_DIR = pathlib.Path.cwd().resolve()
 GIT_CONFIG = HOME / ".config/git"
 CLAUDE_CONFIG_DIR = os.environ.get("CLAUDE_CONFIG_DIR", "")
@@ -106,6 +128,7 @@ DEFAULT_CONFIG = {
     },
     "env": {
         "inherit": ["PATH", "TERM", "USER"],
+        "unset": SANDBOX_UNSETENV,
         "set": {
             "HOME": HOME,
             "TMPDIR": "/tmp",
@@ -140,13 +163,146 @@ PROGRAM_CONFIG = {
 }
 
 
-def build_command(args, program_args):
-    program = shutil.which(args.program)
-    if not program:
-        raise FileNotFoundError(f"{args.program} not found")
+class SandboxError(Exception):
+    """A failure that leaves no sandbox and no server running."""
 
+
+# a preexec callable that has the kernel SIGKILL the child once parent_pid
+#   dies, and exits the child when that death beat the prctl
+def die_with_parent(parent_pid: int) -> collections.abc.Callable[[], None]:
+    def arm() -> None:
+        LIBC.prctl(PR_SET_PDEATHSIG, signal.SIGKILL, 0, 0, 0)
+        if os.getppid() != parent_pid:
+            os._exit(1)
+
+    return arm
+
+
+# the first line of fd without its newline, within ENDPOINT_TIMEOUT seconds
+# a timeout, an EOF, and a line that is not `unix://<path>` are rejected
+def read_endpoint_line(fd: int) -> str:
+    deadline = time.monotonic() + ENDPOINT_TIMEOUT
+    buffered = b""
+    with selectors.DefaultSelector() as selector:
+        selector.register(fd, selectors.EVENT_READ)
+        while b"\n" not in buffered:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0 or not selector.select(remaining):
+                raise SandboxError(
+                    "noted server socket announced no endpoint within"
+                    f" {ENDPOINT_TIMEOUT:g}s"
+                )
+            chunk = os.read(fd, 4096)
+            if not chunk:
+                raise SandboxError(
+                    "noted server socket closed stdout before announcing"
+                    " an endpoint"
+                )
+            buffered += chunk
+    # A socket path is raw bytes; surrogateescape hands it to bwrap intact.
+    line = buffered.split(b"\n", 1)[0].decode(errors="surrogateescape")
+    if not line.startswith(ENDPOINT_SCHEME) or line == ENDPOINT_SCHEME:
+        raise SandboxError(f"noted server socket announced {line!r}")
+    return line
+
+
+# SIGTERM, then SIGKILL SERVER_GRACE seconds later; returns once reaped
+def terminate(process: subprocess.Popen) -> None:
+    if process.poll() is None:
+        process.terminate()
+        try:
+            process.wait(SERVER_GRACE)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
+
+
+class NotesServer:
+    """The `noted server socket` process this invocation owns."""
+
+    def __init__(self, process: subprocess.Popen, endpoint: str) -> None:
+        self._process = process
+        self._endpoint = endpoint
+
+    # cwd `/`, so no `.notedenv` at or above the invocation directory is read
+    #   and the root comes from the wrapper's own NOTED_DIR or noted.env
+    # the spawn environment is the wrapper's own minus NOTED_URL
+    # its own session, so no terminal-generated signal reaches it
+    # dies with the wrapper, a SIGKILLed wrapper included
+    # stdin /dev/null, stderr inherited, stdout a pipe held open until stop
+    # a `noted` PATH holds no entry for, and any rejected endpoint line,
+    #   terminates the process and raises SandboxError
+    @classmethod
+    def start(cls) -> "NotesServer":
+        env = {k: v for k, v in os.environ.items() if k != "NOTED_URL"}
+        try:
+            process = subprocess.Popen(
+                [NOTED_BIN, "server", "socket"],
+                cwd=NOTED_SERVER_CWD,
+                env=env,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                bufsize=0,
+                start_new_session=True,
+                preexec_fn=die_with_parent(os.getpid()),
+            )
+        except OSError as e:
+            raise SandboxError(f"cannot run {NOTED_BIN}: {e}") from e
+        try:
+            endpoint = read_endpoint_line(process.stdout.fileno())
+        except SandboxError:
+            terminate(process)
+            raise
+        return cls(process, endpoint)
+
+    @property
+    def endpoint(self) -> str:
+        return self._endpoint
+
+    @property
+    def socket(self) -> pathlib.Path:
+        return pathlib.Path(self._endpoint[len(ENDPOINT_SCHEME) :])
+
+    def stop(self) -> None:
+        terminate(self._process)
+        self._process.stdout.close()
+
+
+# the file PATH resolves name to
+# a name PATH holds no entry for is rejected
+def resolve_program(name: str) -> pathlib.Path:
+    path = shutil.which(name)
+    if path is None:
+        raise SandboxError(f"{name} not found on PATH")
+    return pathlib.Path(path)
+
+
+# the sandbox's exit status, 128 + signum when a signal killed it
+# SIGINT and SIGQUIT are handled rather than ignored: exec resets a handled
+#   signal to its default, so Ctrl-C still reaches the sandboxed program
+def run_sandbox(cmd: list[str]) -> int:
+    def keep_waiting(signum: int, frame: types.FrameType | None) -> None:
+        pass
+
+    for sig in (signal.SIGINT, signal.SIGQUIT):
+        signal.signal(sig, keep_waiting)
+    try:
+        sandbox = subprocess.Popen(cmd)
+    except OSError as e:
+        raise SandboxError(f"cannot launch {cmd[0]}: {e}") from e
+    status = sandbox.wait()
+    return status if status >= 0 else 128 - status
+
+
+def build_command(
+    args: argparse.Namespace,
+    program_args: list[str],
+    program: pathlib.Path,
+    endpoint: str,
+    socket: pathlib.Path,
+) -> list[str]:
     config = DEFAULT_CONFIG
-    extra = PROGRAM_CONFIG.get(pathlib.Path(program).name, {})
+    extra = PROGRAM_CONFIG.get(program.name, {})
 
     bwrap = Bubblewrap()
     for p in config["proc"]:
@@ -184,6 +340,9 @@ def build_command(args, program_args):
     for p in rw_paths:
         add_bind(p, readonly=False)
 
+    # The only hole to the notes, `--ro` or not, and the socket file alone.
+    bwrap.bind(socket, socket)
+
     for src, dest in args.bind:
         src = pathlib.Path(src).resolve()
         dest = src if dest == "" else pathlib.Path(dest)
@@ -199,11 +358,12 @@ def build_command(args, program_args):
         "inherit", []
     ):
         bwrap.setenv(name)
-    for name in extra.get("env", {}).get("unset", []):
+    for name in config["env"]["unset"] + extra.get("env", {}).get("unset", []):
         bwrap.unsetenv(name)
     for name, value in {
         **config["env"]["set"],
         **extra.get("env", {}).get("set", {}),
+        "NOTED_URL": endpoint,
     }.items():
         bwrap.setenv(name, value)
     for env in args.setenv:
@@ -216,13 +376,13 @@ def build_command(args, program_args):
     bwrap.chdir(config["chdir"])
     bwrap.unshare_pid(config["unshare_pid"])
     bwrap.die_with_parent(config["die_with_parent"])
-    bwrap.arg(program)
+    bwrap.arg(str(program))
     bwrap.arg(*program_args)
 
     return list(bwrap)
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(
         description="Run a program inside a bubblewrap sandbox with filesystem isolation.",
         add_help=False,
@@ -266,8 +426,22 @@ def main():
         parser.print_help()
         return
 
-    cmd = build_command(args, program_args)
-    os.execvp(cmd[0], cmd)
+    try:
+        program = resolve_program(args.program)
+        server = NotesServer.start()
+    except SandboxError as e:
+        sys.exit(f"bwrapped: {e}")
+    try:
+        status = run_sandbox(
+            build_command(
+                args, program_args, program, server.endpoint, server.socket
+            )
+        )
+    except SandboxError as e:
+        sys.exit(f"bwrapped: {e}")
+    finally:
+        server.stop()
+    sys.exit(status)
 
 
 if __name__ == "__main__":
