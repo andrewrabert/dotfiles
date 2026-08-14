@@ -229,7 +229,7 @@ class NotesServer:
     # the spawn environment is the wrapper's own minus NOTED_URL
     # its own session, so no terminal-generated signal reaches it
     # dies with the wrapper, a SIGKILLed wrapper included
-    # stdin /dev/null, stderr inherited, stdout a pipe held open until stop
+    # stdin /dev/null, stderr /dev/null, stdout a pipe held open until stop
     # a `noted` PATH holds no entry for, and any rejected endpoint line,
     #   terminates the process and raises SandboxError
     @classmethod
@@ -242,6 +242,7 @@ class NotesServer:
                 env=env,
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
                 bufsize=0,
                 start_new_session=True,
                 preexec_fn=die_with_parent(os.getpid()),
