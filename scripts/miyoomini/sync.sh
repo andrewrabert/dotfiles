@@ -39,7 +39,7 @@ log 'Syncing roms'
 ./sync_roms.py --delete "${SDCARD_DIR}"
 
 log 'Generating .m3u files'
-./generate_pico_thumbs.sh "${SDCARD_DIR}"
+./generate_rom_m3u.py "${SDCARD_DIR}"
 
 log 'Generating PICO-8 thumbnails'
 ./generate_pico_thumbs.sh "${SDCARD_DIR}"

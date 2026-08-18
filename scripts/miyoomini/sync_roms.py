@@ -101,7 +101,8 @@ async def rsync_fetch(remote_path, local_path):
     proc = await asyncio.create_subprocess_exec(
         "rsync",
         "-a",
-        f"{SSH_HOST}:{shlex.quote(str(remote_path))}",
+        "--secluded-args",
+        f"{SSH_HOST}:{remote_path}",
         str(local_path),
         stdout=asyncio.subprocess.DEVNULL,
         stderr=asyncio.subprocess.PIPE,
