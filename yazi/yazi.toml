@@ -2,6 +2,18 @@
 show_hidden = true
 show_symlink = false
 
+# Restore pre-26.8 behavior: opening a directory is a no-op
+# (26.8 matches dirs to the default edit opener -> $EDITOR -> netrw)
+[opener]
+noop = [
+	{ run = "true", desc = "Do nothing" },
+]
+
+[open]
+prepend_rules = [
+	{ url = "*/", use = "noop" },
+]
+
 [tasks]
 suppress_preload = true
 macro_workers = 1
