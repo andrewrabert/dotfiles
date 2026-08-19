@@ -1,7 +1,13 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --script
+# /// script
+# dependencies = [
+#   "pydantic-settings",
+#   "tomli-w",
+# ]
+# ///
 """Run a program inside a bubblewrap sandbox with filesystem isolation."""
 
-import argparse
+import abc
 import collections.abc
 import ctypes
 import os
@@ -13,6 +19,11 @@ import subprocess
 import sys
 import time
 import types
+import typing
+
+import pydantic
+import pydantic_settings
+import tomli_w
 
 
 class Bubblewrap:
@@ -89,6 +100,7 @@ SANDBOX_UNSETENV = [
 PR_SET_PDEATHSIG = 1
 LIBC = ctypes.CDLL(None, use_errno=True)
 WORK_DIR = pathlib.Path.cwd().resolve()
+CONFIG_NAME = ".bwrapped.conf"
 GIT_CONFIG = HOME / ".config/git"
 CLAUDE_CONFIG_DIR = os.environ.get("CLAUDE_CONFIG_DIR", "")
 CODEX_HOME = os.environ.get("CODEX_HOME") or HOME / ".codex"
@@ -165,6 +177,253 @@ PROGRAM_CONFIG = {
 
 class SandboxError(Exception):
     """A failure that leaves no sandbox and no server running."""
+
+
+class Bind(pydantic.BaseModel, abc.ABC):
+    """One abstract bind mount."""
+
+    model_config = pydantic.ConfigDict(extra="forbid", frozen=True)
+
+    source: pathlib.Path
+    target: pathlib.Path | None = None
+
+    @classmethod
+    def from_str(cls, value: str) -> "Bind":
+        parts: list[str] = []
+        part: list[str] = []
+        escaped = False
+        for char in value:
+            if escaped:
+                if char not in (":", "\\"):
+                    raise ValueError(f"unsupported escape \\{char}")
+                part.append(char)
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == ":":
+                parts.append("".join(part))
+                part = []
+            else:
+                part.append(char)
+        if escaped:
+            raise ValueError("bind ends with an incomplete escape")
+        parts.append("".join(part))
+
+        if not parts[0]:
+            raise ValueError("bind source cannot be empty")
+        if len(parts) > 3:
+            raise ValueError("bind must be SOURCE[:DESTINATION[:ro|rw]]")
+
+        target = (
+            pathlib.Path(parts[1]) if len(parts) >= 2 and parts[1] else None
+        )
+        mode = parts[2] if len(parts) == 3 else "rw"
+        if mode not in ("ro", "rw"):
+            raise ValueError("bind mode must be 'ro' or 'rw'")
+        bind_type = ReadOnlyBind if mode == "ro" else ReadWriteBind
+        return bind_type(source=pathlib.Path(parts[0]), target=target)
+
+    @pydantic.field_validator("target", mode="before")
+    @classmethod
+    def empty_target_means_source(cls, value: typing.Any) -> typing.Any:
+        return None if value == "" else value
+
+    def relative_to(self, directory: pathlib.Path) -> "Bind":
+        source = self.source
+        if not source.is_absolute():
+            source = directory / source
+        return self.model_copy(update={"source": source.resolve()})
+
+    @property
+    def destination(self) -> pathlib.Path:
+        return self.source if self.target is None else self.target
+
+    def serialized(self, *, read_only: bool) -> dict[str, typing.Any]:
+        value: dict[str, typing.Any] = {
+            "source": str(self.source),
+            "read_only": read_only,
+        }
+        if self.target is not None:
+            value["target"] = str(self.target)
+        return value
+
+    @abc.abstractmethod
+    def mount(self, bwrap: Bubblewrap) -> None:
+        """Add this mount to a Bubblewrap command."""
+
+    @abc.abstractmethod
+    def serialize(self) -> dict[str, typing.Any]:
+        """Serialize this concrete mount for a project config."""
+
+
+class ReadOnlyBind(Bind):
+    def mount(self, bwrap: Bubblewrap) -> None:
+        bwrap.ro_bind(self.source, self.destination)
+
+    def serialize(self) -> dict[str, typing.Any]:
+        return self.serialized(read_only=True)
+
+
+class ReadWriteBind(Bind):
+    def mount(self, bwrap: Bubblewrap) -> None:
+        bwrap.bind(self.source, self.destination)
+
+    def serialize(self) -> dict[str, typing.Any]:
+        return self.serialized(read_only=False)
+
+
+class SandboxSettings(pydantic_settings.BaseSettings):
+    """Sandbox options shared by the project file and command line."""
+
+    model_config = pydantic_settings.SettingsConfigDict(extra="forbid")
+
+    ro: pydantic_settings.CliImplicitFlag[bool] = pydantic.Field(
+        False, description="Mount the working directory read-only"
+    )
+    bind: list[Bind] = pydantic.Field(
+        default_factory=list,
+        description="Bind SOURCE[:DESTINATION[:ro|rw]] (repeatable)",
+    )
+    env: dict[str, str] = pydantic.Field(
+        default_factory=dict,
+        description="Set KEY=VALUE (repeatable)",
+    )
+    noted_scope: str | None = pydantic.Field(
+        None, description="Set NOTED_SCOPE inside the sandbox"
+    )
+    noted_source: str | None = pydantic.Field(
+        None, description="Set NOTED_SOURCE (defaults to PROGRAM)"
+    )
+
+    @pydantic.field_validator("bind", mode="before")
+    @classmethod
+    def deserialize_binds(cls, value: typing.Any) -> typing.Any:
+        if not isinstance(value, list):
+            return value
+
+        binds: list[typing.Any] = []
+        for item in value:
+            if isinstance(item, str):
+                binds.append(Bind.from_str(item))
+                continue
+            if isinstance(item, dict):
+                fields = dict(item)
+                read_only = fields.pop("read_only", False)
+                if not isinstance(read_only, bool):
+                    raise ValueError("bind read_only must be a boolean")
+                bind_type = ReadOnlyBind if read_only else ReadWriteBind
+                binds.append(bind_type.model_validate(fields))
+                continue
+            binds.append(item)
+        return binds
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[pydantic_settings.BaseSettings],
+        init_settings: pydantic_settings.PydanticBaseSettingsSource,
+        env_settings: pydantic_settings.PydanticBaseSettingsSource,
+        dotenv_settings: pydantic_settings.PydanticBaseSettingsSource,
+        file_secret_settings: pydantic_settings.PydanticBaseSettingsSource,
+    ) -> tuple[pydantic_settings.PydanticBaseSettingsSource, ...]:
+        # Invocation settings come only from the CLI and selected TOML file.
+        return (init_settings,)
+
+
+class InvocationSettings(SandboxSettings):
+    """Run a program inside a bubblewrap sandbox with filesystem isolation."""
+
+    model_config = pydantic_settings.SettingsConfigDict(
+        cli_parse_args=True,
+        cli_kebab_case=True,
+        cli_ignore_unknown_args=True,
+        cli_shortcuts={"bind": "b", "env": "e", "write-config": "w"},
+        extra="forbid",
+    )
+
+    program: pydantic_settings.CliPositionalArg[str] = pydantic.Field(
+        description="Program to run inside the sandbox"
+    )
+    program_args: pydantic_settings.CliUnknownArgs
+    write_config: pathlib.Path | None = pydantic.Field(
+        None,
+        description=(
+            "Write the effective settings as TOML; a directory means its "
+            f"{CONFIG_NAME}"
+        ),
+    )
+
+
+# the nearest .bwrapped.conf at or above directory, if one exists
+def find_config(directory: pathlib.Path) -> pathlib.Path | None:
+    for parent in (directory, *directory.parents):
+        candidate = parent / CONFIG_NAME
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def unique_binds(binds: list[Bind]) -> list[Bind]:
+    unique: list[Bind] = []
+    seen: set[pathlib.Path] = set()
+    for bind in reversed(binds):
+        if bind.destination not in seen:
+            seen.add(bind.destination)
+            unique.append(bind)
+    unique.reverse()
+    return unique
+
+
+# CLI scalars override TOML scalars; collections merge TOML then CLI.
+def load_settings(config_path: pathlib.Path | None) -> InvocationSettings:
+    cli = InvocationSettings()
+    if config_path is None:
+        project = SandboxSettings.model_validate({})
+    else:
+        try:
+            values = pydantic_settings.TomlConfigSettingsSource(
+                SandboxSettings, toml_file=config_path
+            )()
+            project = SandboxSettings.model_validate(values)
+        except (OSError, ValueError, pydantic_settings.SettingsError) as e:
+            raise SandboxError(f"cannot load {config_path}: {e}") from e
+
+    config_dir = WORK_DIR if config_path is None else config_path.parent
+    updates: dict[str, typing.Any] = {
+        "bind": unique_binds(
+            [
+                *(bind.relative_to(config_dir) for bind in project.bind),
+                *(bind.relative_to(WORK_DIR) for bind in cli.bind),
+            ]
+        ),
+        "env": {**project.env, **cli.env},
+    }
+    for field in ("ro", "noted_scope", "noted_source"):
+        if field not in cli.model_fields_set:
+            updates[field] = getattr(project, field)
+    return cli.model_copy(update=updates)
+
+
+# Write effective settings; absolute sources preserve their meaning at any PATH.
+def write_config(settings: InvocationSettings, path: pathlib.Path) -> None:
+    if path.is_dir():
+        path /= CONFIG_NAME
+    value: dict[str, typing.Any] = {
+        "ro": settings.ro,
+        "bind": [
+            bind.relative_to(WORK_DIR).serialize() for bind in settings.bind
+        ],
+        "env": settings.env,
+    }
+    if settings.noted_scope is not None:
+        value["noted_scope"] = settings.noted_scope
+    if settings.noted_source is not None:
+        value["noted_source"] = settings.noted_source
+    try:
+        with path.open("wb") as config_file:
+            tomli_w.dump(value, config_file)
+    except OSError as e:
+        raise SandboxError(f"cannot write {path}: {e}") from e
 
 
 # a preexec callable that has the kernel SIGKILL the child once parent_pid
@@ -296,11 +555,11 @@ def run_sandbox(cmd: list[str]) -> int:
 
 
 def build_command(
-    args: argparse.Namespace,
-    program_args: list[str],
+    args: InvocationSettings,
     program: pathlib.Path,
     endpoint: str,
     socket: pathlib.Path,
+    config_path: pathlib.Path | None,
 ) -> list[str]:
     config = DEFAULT_CONFIG
     extra = PROGRAM_CONFIG.get(program.name, {})
@@ -344,16 +603,15 @@ def build_command(
     # The only hole to the notes, `--ro` or not, and the socket file alone.
     bwrap.bind(socket, socket)
 
-    for src, dest in args.bind:
-        src = pathlib.Path(src).resolve()
-        dest = src if dest == "" else pathlib.Path(dest)
-        if src.exists():
-            bwrap.bind(src, dest)
-    for src, dest in args.ro_bind:
-        src = pathlib.Path(src).resolve()
-        dest = src if dest == "" else pathlib.Path(dest)
-        if src.exists():
-            bwrap.ro_bind(src, dest)
+    for requested in args.bind:
+        requested = requested.relative_to(WORK_DIR)
+        source = requested.source
+        if source.exists():
+            requested.mount(bwrap)
+
+    # Apply this after every broader mount so the selected file cannot be read.
+    if config_path is not None:
+        bwrap.ro_bind("/dev/null", config_path)
 
     for name in config["env"]["inherit"] + extra.get("env", {}).get(
         "inherit", []
@@ -367,75 +625,46 @@ def build_command(
         "NOTED_URL": endpoint,
     }.items():
         bwrap.setenv(name, value)
-    for env in args.setenv:
-        if "=" in env:
-            name, value = env.split("=", 1)
-            bwrap.setenv(name, value)
-        else:
-            bwrap.setenv(env)
+    for name, value in args.env.items():
+        bwrap.setenv(name, value)
+    if args.noted_scope is not None:
+        bwrap.setenv("NOTED_SCOPE", args.noted_scope)
+    bwrap.setenv(
+        "NOTED_SOURCE",
+        args.program if args.noted_source is None else args.noted_source,
+    )
 
     bwrap.chdir(config["chdir"])
     bwrap.unshare_pid(config["unshare_pid"])
     bwrap.die_with_parent(config["die_with_parent"])
     bwrap.arg(str(program))
-    bwrap.arg(*program_args)
+    bwrap.arg(*args.program_args)
 
     return list(bwrap)
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Run a program inside a bubblewrap sandbox with filesystem isolation.",
-        add_help=False,
-    )
-    parser.add_argument("program", help="Program to run inside the sandbox")
-    parser.add_argument(
-        "-h", "--help", action="store_true", help="Show this help"
-    )
-    parser.add_argument(
-        "--ro",
-        action="store_true",
-        help="Mount the working dir read-only",
-    )
-    parser.add_argument(
-        "--bind",
-        action="append",
-        nargs=2,
-        default=[],
-        metavar=("SRC", "DEST"),
-        help="Additional read-write bind mount; use '' for DEST to bind to same path",
-    )
-    parser.add_argument(
-        "--ro-bind",
-        action="append",
-        nargs=2,
-        default=[],
-        dest="ro_bind",
-        metavar=("SRC", "DEST"),
-        help="Additional read-only bind mount; use '' for DEST to bind to same path",
-    )
-    parser.add_argument(
-        "--setenv",
-        action="append",
-        default=[],
-        metavar="NAME[=VALUE]",
-        help="Set environment variable (inherits from env if no value)",
-    )
-    args, program_args = parser.parse_known_args()
-
-    if args.help:
-        parser.print_help()
-        return
-
+    config_path = find_config(WORK_DIR)
     try:
+        args = load_settings(config_path)
+        if args.write_config is not None:
+            write_config(args, args.write_config)
         program = resolve_program(args.program)
         server = NotesServer.start()
-    except SandboxError as e:
+    except (
+        SandboxError,
+        pydantic_settings.SettingsError,
+        pydantic.ValidationError,
+    ) as e:
         sys.exit(f"bwrapped: {e}")
     try:
         status = run_sandbox(
             build_command(
-                args, program_args, program, server.endpoint, server.socket
+                args,
+                program,
+                server.endpoint,
+                server.socket,
+                config_path,
             )
         )
     except SandboxError as e:
