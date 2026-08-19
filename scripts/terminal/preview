@@ -163,6 +163,7 @@ preview_file() {
         audio/x-mpegurl)
             default_preview "$file"
             ;;
+        video/matroska|\
         video/x-matroska)
             mkv-preview "$file"
             ;;
