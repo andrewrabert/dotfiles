@@ -26,12 +26,20 @@ import fastmcp.cli.client
 import fastmcp.client.auth
 import pydantic
 import pydantic_settings
+import rich.console
 
 DB_PATH = pathlib.Path.home() / ".mcpbert.sqlite3"
 
 
 def _now() -> float:
     return datetime.datetime.now(datetime.UTC).timestamp()
+
+
+def _print_json(data) -> None:
+    if sys.stdout.isatty():
+        rich.console.Console().print_json(json.dumps(data), indent=2)
+    else:
+        print(json.dumps(data, indent=2))
 
 
 class SqliteStore:
@@ -184,6 +192,10 @@ class Cli(
         False,
         description="wipe cached tokens and client registration, then re-run OAuth",
     )
+    raw: bool = pydantic.Field(
+        False,
+        description="print the complete MCP call-tool response payload as JSON",
+    )
     db_path: pathlib.Path = pydantic.Field(
         DB_PATH,
         description="sqlite database for cached tokens and client registrations",
@@ -227,11 +239,21 @@ class Cli(
         arguments = fastmcp.cli.client.parse_tool_arguments(
             tuple(self.args), None, tool.inputSchema
         )
+        if self.raw:
+            raw_result = await client.call_tool_mcp(self.tool, arguments)
+            _print_json(
+                raw_result.model_dump(
+                    by_alias=True, mode="json", exclude_none=True
+                )
+            )
+            if raw_result.isError:
+                sys.exit(1)
+            return
         result = await client.call_tool(
             self.tool, arguments, raise_on_error=False
         )
         if result.structured_content is not None:
-            print(json.dumps(result.structured_content, indent=2))
+            _print_json(result.structured_content)
         else:
             for block in result.content:
                 print(getattr(block, "text", block))
