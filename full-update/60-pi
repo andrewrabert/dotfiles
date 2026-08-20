@@ -1,8 +1,6 @@
 #!/usr/bin/env sh
 set -e
 
-PACKAGE='@earendil-works/pi-coding-agent'
-
 show_help() {
     cat << EOF
 usage:
@@ -31,7 +29,7 @@ done
 
 if [ -n "${FORCE}" ]; then
     echo 'Updating pi coding agent...'
-    npm install -g --ignore-scripts "${PACKAGE}"
+    npm install -g --ignore-scripts '@earendil-works/pi-coding-agent'
 fi
 
 if command -v pi > /dev/null; then
