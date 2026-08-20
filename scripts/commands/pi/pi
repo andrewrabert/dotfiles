@@ -1,5 +1,9 @@
 #!/usr/bin/env zsh
-export PI_OFFLINE=1
+if [[ ${1-} == update ]]; then
+    export PI_OFFLINE=0
+else
+    export PI_OFFLINE=1
+fi
 
 () {
     typeset -g WRAPPED_BIN=
