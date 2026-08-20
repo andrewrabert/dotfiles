@@ -62,7 +62,12 @@ def main():
 
     match hostname:
         case "aweber":
-            sources.extend([zoekt_simple_bin])
+            sources.extend(
+                [
+                    dotfiles / "scripts/mcp",
+                    zoekt_simple_bin,
+                ]
+            )
         case "mars":
             sources.extend(
                 [
@@ -73,6 +78,7 @@ def main():
         case "phobos":
             sources.extend(
                 [
+                    dotfiles / "scripts/mcp",
                     dotfiles / "scripts/media",
                     zoekt_simple_bin,
                 ]
