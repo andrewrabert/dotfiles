@@ -4,7 +4,7 @@ set -e
 show_help() {
     cat << EOF
 usage:
-    -f, --force     build/install noted even if not already present
+    -f, --force     install noted even if not already present
     --help          show help and exit
 EOF
 }
@@ -26,6 +26,21 @@ while [ $# -gt 0 ]; do
             ;;
     esac
 done
+
+if command -v termux-info > /dev/null; then
+    if [ -z "${FORCE}" ] && ! command -v noted > /dev/null; then
+        exit
+    fi
+
+    APT_SOURCE="${PREFIX}/etc/apt/sources.list.d/noted.list"
+    APT_REPOSITORY='deb [trusted=yes] https://andrewrabert.github.io/noted stable main'
+    if ! [ -e "${APT_SOURCE}" ]; then
+        mkdir -p "$(dirname "${APT_SOURCE}")"
+        printf '%s\n' "${APT_REPOSITORY}" > "${APT_SOURCE}"
+    fi
+    pkg install -y noted
+    exit
+fi
 
 BIN="${DOTFILES}/.local/noted/bin/noted"
 REPO_DIR="${DOTFILES}/.local/noted/git"
