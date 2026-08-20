@@ -33,10 +33,5 @@ if [ -n "${FORCE}" ]; then
 fi
 
 if command -v pi > /dev/null; then
-    if npm list --global --depth=0 '@earendil-works/pi-coding-agent' > /dev/null 2>&1; then
-        pi update --all
-    else
-        pi update --extensions
-        pi update --models
-    fi
+    pi update --all
 fi
