@@ -1,0 +1,340 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.12"
+# dependencies = ["pyyaml", "pydantic", "pydantic-settings"]
+# ///
+"""Manage Pi from declarative YAML spec files."""
+
+import json
+import os
+import pathlib
+import socket
+import subprocess
+import tempfile
+import typing
+
+import pydantic
+import yaml
+from pydantic import AliasChoices, Field
+from pydantic_settings import (
+    BaseSettings,
+    CliApp,
+    CliPositionalArg,
+    CliSubCommand,
+    CliToggleFlag,
+    SettingsConfigDict,
+)
+
+SPEC_FILENAME = "pi-config.yaml"
+
+
+class UserError(Exception):
+    pass
+
+
+class Spec(pydantic.BaseModel):
+    model_config = pydantic.ConfigDict(extra="forbid")
+    settings: dict[str, typing.Any] = pydantic.Field(default_factory=dict)
+    models: dict[str, typing.Any] | None = None
+
+
+class HostSpec(pydantic.BaseModel):
+    model_config = pydantic.ConfigDict(extra="forbid")
+    providers: list[str] = pydantic.Field(min_length=1)
+
+
+def load_yaml(path: pathlib.Path) -> dict:
+    try:
+        value = yaml.safe_load(path.read_text()) or {}
+    except FileNotFoundError as error:
+        raise UserError(f"spec file not found: {path}") from error
+    except yaml.YAMLError as error:
+        raise UserError(f"invalid YAML in {path}: {error}") from error
+    if not isinstance(value, dict):
+        raise UserError(f"expected a YAML mapping: {path}")
+    return value
+
+
+def dump_yaml(value: dict) -> str:
+    return yaml.safe_dump(
+        value,
+        default_flow_style=False,
+        sort_keys=False,
+        allow_unicode=True,
+        width=float("inf"),
+    )
+
+
+def merge_objects(base: dict, override: dict) -> dict:
+    merged = base.copy()
+    for key, value in override.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = merge_objects(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
+
+def load_provider_spec(config_dir: pathlib.Path, reference: str) -> Spec:
+    providers_dir = (config_dir / "providers").resolve()
+    relative_path = pathlib.PurePosixPath(reference)
+    if (
+        not reference
+        or relative_path.suffix
+        or relative_path.is_absolute()
+        or ".." in relative_path.parts
+    ):
+        raise UserError(
+            f"provider reference must be relative and omit .yaml: {reference!r}"
+        )
+
+    path = (providers_dir / f"{reference}.yaml").resolve()
+    if not path.is_relative_to(providers_dir):
+        raise UserError(
+            f"provider reference escapes providers directory: {reference!r}"
+        )
+    return Spec.model_validate(load_yaml(path))
+
+
+def merge_specs(base: Spec, override: Spec) -> Spec:
+    models = base.models
+    if override.models is not None:
+        models = merge_objects(models or {}, override.models)
+    return Spec(
+        settings=merge_objects(base.settings, override.settings),
+        models=models,
+    )
+
+
+def provider_defaults(reference: str, spec: Spec) -> tuple[str, str]:
+    enabled_models = spec.settings.get("enabledModels", [])
+    if isinstance(enabled_models, list) and enabled_models:
+        first = enabled_models[0]
+        if isinstance(first, str) and "/" in first:
+            provider_name, model_name = first.split("/", 1)
+            return provider_name, model_name
+
+    providers = (spec.models or {}).get("providers", {})
+    if isinstance(providers, dict) and providers:
+        provider_name, provider = next(iter(providers.items()))
+        models = (
+            provider.get("models", []) if isinstance(provider, dict) else []
+        )
+        if (
+            models
+            and isinstance(models[0], dict)
+            and isinstance(models[0].get("id"), str)
+        ):
+            return provider_name, models[0]["id"]
+
+    raise UserError(
+        f"cannot determine default provider and model from providers/{reference}.yaml"
+    )
+
+
+def load_spec(config_dir: pathlib.Path, host: str) -> Spec:
+    spec = Spec.model_validate(load_yaml(config_dir / SPEC_FILENAME))
+    host_spec_path = config_dir / "hosts" / f"{host}.yaml"
+    if not host_spec_path.is_file():
+        return spec
+
+    host_spec = HostSpec.model_validate(load_yaml(host_spec_path))
+    first_reference = host_spec.providers[0]
+    first_provider_spec = load_provider_spec(config_dir, first_reference)
+    default_provider, default_model = provider_defaults(
+        first_reference, first_provider_spec
+    )
+
+    spec = merge_specs(spec, first_provider_spec)
+    for reference in host_spec.providers[1:]:
+        spec = merge_specs(spec, load_provider_spec(config_dir, reference))
+
+    settings = merge_objects(
+        spec.settings,
+        {
+            "defaultProvider": default_provider,
+            "defaultModel": default_model,
+        },
+    )
+    return Spec(settings=settings, models=spec.models)
+
+
+def safe_write(path: pathlib.Path, data: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    stat = path.stat() if path.exists() else None
+    with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as handle:
+        temporary_path = pathlib.Path(handle.name)
+        try:
+            handle.write(data)
+            handle.flush()
+            if stat:
+                temporary_path.chmod(stat.st_mode)
+            temporary_path.replace(path)
+        finally:
+            temporary_path.unlink(missing_ok=True)
+
+
+def write_json(path: pathlib.Path, value: dict) -> None:
+    safe_write(
+        path,
+        (json.dumps(value, ensure_ascii=False, indent=2) + "\n").encode(),
+    )
+
+
+def package_source(entry: object) -> str:
+    if isinstance(entry, str):
+        return entry
+    if isinstance(entry, dict) and isinstance(entry.get("source"), str):
+        return entry["source"]
+    raise UserError(f"invalid package entry: {entry!r}")
+
+
+def validate_settings(settings: dict) -> None:
+    packages = settings.get("packages", [])
+    if not isinstance(packages, list):
+        raise UserError("settings.packages must be an array")
+    for entry in packages:
+        package_source(entry)
+
+
+def install_packages(settings: dict, settings_path: pathlib.Path) -> None:
+    packages = settings.get("packages", [])
+    if not packages:
+        return
+
+    # Pi must install package resources before it can resolve settings that
+    # refer to those resources, such as a package-provided theme.
+    bootstrap = settings.copy()
+    bootstrap.pop("theme", None)
+    bootstrap["packages"] = []
+    write_json(settings_path, bootstrap)
+
+    for entry in packages:
+        source = package_source(entry)
+        print(f"Installing Pi package {source}")
+        subprocess.run(["pi", "install", source], check=True)
+
+
+def resolve_host(value: str | None) -> str:
+    return value or os.environ.get("HOST_DOTFILES") or socket.gethostname()
+
+
+def config_directory(value: str) -> pathlib.Path:
+    directory = pathlib.Path(value).expanduser().resolve()
+    if not directory.is_dir():
+        raise UserError(f"not a directory: {directory}")
+    return directory
+
+
+class ApplyCmd(pydantic.BaseModel):
+    """Install packages and apply a Pi YAML spec directory."""
+
+    dir: CliPositionalArg[str]
+    host: str | None = None
+
+    def cli_cmd(self):
+        directory = config_directory(self.dir)
+        spec = load_spec(directory, resolve_host(self.host))
+        validate_settings(spec.settings)
+
+        target_dir = pathlib.Path.home() / ".pi" / "agent"
+        if target_dir.is_symlink():
+            raise UserError(f"refusing to use directory symlink: {target_dir}")
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+        models_path = target_dir / "models.json"
+        if spec.models is None:
+            if models_path.is_dir() and not models_path.is_symlink():
+                raise UserError(f"refusing to remove directory: {models_path}")
+            models_path.unlink(missing_ok=True)
+        else:
+            write_json(models_path, spec.models)
+
+        settings_path = target_dir / "settings.json"
+        install_packages(spec.settings, settings_path)
+        write_json(settings_path, spec.settings)
+
+
+class ValidateCmd(pydantic.BaseModel):
+    """Validate Pi YAML specs without changing anything."""
+
+    dir: CliPositionalArg[str]
+    host: str | None = None
+
+    def cli_cmd(self):
+        directory = config_directory(self.dir)
+        spec = load_spec(directory, resolve_host(self.host))
+        validate_settings(spec.settings)
+
+
+class ExportCmd(pydantic.BaseModel):
+    """Export current Pi settings as a YAML spec."""
+
+    dir: CliPositionalArg[str]
+    force: CliToggleFlag[bool] = Field(
+        False, validation_alias=AliasChoices("force", "f")
+    )
+
+    def cli_cmd(self):
+        directory = pathlib.Path(self.dir).expanduser().resolve()
+        output = directory / SPEC_FILENAME
+        if output.exists() and not self.force:
+            raise UserError(f"path exists (use -f to overwrite): {output}")
+
+        settings_path = pathlib.Path.home() / ".pi" / "agent" / "settings.json"
+        try:
+            settings = json.loads(settings_path.read_text())
+        except FileNotFoundError as error:
+            raise UserError(f"file not found: {settings_path}") from error
+        except json.JSONDecodeError as error:
+            raise UserError(
+                f"invalid JSON in {settings_path}: {error}"
+            ) from error
+        if not isinstance(settings, dict):
+            raise UserError(f"expected a JSON object: {settings_path}")
+
+        models_path = pathlib.Path.home() / ".pi" / "agent" / "models.json"
+        try:
+            models = json.loads(models_path.read_text())
+        except FileNotFoundError:
+            models = None
+        except json.JSONDecodeError as error:
+            raise UserError(
+                f"invalid JSON in {models_path}: {error}"
+            ) from error
+        if models is not None and not isinstance(models, dict):
+            raise UserError(f"expected a JSON object: {models_path}")
+
+        directory.mkdir(parents=True, exist_ok=True)
+        spec = Spec(settings=settings, models=models)
+        safe_write(
+            output,
+            dump_yaml(spec.model_dump(exclude_none=True)).encode(),
+        )
+
+
+class App(BaseSettings):
+    """Manage Pi from declarative YAML spec files."""
+
+    model_config = SettingsConfigDict(cli_parse_args=True, cli_kebab_case=True)
+    apply: CliSubCommand[ApplyCmd]
+    export: CliSubCommand[ExportCmd]
+    validate_spec: CliSubCommand[ValidateCmd] = Field(alias="validate")
+
+    def cli_cmd(self):
+        CliApp.run_subcommand(self)
+
+
+if __name__ == "__main__":
+    try:
+        CliApp.run(App)
+    except UserError as error:
+        print(f"error: {error}", file=os.sys.stderr)
+        raise SystemExit(1) from error
+    except subprocess.CalledProcessError as error:
+        raise SystemExit(error.returncode) from error
+    except pydantic.ValidationError as error:
+        for item in error.errors():
+            location = ".".join(str(value) for value in item["loc"])
+            print(f"error: {location}: {item['msg']}", file=os.sys.stderr)
+        raise SystemExit(1) from error
