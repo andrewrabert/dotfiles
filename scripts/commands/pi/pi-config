@@ -8,6 +8,7 @@
 import json
 import os
 import pathlib
+import re
 import socket
 import subprocess
 import tempfile
@@ -34,13 +35,27 @@ class UserError(Exception):
 
 class Spec(pydantic.BaseModel):
     model_config = pydantic.ConfigDict(extra="forbid")
+    packages: list[str] = pydantic.Field(default_factory=list)
     settings: dict[str, typing.Any] = pydantic.Field(default_factory=dict)
     models: dict[str, typing.Any] | None = None
+
+
+class PackageSelection(pydantic.BaseModel):
+    model_config = pydantic.ConfigDict(extra="forbid")
+    enabled: list[str] | None = None
+    disabled: list[str] = pydantic.Field(default_factory=list)
+
+
+class PackageSpec(PackageSelection):
+    source: str = pydantic.Field(min_length=1)
 
 
 class HostSpec(pydantic.BaseModel):
     model_config = pydantic.ConfigDict(extra="forbid")
     providers: list[str] = pydantic.Field(min_length=1)
+    packages: dict[str, PackageSelection] = pydantic.Field(
+        default_factory=dict
+    )
 
 
 def load_yaml(path: pathlib.Path) -> dict:
@@ -75,6 +90,28 @@ def merge_objects(base: dict, override: dict) -> dict:
     return merged
 
 
+def validate_reference(reference: str, kind: str) -> None:
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*", reference):
+        raise UserError(
+            f"{kind} reference must be a filename without .yaml: {reference!r}"
+        )
+
+
+def validate_extension_names(names: list[str], package: str) -> None:
+    for name in names:
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*", name):
+            raise UserError(
+                f"extension name in package {package!r} must be a folder name: {name!r}"
+            )
+
+
+def load_package_spec(config_dir: pathlib.Path, reference: str) -> PackageSpec:
+    validate_reference(reference, "package")
+    return PackageSpec.model_validate(
+        load_yaml(config_dir / "packages" / f"{reference}.yaml")
+    )
+
+
 def load_provider_spec(config_dir: pathlib.Path, reference: str) -> Spec:
     providers_dir = (config_dir / "providers").resolve()
     relative_path = pathlib.PurePosixPath(reference)
@@ -101,9 +138,63 @@ def merge_specs(base: Spec, override: Spec) -> Spec:
     if override.models is not None:
         models = merge_objects(models or {}, override.models)
     return Spec(
+        packages=base.packages,
         settings=merge_objects(base.settings, override.settings),
         models=models,
     )
+
+
+def package_entry(
+    reference: str,
+    package: PackageSpec,
+    override: PackageSelection | None,
+) -> str | dict[str, typing.Any]:
+    enabled = package.enabled
+    disabled = package.disabled.copy()
+    if override is not None:
+        if override.enabled is not None:
+            enabled = override.enabled
+        disabled.extend(override.disabled)
+
+    validate_extension_names(enabled or [], reference)
+    validate_extension_names(disabled, reference)
+    disabled = list(dict.fromkeys(disabled))
+
+    if enabled is None and not disabled:
+        return package.source
+
+    extensions = (
+        [f"extensions/{name}/**" for name in enabled]
+        if enabled is not None
+        else ["extensions/**"]
+    )
+    extensions.extend(f"!extensions/{name}/**" for name in disabled)
+    return {"source": package.source, "extensions": extensions}
+
+
+def resolve_packages(
+    config_dir: pathlib.Path,
+    references: list[str],
+    overrides: dict[str, PackageSelection],
+) -> list[str | dict[str, typing.Any]]:
+    unknown = set(overrides).difference(references)
+    if unknown:
+        names = ", ".join(sorted(unknown))
+        raise UserError(
+            f"host overrides packages not referenced by main spec: {names}"
+        )
+
+    entries = []
+    for reference in references:
+        validate_reference(reference, "package")
+        entries.append(
+            package_entry(
+                reference,
+                load_package_spec(config_dir, reference),
+                overrides.get(reference),
+            )
+        )
+    return entries
 
 
 def provider_defaults(reference: str, spec: Spec) -> tuple[str, str]:
@@ -135,28 +226,34 @@ def provider_defaults(reference: str, spec: Spec) -> tuple[str, str]:
 def load_spec(config_dir: pathlib.Path, host: str) -> Spec:
     spec = Spec.model_validate(load_yaml(config_dir / SPEC_FILENAME))
     host_spec_path = config_dir / "hosts" / f"{host}.yaml"
-    if not host_spec_path.is_file():
-        return spec
+    host_spec = None
+    if host_spec_path.is_file():
+        host_spec = HostSpec.model_validate(load_yaml(host_spec_path))
+        first_reference = host_spec.providers[0]
+        first_provider_spec = load_provider_spec(config_dir, first_reference)
+        default_provider, default_model = provider_defaults(
+            first_reference, first_provider_spec
+        )
 
-    host_spec = HostSpec.model_validate(load_yaml(host_spec_path))
-    first_reference = host_spec.providers[0]
-    first_provider_spec = load_provider_spec(config_dir, first_reference)
-    default_provider, default_model = provider_defaults(
-        first_reference, first_provider_spec
-    )
+        spec = merge_specs(spec, first_provider_spec)
+        for reference in host_spec.providers[1:]:
+            spec = merge_specs(spec, load_provider_spec(config_dir, reference))
 
-    spec = merge_specs(spec, first_provider_spec)
-    for reference in host_spec.providers[1:]:
-        spec = merge_specs(spec, load_provider_spec(config_dir, reference))
+        spec.settings = merge_objects(
+            spec.settings,
+            {
+                "defaultProvider": default_provider,
+                "defaultModel": default_model,
+            },
+        )
 
-    settings = merge_objects(
-        spec.settings,
-        {
-            "defaultProvider": default_provider,
-            "defaultModel": default_model,
-        },
-    )
-    return Spec(settings=settings, models=spec.models)
+    if spec.packages:
+        spec.settings["packages"] = resolve_packages(
+            config_dir,
+            spec.packages,
+            host_spec.packages if host_spec is not None else {},
+        )
+    return spec
 
 
 def safe_write(path: pathlib.Path, data: bytes) -> None:
@@ -309,7 +406,9 @@ class ExportCmd(pydantic.BaseModel):
         spec = Spec(settings=settings, models=models)
         safe_write(
             output,
-            dump_yaml(spec.model_dump(exclude_none=True)).encode(),
+            dump_yaml(
+                spec.model_dump(exclude_none=True, exclude={"packages"})
+            ).encode(),
         )
 
 
