@@ -42,9 +42,16 @@ if ($Capability.State -ne "Installed") {
 Set-Service sshd -StartupType Automatic
 Start-Service sshd
 
-# Ensure the firewall rule exists.
-if (-not (Get-NetFirewallRule -Name "OpenSSH-Server-In-TCP" `
-            -ErrorAction SilentlyContinue)) {
+# Ensure the firewall rule exists and applies to every network profile.
+$FirewallRule = Get-NetFirewallRule -Name "OpenSSH-Server-In-TCP" `
+    -ErrorAction SilentlyContinue
+
+if ($FirewallRule) {
+    Set-NetFirewallRule `
+        -Name "OpenSSH-Server-In-TCP" `
+        -Enabled True `
+        -Profile Any
+} else {
     New-NetFirewallRule `
         -Name "OpenSSH-Server-In-TCP" `
         -DisplayName "OpenSSH SSH Server (sshd)" `
@@ -52,7 +59,8 @@ if (-not (Get-NetFirewallRule -Name "OpenSSH-Server-In-TCP" `
         -Direction Inbound `
         -Protocol TCP `
         -Action Allow `
-        -LocalPort 22
+        -LocalPort 22 `
+        -Profile Any
 }
 
 # User authorized_keys.
