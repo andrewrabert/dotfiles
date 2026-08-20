@@ -739,13 +739,7 @@ class ClaudeConfig:
 
     def load_installed_plugins(self):
         data = load_json(self.installed_plugins_path)
-        ip = InstalledPlugins.model_validate(data)
-        ip.plugins = {
-            ref: recs
-            for ref, recs in ip.plugins.items()
-            if any(r.get("scope") == "user" for r in recs)
-        }
-        return ip
+        return InstalledPlugins.model_validate(data)
 
     def load_known_marketplaces(self):
         data = load_json(self.known_marketplaces_path)
@@ -827,8 +821,7 @@ class ClaudeConfig:
 
         Orphaned entries linger when a plugin's install record vanishes
         outside our flow, and a stale entry for the same plugin name under
-        another marketplace makes `claude plugin uninstall` fail with a bogus
-        scope error.
+        another marketplace makes `claude plugin uninstall` fail.
         """
         settings = self.load_settings()
         installed = self.load_installed_plugins()
@@ -1082,14 +1075,22 @@ def compute_changes(
 
 
 class ClaudeCLI:
-    """Wrapper for Claude CLI plugin commands. Methods raise CLIError on failure."""
+    """Wrapper for Claude CLI plugin commands. Methods raise CLIError on failure.
 
-    @staticmethod
-    async def _run(*args):
+    Runs claude with cwd pinned to the config dir so commands never act on
+    the caller's repo.
+    """
+
+    def __init__(self, config):
+        self.config = config
+
+    async def _run(self, *args):
         """Run claude command. Raises CLIError on failure."""
         proc = await asyncio.create_subprocess_exec(
             "claude",
+            "plugin",
             *args,
+            cwd=self.config.dir,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -1098,46 +1099,34 @@ class ClaudeCLI:
             raise CLIError(stderr.decode().rstrip() or "unknown error")
         return stdout.decode()
 
-    @classmethod
-    async def _plugin(cls, command, *args, scope="user"):
-        await cls._run("plugin", command, *args, "--scope", scope)
+    async def marketplace_add(self, source):
+        await self._run("marketplace", "add", source)
 
-    @classmethod
-    async def marketplace_add(cls, source):
-        await cls._plugin("marketplace", "add", source)
+    async def marketplace_update(self, name):
+        await self._run("marketplace", "update", name)
 
-    @classmethod
-    async def marketplace_update(cls, name):
-        await cls._run("plugin", "marketplace", "update", name)
+    async def marketplace_remove(self, name):
+        await self._run("marketplace", "remove", name)
 
-    @classmethod
-    async def marketplace_remove(cls, name):
-        await cls._plugin("marketplace", "remove", name)
+    async def plugin_install(self, plugin_ref):
+        await self._run("install", plugin_ref)
 
-    @classmethod
-    async def plugin_install(cls, plugin_ref):
-        await cls._plugin("install", plugin_ref)
+    async def plugin_update(self, plugin_ref):
+        await self._run("update", plugin_ref)
 
-    @classmethod
-    async def plugin_update(cls, plugin_ref):
-        await cls._run("plugin", "update", plugin_ref)
+    async def plugin_uninstall(self, plugin_ref):
+        await self._run("uninstall", plugin_ref)
 
-    @classmethod
-    async def plugin_uninstall(cls, plugin_ref):
-        await cls._plugin("uninstall", plugin_ref)
-
-    @classmethod
-    async def plugin_enable(cls, plugin_ref):
+    async def plugin_enable(self, plugin_ref):
         try:
-            await cls._plugin("enable", plugin_ref)
+            await self._run("enable", plugin_ref)
         except CLIError as e:
             if "already enabled" not in str(e):
                 raise
 
-    @classmethod
-    async def plugin_disable(cls, plugin_ref):
+    async def plugin_disable(self, plugin_ref):
         try:
-            await cls._plugin("disable", plugin_ref)
+            await self._run("disable", plugin_ref)
         except CLIError as e:
             if "already disabled" not in str(e):
                 raise
@@ -1267,49 +1256,49 @@ class App(BaseSettings):
         CliApp.run_subcommand(self)
 
 
-async def add_marketplace(source):
+async def add_marketplace(cli, source):
     """Add a new marketplace. Raises CLIError on failure."""
     local_path = get_local_path(source)
     add_source = str(local_path.resolve()) if local_path else source
-    await ClaudeCLI.marketplace_add(add_source)
+    await cli.marketplace_add(add_source)
 
 
-async def update_plugin(cfg, marketplace, plugin, force=False):
+async def update_plugin(cli, cfg, marketplace, plugin, force=False):
     """Update a single plugin. Raises CLIError on failure."""
     ref = str(PluginRef(plugin, marketplace))
     if force:
-        await ClaudeCLI.plugin_uninstall(ref)
+        await cli.plugin_uninstall(ref)
         cfg.clear_plugin_cache(marketplace, plugin)
-        await ClaudeCLI.plugin_install(ref)
+        await cli.plugin_install(ref)
     else:
-        await ClaudeCLI.plugin_update(ref)
+        await cli.plugin_update(ref)
 
 
-async def install_or_update_plugin(cfg, marketplace, name, force=False):
+async def install_or_update_plugin(cli, cfg, marketplace, name, force=False):
     """Install or update a single plugin. Returns (success, error_msg)."""
     ref = str(PluginRef(name, marketplace))
     try:
         if force:
-            await ClaudeCLI.plugin_uninstall(ref)
+            await cli.plugin_uninstall(ref)
             cfg.clear_plugin_cache(marketplace, name)
-        await ClaudeCLI.plugin_install(ref)
+        await cli.plugin_install(ref)
         return True, None
     except CLIError:
         pass
 
     try:
-        await ClaudeCLI.plugin_update(ref)
+        await cli.plugin_update(ref)
         return True, None
     except CLIError as e:
         return False, str(e)
 
 
-async def install_all_plugins(cfg, marketplace, plugins, force=False):
+async def install_all_plugins(cli, cfg, marketplace, plugins, force=False):
     """Install all plugins sequentially. Returns failure count."""
     failures = 0
     for plugin in plugins:
         success, error = await install_or_update_plugin(
-            cfg, marketplace, plugin, force
+            cli, cfg, marketplace, plugin, force
         )
         if not success:
             print(f"error: {plugin}@{marketplace}: {error}", file=sys.stderr)
@@ -1320,6 +1309,7 @@ async def install_all_plugins(cfg, marketplace, plugins, force=False):
 async def cmd_apply(cmd, cfg):
     """Handle apply subcommand - reconcile to match spec directory."""
     directory = require_spec_dir(cmd.dir)
+    cli = ClaudeCLI(cfg)
     try:
         data = load_spec_file(directory)
     except yaml.YAMLError as e:
@@ -1425,12 +1415,12 @@ async def cmd_apply(cmd, cfg):
         for plugin_ref in installed.plugins:
             if plugin_ref.endswith(f"@{name}"):
                 try:
-                    await ClaudeCLI.plugin_uninstall(plugin_ref)
+                    await cli.plugin_uninstall(plugin_ref)
                 except CLIError as e:
                     print(f"error: {e}", file=sys.stderr)
                     err_count += 1
         try:
-            await ClaudeCLI.marketplace_remove(name)
+            await cli.marketplace_remove(name)
         except CLIError as e:
             print(f"error: {e}", file=sys.stderr)
             err_count += 1
@@ -1447,7 +1437,7 @@ async def cmd_apply(cmd, cfg):
     # Add new marketplaces
     for source, enabled, disabled in marketplaces_to_add:
         try:
-            await add_marketplace(source)
+            await add_marketplace(cli, source)
         except CLIError as e:
             print(f"error: {e}", file=sys.stderr)
             err_count += 1
@@ -1464,12 +1454,16 @@ async def cmd_apply(cmd, cfg):
         if all_plugins:
             local = get_local_path(source)
             err_count += await install_all_plugins(
-                cfg, marketplace_name, all_plugins, force=local is not None
+                cli,
+                cfg,
+                marketplace_name,
+                all_plugins,
+                force=local is not None,
             )
         # Enable only the enabled plugins (installed plugins are disabled by default)
         for plugin in enabled:
             try:
-                await ClaudeCLI.plugin_enable(
+                await cli.plugin_enable(
                     str(PluginRef(plugin, marketplace_name))
                 )
             except CLIError as e:
@@ -1480,7 +1474,7 @@ async def cmd_apply(cmd, cfg):
     marketplaces_needing_update = {m for m, _ in plugins_to_install}
     for marketplace in marketplaces_needing_update:
         try:
-            await ClaudeCLI.marketplace_update(marketplace)
+            await cli.marketplace_update(marketplace)
         except CLIError as e:
             print(f"error: {e}", file=sys.stderr)
             err_count += 1
@@ -1488,9 +1482,7 @@ async def cmd_apply(cmd, cfg):
     # Remove plugins from existing marketplaces
     for marketplace, plugin in plugins_to_remove:
         try:
-            await ClaudeCLI.plugin_uninstall(
-                str(PluginRef(plugin, marketplace))
-            )
+            await cli.plugin_uninstall(str(PluginRef(plugin, marketplace)))
         except CLIError as e:
             print(f"error: {e}", file=sys.stderr)
             err_count += 1
@@ -1502,11 +1494,11 @@ async def cmd_apply(cmd, cfg):
     for marketplace, plugin in plugins_to_install:
         by_marketplace.setdefault(marketplace, []).append(plugin)
     for marketplace, plugins in by_marketplace.items():
-        err_count += await install_all_plugins(cfg, marketplace, plugins)
+        err_count += await install_all_plugins(cli, cfg, marketplace, plugins)
         for plugin in plugins:
             if plugin in spec_enabled:
                 try:
-                    await ClaudeCLI.plugin_enable(
+                    await cli.plugin_enable(
                         str(PluginRef(plugin, marketplace))
                     )
                 except CLIError as e:
@@ -1516,7 +1508,7 @@ async def cmd_apply(cmd, cfg):
     # Enable plugins
     for marketplace, plugin in plugins_to_enable:
         try:
-            await ClaudeCLI.plugin_enable(str(PluginRef(plugin, marketplace)))
+            await cli.plugin_enable(str(PluginRef(plugin, marketplace)))
         except CLIError as e:
             print(f"error: {e}", file=sys.stderr)
             err_count += 1
@@ -1524,7 +1516,7 @@ async def cmd_apply(cmd, cfg):
     # Disable plugins
     for marketplace, plugin in plugins_to_disable:
         try:
-            await ClaudeCLI.plugin_disable(str(PluginRef(plugin, marketplace)))
+            await cli.plugin_disable(str(PluginRef(plugin, marketplace)))
         except CLIError as e:
             print(f"error: {e}", file=sys.stderr)
             err_count += 1
@@ -1533,7 +1525,7 @@ async def cmd_apply(cmd, cfg):
     for marketplace, plugin in plugins_to_update:
         try:
             force = cfg.is_local_marketplace(marketplace)
-            await update_plugin(cfg, marketplace, plugin, force)
+            await update_plugin(cli, cfg, marketplace, plugin, force)
         except CLIError as e:
             print(f"error: {e}", file=sys.stderr)
             err_count += 1
@@ -1788,6 +1780,7 @@ async def cmd_validate(cmd):
 async def cmd_update(cfg):
     """Handle update subcommand - update all marketplaces and plugins."""
     err_count = 0
+    cli = ClaudeCLI(cfg)
     cfg.prune_enabled_plugins()
 
     # Update all marketplaces
@@ -1795,7 +1788,7 @@ async def cmd_update(cfg):
     for name in sorted(known, key=str.lower):
         log.info("marketplace: %s", name)
         try:
-            await ClaudeCLI.marketplace_update(name)
+            await cli.marketplace_update(name)
         except CLIError as e:
             log.error("%s", e)
             err_count += 1
@@ -1808,7 +1801,7 @@ async def cmd_update(cfg):
         log.info("plugin: %s", ref)
         try:
             force = cfg.is_local_marketplace(ref.marketplace)
-            await update_plugin(cfg, ref.marketplace, ref.plugin, force)
+            await update_plugin(cli, cfg, ref.marketplace, ref.plugin, force)
         except CLIError as e:
             log.error("%s", e)
             err_count += 1
