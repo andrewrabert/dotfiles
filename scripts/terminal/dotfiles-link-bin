@@ -4,6 +4,8 @@ import pathlib
 import shutil
 import socket
 
+HOSTNAME = os.environ.get("HOST_DOTFILES") or socket.gethostname()
+
 
 def find_executables(directory):
     executables = set()
@@ -36,17 +38,11 @@ def main():
             continue
         all_commands.update(p.name for p in find_executables(path))
 
-    # TODO fix this outside of this script
-    if shutil.which("termux-info"):
-        hostname = "termux"
-    else:
-        hostname = socket.gethostname()
-
     sources = [
-        dotfiles / "scripts/hosts" / hostname,
+        dotfiles / "scripts/hosts" / HOSTNAME,
     ]
     for d in other_dotfiles:
-        sources.append(d / "scripts/hosts" / hostname)
+        sources.append(d / "scripts/hosts" / HOSTNAME)
 
     for path in (dotfiles / "scripts/commands").iterdir():
         if path.name in all_commands:
@@ -60,7 +56,7 @@ def main():
 
     zoekt_simple_bin = dotfiles / ".local/zoekt-simple/bin"
 
-    match hostname:
+    match HOSTNAME:
         case "aweber":
             sources.extend(
                 [

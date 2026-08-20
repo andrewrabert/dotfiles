@@ -16,6 +16,7 @@ wipes the cache row for the current key and re-runs OAuth.
 import asyncio
 import datetime
 import json
+import os
 import pathlib
 import sqlite3
 import sys
@@ -140,10 +141,15 @@ class Cli(
     cli_avoid_json=True,
     cli_implicit_flags=True,
     cli_ignore_unknown_args=True,
+    env_prefix="MCPBERT_",
+    env_file=os.environ.get("MCPBERT_ENV_FILE"),
 ):
     """Call tools on a remote MCP server.
 
     example: mcpbert --url https://mcp.example.com/mcp getJiraIssue cloudId=<id> issueIdOrKey=PROJ-123
+
+    Options are also read from MCPBERT_* environment variables
+    (e.g. MCPBERT_URL), and from a dotenv file named by MCPBERT_ENV_FILE.
     """
 
     url: str = pydantic.Field(description="MCP server URL")
@@ -161,7 +167,9 @@ class Cli(
     )
     client_name: str = pydantic.Field(
         "andrewr-cli",
-        validation_alias=pydantic.AliasChoices("client-name", "n"),
+        validation_alias=pydantic.AliasChoices(
+            "client-name", "n", "MCPBERT_CLIENT_NAME"
+        ),
         description="OAuth client name registered via DCR",
     )
     redirect: list[str] = pydantic.Field(
@@ -242,4 +250,12 @@ class Cli(
 
 
 if __name__ == "__main__":
-    pydantic_settings.CliApp.run(Cli)
+    try:
+        pydantic_settings.CliApp.run(Cli)
+    except pydantic.ValidationError as exc:
+        for error in exc.errors():
+            location = ".".join(str(part) for part in error["loc"])
+            print(
+                f"mcpbert: error: {location}: {error['msg']}", file=sys.stderr
+            )
+        sys.exit(2)
