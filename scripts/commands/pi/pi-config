@@ -331,13 +331,29 @@ class ApplyCmd(pydantic.BaseModel):
 
     def cli_cmd(self):
         directory = config_directory(self.dir)
-        spec = load_spec(directory, resolve_host(self.host))
+        host = resolve_host(self.host)
+        spec = load_spec(directory, host)
         validate_settings(spec.settings)
 
         target_dir = pathlib.Path.home() / ".pi" / "agent"
         if target_dir.is_symlink():
             raise UserError(f"refusing to use directory symlink: {target_dir}")
         target_dir.mkdir(parents=True, exist_ok=True)
+
+        agents_source = directory / "AGENTS.md"
+        try:
+            agents_data = agents_source.read_bytes()
+        except FileNotFoundError as error:
+            raise UserError(f"file not found: {agents_source}") from error
+
+        host_agents_source = directory / "hosts" / host / "AGENTS.md"
+        if host_agents_source.is_file():
+            agents_data = (
+                agents_data.rstrip(b"\n")
+                + b"\n\n"
+                + host_agents_source.read_bytes().lstrip(b"\n")
+            )
+        safe_write(target_dir / "AGENTS.md", agents_data)
 
         models_path = target_dir / "models.json"
         if spec.models is None:
