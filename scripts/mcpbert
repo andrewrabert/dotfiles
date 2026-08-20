@@ -1,0 +1,245 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.14"
+# dependencies = ["fastmcp>=3,<4", "pydantic-settings>=2.8"]
+# ///
+"""CLI access to a remote MCP server via the fastmcp client.
+
+First run against a server opens a browser for its OAuth consent.
+Tokens and client registrations are cached in a sqlite database at
+~/.mcpbert.sqlite3, keyed by (url, client name,
+redirect config), so changing --client-name / --redirect /
+--no-default-redirect registers a fresh client automatically. --reauth
+wipes the cache row for the current key and re-runs OAuth.
+"""
+
+import asyncio
+import datetime
+import json
+import pathlib
+import sqlite3
+import sys
+
+import fastmcp
+import fastmcp.cli.client
+import fastmcp.client.auth
+import pydantic
+import pydantic_settings
+
+DB_PATH = pathlib.Path.home() / ".mcpbert.sqlite3"
+
+
+def _now() -> float:
+    return datetime.datetime.now(datetime.UTC).timestamp()
+
+
+class SqliteStore:
+    """AsyncKeyValue backed by one sqlite table, namespaced by
+    (url, client name, redirect config)."""
+
+    _SCHEMA = """
+    CREATE TABLE IF NOT EXISTS oauth_storage (
+        url TEXT NOT NULL,
+        name TEXT NOT NULL,
+        redirects TEXT NOT NULL,
+        collection TEXT NOT NULL,
+        key TEXT NOT NULL,
+        value TEXT NOT NULL,
+        expires_at REAL,
+        PRIMARY KEY (url, name, redirects, collection, key)
+    )
+    """
+
+    def __init__(
+        self, path: pathlib.Path, url: str, name: str, redirects: str
+    ):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        self._conn = sqlite3.connect(path)
+        self._conn.execute(self._SCHEMA)
+        self._conn.commit()
+        self._ns = (url, name, redirects)
+
+    def clear_namespace(self) -> None:
+        self._conn.execute(
+            "DELETE FROM oauth_storage WHERE url = ? AND name = ? AND redirects = ?",
+            self._ns,
+        )
+        self._conn.commit()
+
+    def _fetch(self, key: str, collection: str | None):
+        row = self._conn.execute(
+            "SELECT value, expires_at FROM oauth_storage"
+            " WHERE url = ? AND name = ? AND redirects = ?"
+            " AND collection = ? AND key = ?",
+            (*self._ns, collection or "", key),
+        ).fetchone()
+        if row is None:
+            return None, None
+        value, expires_at = row
+        if expires_at is not None:
+            remaining = expires_at - _now()
+            if remaining <= 0:
+                self._delete(key, collection)
+                return None, None
+            return json.loads(value), remaining
+        return json.loads(value), None
+
+    def _delete(self, key: str, collection: str | None) -> bool:
+        cursor = self._conn.execute(
+            "DELETE FROM oauth_storage"
+            " WHERE url = ? AND name = ? AND redirects = ?"
+            " AND collection = ? AND key = ?",
+            (*self._ns, collection or "", key),
+        )
+        self._conn.commit()
+        return cursor.rowcount > 0
+
+    async def get(self, key, *, collection=None):
+        return self._fetch(key, collection)[0]
+
+    async def ttl(self, key, *, collection=None):
+        return self._fetch(key, collection)
+
+    async def put(self, key, value, *, collection=None, ttl=None):
+        expires_at = _now() + float(ttl) if ttl is not None else None
+        self._conn.execute(
+            "INSERT OR REPLACE INTO oauth_storage"
+            " (url, name, redirects, collection, key, value, expires_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                *self._ns,
+                collection or "",
+                key,
+                json.dumps(dict(value)),
+                expires_at,
+            ),
+        )
+        self._conn.commit()
+
+    async def delete(self, key, *, collection=None):
+        return self._delete(key, collection)
+
+    async def get_many(self, keys, *, collection=None):
+        return [self._fetch(key, collection)[0] for key in keys]
+
+    async def ttl_many(self, keys, *, collection=None):
+        return [self._fetch(key, collection) for key in keys]
+
+    async def put_many(self, keys, values, *, collection=None, ttl=None):
+        for key, value in zip(keys, values):
+            await self.put(key, value, collection=collection, ttl=ttl)
+
+    async def delete_many(self, keys, *, collection=None):
+        return sum(self._delete(key, collection) for key in keys)
+
+
+class Cli(
+    pydantic_settings.BaseSettings,
+    cli_prog_name="mcpbert",
+    cli_kebab_case=True,
+    cli_avoid_json=True,
+    cli_implicit_flags=True,
+    cli_ignore_unknown_args=True,
+):
+    """Call tools on a remote MCP server.
+
+    example: mcpbert --url https://mcp.example.com/mcp getJiraIssue cloudId=<id> issueIdOrKey=PROJ-123
+    """
+
+    url: str = pydantic.Field(description="MCP server URL")
+    tool: pydantic_settings.CliPositionalArg[str] = pydantic.Field(
+        "", description="tool name to call"
+    )
+    args: pydantic_settings.CliUnknownArgs = pydantic.Field(
+        [],
+        description="key=value tool arguments; values coerced per the tool's input schema",
+    )
+    list_tools: bool = pydantic.Field(
+        False,
+        validation_alias=pydantic.AliasChoices("list", "l"),
+        description="list tools (default with no tool)",
+    )
+    client_name: str = pydantic.Field(
+        "andrewr-cli",
+        validation_alias=pydantic.AliasChoices("client-name", "n"),
+        description="OAuth client name registered via DCR",
+    )
+    redirect: list[str] = pydantic.Field(
+        [],
+        description="redirect URI to add to the OAuth client registration (repeatable)",
+    )
+    default_redirect: bool = pydantic.Field(
+        True,
+        description="--no-default-redirect drops the local callback URI",
+    )
+    reauth: bool = pydantic.Field(
+        False,
+        description="wipe cached tokens and client registration, then re-run OAuth",
+    )
+    db_path: pathlib.Path = pydantic.Field(
+        DB_PATH,
+        description="sqlite database for cached tokens and client registrations",
+    )
+
+    def build_auth(self) -> fastmcp.client.auth.OAuth:
+        redirects_key = json.dumps(
+            {"redirect": self.redirect, "default": self.default_redirect},
+            sort_keys=True,
+        )
+        store = SqliteStore(
+            self.db_path, self.url, self.client_name, redirects_key
+        )
+        if self.reauth:
+            store.clear_namespace()
+        auth = fastmcp.client.auth.OAuth(
+            mcp_url=self.url,
+            client_name=self.client_name,
+            token_storage=store,
+        )
+        metadata = auth.context.client_metadata
+        if not self.default_redirect:
+            metadata.redirect_uris = []
+        metadata.redirect_uris.extend(
+            pydantic.AnyHttpUrl(uri) for uri in self.redirect
+        )
+        return auth
+
+    async def list_all_tools(self, client: fastmcp.Client) -> None:
+        tools = await client.list_tools()
+        for tool in sorted(tools, key=lambda t: t.name):
+            description = (tool.description or "").strip().splitlines()
+            summary = description[0] if description else ""
+            print(f"{tool.name}\t{summary}")
+
+    async def call_tool(self, client: fastmcp.Client) -> None:
+        tools = await client.list_tools()
+        tool = next((t for t in tools if t.name == self.tool), None)
+        if tool is None:
+            sys.exit(f"unknown tool: {self.tool}")
+        arguments = fastmcp.cli.client.parse_tool_arguments(
+            tuple(self.args), None, tool.inputSchema
+        )
+        result = await client.call_tool(
+            self.tool, arguments, raise_on_error=False
+        )
+        if result.structured_content is not None:
+            print(json.dumps(result.structured_content, indent=2))
+        else:
+            for block in result.content:
+                print(getattr(block, "text", block))
+        if result.is_error:
+            sys.exit(1)
+
+    async def run(self) -> None:
+        async with fastmcp.Client(self.url, auth=self.build_auth()) as client:
+            if self.tool:
+                await self.call_tool(client)
+            else:
+                await self.list_all_tools(client)
+
+    def cli_cmd(self) -> None:
+        asyncio.run(self.run())
+
+
+if __name__ == "__main__":
+    pydantic_settings.CliApp.run(Cli)
