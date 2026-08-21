@@ -424,7 +424,6 @@ if HOSTNAME in ("sol", "mars", "phobos"):
             "prettier",
             "pwgen",
             "pyalpm",
-            "pyright",
             "python",
             "rclone",
             "reflector",
@@ -446,6 +445,7 @@ if HOSTNAME in ("sol", "mars", "phobos"):
             "traceroute",
             "transmission-cli",
             "tree-sitter-cli",  # for neovim plugins
+            "ty",
             "typescript-language-server",
             "unace",
             "unrar",

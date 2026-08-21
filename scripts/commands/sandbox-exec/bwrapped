@@ -1,0 +1,721 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# dependencies = [
+#   "pydantic-settings",
+#   "tomli-w",
+# ]
+# ///
+"""Run a program inside a seatbelt sandbox with filesystem isolation."""
+
+import abc
+import asyncio
+import contextlib
+import os
+import pathlib
+import platform
+import shutil
+import signal
+import sys
+import tempfile
+import types
+import typing
+
+import pydantic
+import pydantic_settings
+import tomli_w
+
+
+class SandboxError(Exception):
+    """A failure that leaves no sandbox and no server running."""
+
+
+class Seatbelt:
+    BIN = "sandbox-exec"
+
+    # Rights every process needs before it can reach a single file, and the
+    # traversal of every parent directory on the way to an allowed path.
+    _PREAMBLE = (
+        "(deny default)",
+        "(allow process-exec* process-fork process-info* signal)",
+        "(allow sysctl-read)",
+        "(allow mach-lookup mach-task-name)",
+        "(allow ipc-posix-shm)",
+        "(allow file-read-metadata)",
+        '(allow file-read* (literal "/"))',
+        '(allow file-write-data (literal "/dev/null") (literal "/dev/tty"))',
+        '(allow file-ioctl (literal "/dev/dtracehelper") (literal "/dev/tty"))',
+    )
+
+    def __init__(self, *args):
+        self._rules = ["(version 1)", *self._PREAMBLE]
+        self._denials = []
+        self._env = dict(os.environ)
+        self._cwd = None
+        self._args = list(args)
+
+    # A rule naming one fully resolved path. Seatbelt matches the real file,
+    # so a symlink is stated as whatever it points at. A path that does not
+    # exist yet covers its whole tree, which is what lets the sandbox create
+    # a directory the rule was written for.
+    @staticmethod
+    def _rule(action, operation, path):
+        path = pathlib.Path(path).resolve()
+        pattern = "literal" if path.is_file() else "subpath"
+        quoted = str(path).replace("\\", "\\\\").replace('"', '\\"')
+        return f'({action} {operation} ({pattern} "{quoted}"))'
+
+    def allow(self, operation, path):
+        self._rules.append(self._rule("allow", operation, path))
+        return self
+
+    # Denials are held back and emitted last, because the final rule matching
+    # a path is the one that decides it.
+    def deny(self, operation, path):
+        self._denials.append(self._rule("deny", operation, path))
+        return self
+
+    # Seatbelt cannot remap a path, so a destination that renames its source
+    # cannot be honored at all.
+    def _same_path(self, src, dest):
+        if dest is not None and pathlib.Path(dest) != pathlib.Path(src):
+            raise SandboxError(
+                f"seatbelt cannot mount {src} at {dest}: destinations must"
+                " match their source"
+            )
+
+    # The write denial sits beside its own allow rather than with the trailing
+    # denials, so a later read-write rule for a path underneath still wins.
+    def ro_bind(self, src, dest=None):
+        self._same_path(src, dest)
+        self.allow("file-read*", src)
+        self._rules.append(self._rule("deny", "file-write*", src))
+        return self
+
+    def bind(self, src, dest=None):
+        self._same_path(src, dest)
+        return self.allow("file*", src)
+
+    def hide(self, path):
+        return self.deny("file-read*", path)
+
+    def setenv(self, name, value):
+        self._env[name] = str(value)
+        return self
+
+    def unsetenv(self, name):
+        self._env.pop(name, None)
+        return self
+
+    def chdir(self, path):
+        self._cwd = pathlib.Path(path)
+        return self
+
+    def arg(self, *args):
+        self._args.extend(str(a) for a in args if a is not None)
+        return self
+
+    def unshare_net(self, enable=True):
+        self._rules.append("(deny network*)" if enable else "(allow network*)")
+        return self
+
+    @property
+    def profile(self):
+        return "\n".join([*self._rules, *self._denials]) + "\n"
+
+    @property
+    def env(self):
+        return dict(self._env)
+
+    @property
+    def cwd(self):
+        return self._cwd
+
+    def __iter__(self):
+        return iter([self.BIN, "-p", self.profile, *self._args])
+
+
+HOME = pathlib.Path.home()
+NOTED_BIN = "noted"
+NOTED_SERVER_CWD = pathlib.Path("/")
+ENDPOINT_SCHEME = "unix://"
+ENDPOINT_TIMEOUT = 10.0
+SERVER_GRACE = 5.0
+SANDBOX_UNSETENV = [
+    "NOTED_DIR",
+    "NOTED_ENV_FILE",
+    "NOTED_POLICY",
+    "NOTED_SCOPE",
+    "NOTED_SOURCE",
+]
+WORK_DIR = pathlib.Path.cwd().resolve()
+CONFIG_NAME = ".bwrapped.conf"
+GIT_CONFIG = HOME / ".config/git"
+
+CLAUDE_CONFIG_ENV = os.environ.get("CLAUDE_CONFIG_DIR")
+if CLAUDE_CONFIG_ENV:
+    CLAUDE_CONFIG_DIR = pathlib.Path(CLAUDE_CONFIG_ENV)
+    CLAUDE_JSON = CLAUDE_CONFIG_DIR / ".claude.json"
+else:
+    CLAUDE_CONFIG_DIR = pathlib.Path.home() / ".claude"
+    CLAUDE_JSON = pathlib.Path.home() / ".claude.json"
+# claude writes here whatever TMPDIR says, so the path has to be granted by
+# name. It is shared with every unsandboxed claude this user runs.
+CLAUDE_TMP = pathlib.Path(f"/private/tmp/claude-{os.getuid()}")
+# where claude keeps its token on macOS
+KEYCHAINS = HOME / "Library/Keychains"
+CODEX_HOME = os.environ.get("CODEX_HOME") or HOME / ".codex"
+PI_DIR = HOME / ".pi"
+PI_AGENT_DIR = PI_DIR / "agent"
+DOTFILES_PUBLIC = HOME / ".dotfiles" / "public"
+DOTFILES_PUBLIC_BIN = DOTFILES_PUBLIC / ".local" / "bin"
+DOTFILES_PUBLIC_SCRIPTS = DOTFILES_PUBLIC / "scripts"
+
+DEFAULT_CONFIG = {
+    "bind": {
+        "rw": [
+            "/dev",
+            WORK_DIR,
+        ],
+        "ro": [
+            "/Applications",
+            "/Library",
+            "/System",
+            "/bin",
+            "/opt",
+            "/private/etc",
+            "/private/var/db",
+            "/private/var/select",
+            "/sbin",
+            "/usr",
+            HOME / ".local/bin",
+            DOTFILES_PUBLIC_BIN,
+            DOTFILES_PUBLIC_SCRIPTS,
+            HOME / ".cargo",
+            HOME / ".rustup",
+            GIT_CONFIG,
+            GIT_CONFIG.resolve(),
+        ],
+    },
+    "env": {
+        "unset": SANDBOX_UNSETENV,
+        "set": {
+            "HOME": HOME,
+        },
+    },
+    "chdir": WORK_DIR,
+    "unshare_net": False,
+}
+
+PROGRAM_CONFIG = {
+    "claude": {
+        "bind": {
+            "rw": [
+                str(CLAUDE_CONFIG_DIR),
+                str(CLAUDE_JSON),
+                CLAUDE_TMP,
+                KEYCHAINS,
+            ],
+        },
+        "env": {
+            "inherit": ["CLAUDE_CONFIG_DIR"],
+        },
+    },
+    "codex": {
+        "bind": {
+            "rw": [CODEX_HOME],
+        },
+        "env": {
+            "inherit": ["CODEX_HOME"],
+        },
+    },
+    "pi": {
+        "bind": {"rw": [PI_DIR, PI_AGENT_DIR.resolve()]},
+    },
+}
+
+
+class Bind(pydantic.BaseModel, abc.ABC):
+    """One abstract bind mount."""
+
+    model_config = pydantic.ConfigDict(extra="forbid", frozen=True)
+
+    source: pathlib.Path
+    target: pathlib.Path | None = None
+
+    @classmethod
+    def from_str(cls, value: str) -> "Bind":
+        parts: list[str] = []
+        part: list[str] = []
+        escaped = False
+        for char in value:
+            if escaped:
+                if char not in (":", "\\"):
+                    raise ValueError(f"unsupported escape \\{char}")
+                part.append(char)
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == ":":
+                parts.append("".join(part))
+                part = []
+            else:
+                part.append(char)
+        if escaped:
+            raise ValueError("bind ends with an incomplete escape")
+        parts.append("".join(part))
+
+        if not parts[0]:
+            raise ValueError("bind source cannot be empty")
+        if len(parts) > 3:
+            raise ValueError("bind must be SOURCE[:DESTINATION[:ro|rw]]")
+
+        target = (
+            pathlib.Path(parts[1]) if len(parts) >= 2 and parts[1] else None
+        )
+        mode = parts[2] if len(parts) == 3 else "rw"
+        if mode not in ("ro", "rw"):
+            raise ValueError("bind mode must be 'ro' or 'rw'")
+        bind_type = ReadOnlyBind if mode == "ro" else ReadWriteBind
+        return bind_type(source=pathlib.Path(parts[0]), target=target)
+
+    @pydantic.field_validator("target", mode="before")
+    @classmethod
+    def empty_target_means_source(cls, value: typing.Any) -> typing.Any:
+        return None if value == "" else value
+
+    def relative_to(self, directory: pathlib.Path) -> "Bind":
+        source = self.source
+        if not source.is_absolute():
+            source = directory / source
+        return self.model_copy(update={"source": source.resolve()})
+
+    @property
+    def destination(self) -> pathlib.Path:
+        return self.source if self.target is None else self.target
+
+    def serialized(self, *, read_only: bool) -> dict[str, typing.Any]:
+        value: dict[str, typing.Any] = {
+            "source": str(self.source),
+            "read_only": read_only,
+        }
+        if self.target is not None:
+            value["target"] = str(self.target)
+        return value
+
+    @abc.abstractmethod
+    def mount(self, sandbox: Seatbelt) -> None:
+        """Add this mount to a Seatbelt profile."""
+
+    @abc.abstractmethod
+    def serialize(self) -> dict[str, typing.Any]:
+        """Serialize this concrete mount for a project config."""
+
+
+class ReadOnlyBind(Bind):
+    def mount(self, sandbox: Seatbelt) -> None:
+        sandbox.ro_bind(self.source, self.target)
+
+    def serialize(self) -> dict[str, typing.Any]:
+        return self.serialized(read_only=True)
+
+
+class ReadWriteBind(Bind):
+    def mount(self, sandbox: Seatbelt) -> None:
+        sandbox.bind(self.source, self.target)
+
+    def serialize(self) -> dict[str, typing.Any]:
+        return self.serialized(read_only=False)
+
+
+class SandboxSettings(pydantic_settings.BaseSettings):
+    """Sandbox options shared by the project file and command line."""
+
+    model_config = pydantic_settings.SettingsConfigDict(extra="forbid")
+
+    ro: pydantic_settings.CliImplicitFlag[bool] = pydantic.Field(
+        False, description="Mount the working directory read-only"
+    )
+    bind: list[Bind] = pydantic.Field(
+        default_factory=list,
+        description="Bind SOURCE[:DESTINATION[:ro|rw]] (repeatable)",
+    )
+    env: dict[str, str] = pydantic.Field(
+        default_factory=dict,
+        description="Set KEY=VALUE (repeatable)",
+    )
+    noted_scope: str | None = pydantic.Field(
+        None, description="Set NOTED_SCOPE inside the sandbox"
+    )
+    noted_source: str | None = pydantic.Field(
+        None, description="Set NOTED_SOURCE (defaults to PROGRAM)"
+    )
+
+    @pydantic.field_validator("bind", mode="before")
+    @classmethod
+    def deserialize_binds(cls, value: typing.Any) -> typing.Any:
+        if not isinstance(value, list):
+            return value
+
+        binds: list[typing.Any] = []
+        for item in value:
+            if isinstance(item, str):
+                binds.append(Bind.from_str(item))
+                continue
+            if isinstance(item, dict):
+                fields = dict(item)
+                read_only = fields.pop("read_only", False)
+                if not isinstance(read_only, bool):
+                    raise ValueError("bind read_only must be a boolean")
+                bind_type = ReadOnlyBind if read_only else ReadWriteBind
+                binds.append(bind_type.model_validate(fields))
+                continue
+            binds.append(item)
+        return binds
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[pydantic_settings.BaseSettings],
+        init_settings: pydantic_settings.PydanticBaseSettingsSource,
+        env_settings: pydantic_settings.PydanticBaseSettingsSource,
+        dotenv_settings: pydantic_settings.PydanticBaseSettingsSource,
+        file_secret_settings: pydantic_settings.PydanticBaseSettingsSource,
+    ) -> tuple[pydantic_settings.PydanticBaseSettingsSource, ...]:
+        # Invocation settings come only from the CLI and selected TOML file.
+        return (init_settings,)
+
+
+class InvocationSettings(SandboxSettings):
+    """Run a program inside a seatbelt sandbox with filesystem isolation."""
+
+    model_config = pydantic_settings.SettingsConfigDict(
+        cli_parse_args=True,
+        cli_kebab_case=True,
+        cli_ignore_unknown_args=True,
+        cli_shortcuts={"bind": "b", "env": "e", "write-config": "w"},
+        extra="forbid",
+    )
+
+    program: pydantic_settings.CliPositionalArg[str] = pydantic.Field(
+        description="Program to run inside the sandbox"
+    )
+    program_args: pydantic_settings.CliUnknownArgs
+    write_config: pathlib.Path | None = pydantic.Field(
+        None,
+        description=(
+            "Write the effective settings as TOML; a directory means its "
+            f"{CONFIG_NAME}"
+        ),
+    )
+
+
+# the nearest .bwrapped.conf at or above directory, if one exists
+def find_config(directory: pathlib.Path) -> pathlib.Path | None:
+    for parent in (directory, *directory.parents):
+        candidate = parent / CONFIG_NAME
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def unique_binds(binds: list[Bind]) -> list[Bind]:
+    unique: list[Bind] = []
+    seen: set[pathlib.Path] = set()
+    for bind in reversed(binds):
+        if bind.destination not in seen:
+            seen.add(bind.destination)
+            unique.append(bind)
+    unique.reverse()
+    return unique
+
+
+# CLI scalars override TOML scalars; collections merge TOML then CLI.
+def load_settings(config_path: pathlib.Path | None) -> InvocationSettings:
+    cli = InvocationSettings()
+    if config_path is None:
+        project = SandboxSettings.model_validate({})
+    else:
+        try:
+            values = pydantic_settings.TomlConfigSettingsSource(
+                SandboxSettings, toml_file=config_path
+            )()
+            project = SandboxSettings.model_validate(values)
+        except (OSError, ValueError, pydantic_settings.SettingsError) as e:
+            raise SandboxError(f"cannot load {config_path}: {e}") from e
+
+    config_dir = WORK_DIR if config_path is None else config_path.parent
+    updates: dict[str, typing.Any] = {
+        "bind": unique_binds(
+            [
+                *(bind.relative_to(config_dir) for bind in project.bind),
+                *(bind.relative_to(WORK_DIR) for bind in cli.bind),
+            ]
+        ),
+        "env": {**project.env, **cli.env},
+    }
+    for field in ("ro", "noted_scope", "noted_source"):
+        if field not in cli.model_fields_set:
+            updates[field] = getattr(project, field)
+    return cli.model_copy(update=updates)
+
+
+# Write effective settings; absolute sources preserve their meaning at any PATH.
+def write_config(settings: InvocationSettings, path: pathlib.Path) -> None:
+    if path.is_dir():
+        path /= CONFIG_NAME
+    value: dict[str, typing.Any] = {
+        "ro": settings.ro,
+        "bind": [
+            bind.relative_to(WORK_DIR).serialize() for bind in settings.bind
+        ],
+        "env": settings.env,
+    }
+    if settings.noted_scope is not None:
+        value["noted_scope"] = settings.noted_scope
+    if settings.noted_source is not None:
+        value["noted_source"] = settings.noted_source
+    try:
+        with path.open("wb") as config_file:
+            tomli_w.dump(value, config_file)
+    except OSError as e:
+        raise SandboxError(f"cannot write {path}: {e}") from e
+
+
+# the first line stdout carries without its newline, within ENDPOINT_TIMEOUT
+#   seconds
+# a timeout, an EOF, and a line that is not `unix://<path>` are rejected
+async def read_endpoint(stdout: asyncio.StreamReader) -> str:
+    try:
+        async with asyncio.timeout(ENDPOINT_TIMEOUT):
+            raw = await stdout.readline()
+    except TimeoutError as e:
+        raise SandboxError(
+            "noted server socket announced no endpoint within"
+            f" {ENDPOINT_TIMEOUT:g}s"
+        ) from e
+    if not raw:
+        raise SandboxError(
+            "noted server socket closed stdout before announcing an endpoint"
+        )
+    # A socket path is raw bytes; surrogateescape hands it to sandbox-exec
+    # intact.
+    line = raw.rstrip(b"\n").decode(errors="surrogateescape")
+    if not line.startswith(ENDPOINT_SCHEME) or line == ENDPOINT_SCHEME:
+        raise SandboxError(f"noted server socket announced {line!r}")
+    return line
+
+
+# SIGTERM, then SIGKILL SERVER_GRACE seconds later; returns once reaped
+async def terminate(process: asyncio.subprocess.Process) -> None:
+    if process.returncode is not None:
+        return
+    with contextlib.suppress(ProcessLookupError):
+        process.terminate()
+    try:
+        async with asyncio.timeout(SERVER_GRACE):
+            await process.wait()
+    except TimeoutError:
+        with contextlib.suppress(ProcessLookupError):
+            process.kill()
+        await process.wait()
+
+
+class NotesServer:
+    """The `noted server socket` process this invocation owns."""
+
+    def __init__(
+        self, process: asyncio.subprocess.Process, endpoint: str
+    ) -> None:
+        self._process = process
+        self._endpoint = endpoint
+
+    # cwd `/`, so no `.notedenv` at or above the invocation directory is read
+    #   and the root comes from the wrapper's own NOTED_DIR or noted.env
+    # the spawn environment is the wrapper's own minus NOTED_URL
+    # its own session, so no terminal-generated signal reaches it
+    # stdin /dev/null, stderr /dev/null, stdout a pipe held open until stop
+    # a `noted` PATH holds no entry for, and any rejected endpoint line,
+    #   terminates the process and raises SandboxError
+    @classmethod
+    async def start(cls) -> "NotesServer":
+        env = {k: v for k, v in os.environ.items() if k != "NOTED_URL"}
+        try:
+            process = await asyncio.create_subprocess_exec(
+                NOTED_BIN,
+                "server",
+                "socket",
+                cwd=NOTED_SERVER_CWD,
+                env=env,
+                stdin=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+                start_new_session=True,
+            )
+        except OSError as e:
+            raise SandboxError(f"cannot run {NOTED_BIN}: {e}") from e
+        try:
+            endpoint = await read_endpoint(process.stdout)
+        except SandboxError:
+            await terminate(process)
+            raise
+        return cls(process, endpoint)
+
+    @property
+    def endpoint(self) -> str:
+        return self._endpoint
+
+    @property
+    def socket(self) -> pathlib.Path:
+        return pathlib.Path(self._endpoint[len(ENDPOINT_SCHEME) :])
+
+    async def stop(self) -> None:
+        await terminate(self._process)
+
+
+# the file PATH resolves name to
+# a name PATH holds no entry for is rejected
+def resolve_program(name: str) -> pathlib.Path:
+    path = shutil.which(name)
+    if path is None:
+        raise SandboxError(f"{name} not found on PATH")
+    return pathlib.Path(path)
+
+
+# the sandbox's exit status, 128 + signum when a signal killed it
+# SIGINT and SIGQUIT are handled rather than ignored: exec resets a handled
+#   signal to its default, so Ctrl-C still reaches the sandboxed program
+async def run_sandbox(sandbox: Seatbelt) -> int:
+    def keep_waiting(signum: int, frame: types.FrameType | None) -> None:
+        pass
+
+    for sig in (signal.SIGINT, signal.SIGQUIT):
+        signal.signal(sig, keep_waiting)
+    cmd = list(sandbox)
+    try:
+        process = await asyncio.create_subprocess_exec(
+            *cmd, env=sandbox.env, cwd=sandbox.cwd
+        )
+    except OSError as e:
+        raise SandboxError(f"cannot launch {cmd[0]}: {e}") from e
+    status = await process.wait()
+    return status if status >= 0 else 128 - status
+
+
+def build_sandbox(
+    args: InvocationSettings,
+    program: pathlib.Path,
+    endpoint: str,
+    socket: pathlib.Path,
+    config_path: pathlib.Path | None,
+    scratch: pathlib.Path,
+) -> Seatbelt:
+    config = DEFAULT_CONFIG
+    extra = PROGRAM_CONFIG.get(program.name, {})
+
+    sandbox = Seatbelt()
+    sandbox.unshare_net(config["unshare_net"])
+
+    # Where bubblewrap mounts an empty tmpfs over /tmp, seatbelt cannot
+    # replace a directory, so the sandbox gets a private directory of its own
+    # and the host /tmp stays unreachable.
+    sandbox.bind(scratch)
+    sandbox.setenv("TMPDIR", scratch)
+
+    ro_paths = config["bind"]["ro"] + extra.get("bind", {}).get("ro", [])
+    rw_paths = config["bind"]["rw"] + extra.get("bind", {}).get("rw", [])
+    if args.ro:
+        ro_paths = [*ro_paths, WORK_DIR]
+        rw_paths = [p for p in rw_paths if pathlib.Path(p) != WORK_DIR]
+
+    def add_bind(p, *, readonly):
+        p = pathlib.Path(p)
+        # A rw workdir rule already permits everything beneath it.
+        if not args.ro and p != WORK_DIR and p.is_relative_to(WORK_DIR):
+            return
+        if readonly:
+            sandbox.ro_bind(p)
+        else:
+            sandbox.bind(p)
+
+    for p in ro_paths:
+        add_bind(p, readonly=True)
+    for p in rw_paths:
+        add_bind(p, readonly=False)
+
+    # The only hole to the notes, `--ro` or not, and the socket file alone.
+    sandbox.bind(socket)
+
+    for requested in args.bind:
+        requested.relative_to(WORK_DIR).mount(sandbox)
+
+    # Denials are emitted after every rule, so the selected file cannot be
+    # read however broadly its directory was granted.
+    if config_path is not None:
+        sandbox.hide(config_path)
+
+    for name in config["env"]["unset"] + extra.get("env", {}).get("unset", []):
+        sandbox.unsetenv(name)
+    for name, value in {
+        **config["env"]["set"],
+        **extra.get("env", {}).get("set", {}),
+        "NOTED_URL": endpoint,
+    }.items():
+        sandbox.setenv(name, value)
+    for name, value in args.env.items():
+        sandbox.setenv(name, value)
+    if args.noted_scope is not None:
+        sandbox.setenv("NOTED_SCOPE", args.noted_scope)
+    sandbox.setenv(
+        "NOTED_SOURCE",
+        args.program if args.noted_source is None else args.noted_source,
+    )
+
+    sandbox.chdir(config["chdir"])
+    sandbox.arg(str(program))
+    sandbox.arg(*args.program_args)
+
+    return sandbox
+
+
+async def main() -> None:
+    config_path = find_config(WORK_DIR)
+    try:
+        if platform.system() != "Darwin":
+            raise SandboxError(
+                f"seatbelt needs macOS, not {platform.system()}"
+            )
+        if not shutil.which(Seatbelt.BIN):
+            raise SandboxError(f"{Seatbelt.BIN} not found")
+        args = load_settings(config_path)
+        if args.write_config is not None:
+            write_config(args, args.write_config)
+        program = resolve_program(args.program)
+        server = await NotesServer.start()
+    except (
+        SandboxError,
+        pydantic_settings.SettingsError,
+        pydantic.ValidationError,
+    ) as e:
+        sys.exit(f"bwrapped: {e}")
+    scratch = pathlib.Path(tempfile.mkdtemp(prefix="bwrapped-")).resolve()
+    try:
+        status = await run_sandbox(
+            build_sandbox(
+                args,
+                program,
+                server.endpoint,
+                server.socket,
+                config_path,
+                scratch,
+            )
+        )
+    except SandboxError as e:
+        sys.exit(f"bwrapped: {e}")
+    finally:
+        await server.stop()
+        shutil.rmtree(scratch, ignore_errors=True)
+    sys.exit(status)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

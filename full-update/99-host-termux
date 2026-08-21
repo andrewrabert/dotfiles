@@ -5,6 +5,6 @@ set -e
 if ! command -v termux-info > /dev/null; then
     exit
 fi
-if ! command -v pyright > /dev/null; then
-    uv tool install pyright
+if ! command -v ty > /dev/null; then
+    uv tool install ty
 fi

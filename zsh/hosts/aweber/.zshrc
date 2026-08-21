@@ -1,1 +1,1 @@
-. "${DOTFILES_AWEBER}/zsh/dev-workspace.zsh"
+. "${DOTFILES_PRIVATE}/zsh/.zshrc"

@@ -41,7 +41,6 @@ EXPECTED_PACKAGES = {
     "oxipng",
     "pandoc",
     "prettier",
-    "pyright",
     "rar",
     "ripgrep",
     "rsync",

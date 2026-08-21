@@ -150,3 +150,7 @@ bang-bang() {
 }
 zle -N bang-bang
 bindkey '^p' bang-bang
+
+if [ -e ~/.zshrc.local ]; then
+    . ~/.zshrc.local
+fi
