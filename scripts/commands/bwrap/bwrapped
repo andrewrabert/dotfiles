@@ -283,6 +283,10 @@ class SandboxSettings(pydantic_settings.BaseSettings):
         default_factory=list,
         description="Bind SOURCE[:DESTINATION[:ro|rw]] (repeatable)",
     )
+    exclude: list[pathlib.Path] = pydantic.Field(
+        default_factory=list,
+        description="Hide PATH inside the sandbox (repeatable)",
+    )
     env: dict[str, str] = pydantic.Field(
         default_factory=dict,
         description="Set KEY=VALUE (repeatable)",
@@ -336,7 +340,12 @@ class InvocationSettings(SandboxSettings):
         cli_parse_args=True,
         cli_kebab_case=True,
         cli_ignore_unknown_args=True,
-        cli_shortcuts={"bind": "b", "env": "e", "write-config": "w"},
+        cli_shortcuts={
+            "bind": "b",
+            "env": "e",
+            "exclude": "x",
+            "write-config": "w",
+        },
         extra="forbid",
     )
 
@@ -410,6 +419,16 @@ def load_settings(config_path: pathlib.Path | None) -> InvocationSettings:
                 *(bind.relative_to(WORK_DIR) for bind in cli.bind),
             ]
         ),
+        "exclude": [
+            *(
+                (path if path.is_absolute() else config_dir / path).resolve()
+                for path in project.exclude
+            ),
+            *(
+                (path if path.is_absolute() else WORK_DIR / path).resolve()
+                for path in cli.exclude
+            ),
+        ],
         "env": {**project.env, **cli.env},
     }
     for field in ("ro", "noted_scope", "noted_source"):
@@ -427,6 +446,7 @@ def write_config(settings: InvocationSettings, path: pathlib.Path) -> None:
         "bind": [
             bind.relative_to(WORK_DIR).serialize() for bind in settings.bind
         ],
+        "exclude": [str(path) for path in settings.exclude],
         "env": settings.env,
     }
     if settings.noted_scope is not None:
@@ -627,6 +647,14 @@ def build_command(
     # Apply this after every broader mount so the selected file cannot be read.
     if config_path is not None:
         bwrap.ro_bind("/dev/null", config_path)
+
+    for path in args.exclude:
+        if path.is_dir():
+            bwrap.tmpfs(str(path))
+        elif path.is_file():
+            bwrap.bind("/dev/null", path)
+        else:
+            raise SandboxError(f"cannot exclude nonexistent path: {path}")
 
     for name in config["env"]["inherit"] + extra.get("env", {}).get(
         "inherit", []
