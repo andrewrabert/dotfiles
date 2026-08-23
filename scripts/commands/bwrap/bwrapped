@@ -85,7 +85,6 @@ class Bubblewrap:
 
 
 HOME = pathlib.Path.home()
-NOTED_BIN = "noted"
 NOTED_SERVER_CWD = pathlib.Path("/")
 ENDPOINT_SCHEME = "unix://"
 ENDPOINT_TIMEOUT = 10.0
@@ -289,7 +288,7 @@ class SandboxSettings(pydantic_settings.BaseSettings):
         description="Set KEY=VALUE (repeatable)",
     )
     noted_scope: str | None = pydantic.Field(
-        None, description="Set NOTED_SCOPE inside the sandbox"
+        None, description="Restrict the notes server to this scope"
     )
     noted_source: str | None = pydantic.Field(
         None, description="Set NOTED_SOURCE (defaults to PROGRAM)"
@@ -372,6 +371,21 @@ def unique_binds(binds: list[Bind]) -> list[Bind]:
             unique.append(bind)
     unique.reverse()
     return unique
+
+
+def split_binds(binds: list[Bind]) -> tuple[list[Bind], list[Bind]]:
+    outside: list[Bind] = []
+    inside: list[Bind] = []
+
+    for bind in binds:
+        if not bind.source.exists():
+            raise RuntimeError(f"does not exist: {bind}")
+        if bind.destination.is_relative_to(WORK_DIR):
+            inside.append(bind)
+        else:
+            outside.append(bind)
+
+    return outside, inside
 
 
 # CLI scalars override TOML scalars; collections merge TOML then CLI.
@@ -492,22 +506,20 @@ class NotesServer:
     # a `noted` PATH holds no entry for, and any rejected endpoint line,
     #   terminates the process and raises SandboxError
     @classmethod
-    def start(cls) -> "NotesServer":
+    def start(cls, scope: str) -> "NotesServer":
         env = {k: v for k, v in os.environ.items() if k != "NOTED_URL"}
-        try:
-            process = subprocess.Popen(
-                [NOTED_BIN, "server", "socket"],
-                cwd=NOTED_SERVER_CWD,
-                env=env,
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
-                bufsize=0,
-                start_new_session=True,
-                preexec_fn=die_with_parent(os.getpid()),
-            )
-        except OSError as e:
-            raise SandboxError(f"cannot run {NOTED_BIN}: {e}") from e
+        scope = scope or ""
+        process = subprocess.Popen(
+            ["noted", "server", "socket", f"--scope={scope}"],
+            cwd=NOTED_SERVER_CWD,
+            env=env,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            bufsize=0,
+            start_new_session=True,
+            preexec_fn=die_with_parent(os.getpid()),
+        )
         try:
             endpoint = read_endpoint_line(process.stdout.fileno())
         except SandboxError:
@@ -595,6 +607,12 @@ def build_command(
         else:
             bind(p, p)
 
+    outside_binds, inside_binds = split_binds(
+        [requested.relative_to(WORK_DIR) for requested in args.bind]
+    )
+    for requested in outside_binds:
+        requested.mount(bwrap)
+
     for p in ro_paths:
         add_bind(p, readonly=True)
     for p in rw_paths:
@@ -603,11 +621,8 @@ def build_command(
     # The only hole to the notes, `--ro` or not, and the socket file alone.
     bwrap.bind(socket, socket)
 
-    for requested in args.bind:
-        requested = requested.relative_to(WORK_DIR)
-        source = requested.source
-        if source.exists():
-            requested.mount(bwrap)
+    for requested in inside_binds:
+        requested.mount(bwrap)
 
     # Apply this after every broader mount so the selected file cannot be read.
     if config_path is not None:
@@ -627,8 +642,6 @@ def build_command(
         bwrap.setenv(name, value)
     for name, value in args.env.items():
         bwrap.setenv(name, value)
-    if args.noted_scope is not None:
-        bwrap.setenv("NOTED_SCOPE", args.noted_scope)
     bwrap.setenv(
         "NOTED_SOURCE",
         args.program if args.noted_source is None else args.noted_source,
@@ -650,7 +663,7 @@ def main() -> None:
         if args.write_config is not None:
             write_config(args, args.write_config)
         program = resolve_program(args.program)
-        server = NotesServer.start()
+        server = NotesServer.start(args.noted_scope)
     except (
         SandboxError,
         pydantic_settings.SettingsError,
