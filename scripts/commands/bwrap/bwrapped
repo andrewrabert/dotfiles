@@ -287,6 +287,10 @@ class SandboxSettings(pydantic_settings.BaseSettings):
         default_factory=list,
         description="Hide PATH inside the sandbox (repeatable)",
     )
+    disable: list[str] = pydantic.Field(
+        default_factory=list,
+        description="Disable every PATH match for NAME (repeatable)",
+    )
     env: dict[str, str] = pydantic.Field(
         default_factory=dict,
         description="Set KEY=VALUE (repeatable)",
@@ -342,6 +346,7 @@ class InvocationSettings(SandboxSettings):
         cli_ignore_unknown_args=True,
         cli_shortcuts={
             "bind": "b",
+            "disable": "d",
             "env": "e",
             "exclude": "x",
             "write-config": "w",
@@ -429,6 +434,7 @@ def load_settings(config_path: pathlib.Path | None) -> InvocationSettings:
                 for path in cli.exclude
             ),
         ],
+        "disable": [*project.disable, *cli.disable],
         "env": {**project.env, **cli.env},
     }
     for field in ("ro", "noted_scope", "noted_source"):
@@ -447,6 +453,7 @@ def write_config(settings: InvocationSettings, path: pathlib.Path) -> None:
             bind.relative_to(WORK_DIR).serialize() for bind in settings.bind
         ],
         "exclude": [str(path) for path in settings.exclude],
+        "disable": settings.disable,
         "env": settings.env,
     }
     if settings.noted_scope is not None:
@@ -560,6 +567,21 @@ class NotesServer:
         self._process.stdout.close()
 
 
+def which_all(name: str) -> list[pathlib.Path]:
+    matches: list[pathlib.Path] = []
+    seen: set[pathlib.Path] = set()
+    path = os.environ.get("PATH", os.defpath)
+    for directory in path.split(os.pathsep):
+        match = shutil.which(name, path=directory)
+        if match is None:
+            continue
+        candidate = pathlib.Path(match).resolve()
+        if candidate not in seen:
+            seen.add(candidate)
+            matches.append(candidate)
+    return matches
+
+
 # the file PATH resolves name to
 # a name PATH holds no entry for is rejected
 def resolve_program(name: str) -> pathlib.Path:
@@ -607,6 +629,9 @@ def build_command(
         bwrap.dir(p)
     ro_paths = config["bind"]["ro"] + extra.get("bind", {}).get("ro", [])
     rw_paths = config["bind"]["rw"] + extra.get("bind", {}).get("rw", [])
+    tmux = os.environ.get("TMUX")
+    if tmux:
+        rw_paths = [*rw_paths, tmux.split(",", 1)[0]]
     if args.ro:
         ro_paths = [*ro_paths, WORK_DIR]
         rw_paths = [p for p in rw_paths if pathlib.Path(p) != WORK_DIR]
@@ -647,6 +672,13 @@ def build_command(
     # Apply this after every broader mount so the selected file cannot be read.
     if config_path is not None:
         bwrap.ro_bind("/dev/null", config_path)
+
+    for name in args.disable:
+        matches = which_all(name)
+        if not matches:
+            raise SandboxError(f"cannot disable {name}: not found on PATH")
+        for path in matches:
+            bwrap.ro_bind("/dev/null", path)
 
     for path in args.exclude:
         if path.is_dir():
