@@ -93,7 +93,7 @@ class Seatbelt:
 
     def bind(self, src, dest=None):
         self._same_path(src, dest)
-        return self.allow("file*", src)
+        return self.allow("file* file-read* file-write* file-ioctl", src)
 
     def hide(self, path):
         return self.deny("file-read*", path)
@@ -531,14 +531,13 @@ class NotesServer:
 
     # cwd `/`, so no `.notedenv` at or above the invocation directory is read
     #   and the root comes from the wrapper's own NOTED_DIR or noted.env
-    # the spawn environment is the wrapper's own minus NOTED_URL
     # its own session, so no terminal-generated signal reaches it
     # stdin /dev/null, stderr /dev/null, stdout a pipe held open until stop
     # a `noted` PATH holds no entry for, and any rejected endpoint line,
     #   terminates the process and raises SandboxError
     @classmethod
     async def start(cls) -> "NotesServer":
-        env = {k: v for k, v in os.environ.items() if k != "NOTED_URL"}
+        env = dict(os.environ)
         try:
             process = await asyncio.create_subprocess_exec(
                 NOTED_BIN,
