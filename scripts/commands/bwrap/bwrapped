@@ -655,13 +655,13 @@ def build_command(
     outside_binds, inside_binds = split_binds(
         [requested.relative_to(WORK_DIR) for requested in args.bind]
     )
-    for requested in outside_binds:
-        requested.mount(bwrap)
-
     for p in ro_paths:
         add_bind(p, readonly=True)
     for p in rw_paths:
         add_bind(p, readonly=False)
+
+    for requested in outside_binds:
+        requested.mount(bwrap)
 
     # The only hole to the notes, `--ro` or not, and the socket file alone.
     bwrap.bind(socket, socket)
