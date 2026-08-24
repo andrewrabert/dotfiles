@@ -636,30 +636,35 @@ def build_command(
         ro_paths = [*ro_paths, WORK_DIR]
         rw_paths = [p for p in rw_paths if pathlib.Path(p) != WORK_DIR]
 
-    def add_bind(p, *, readonly):
+    default_binds: list[Bind] = []
+    symlinks: list[tuple[pathlib.Path, pathlib.Path]] = []
+
+    def add_default(p, *, readonly):
         p = pathlib.Path(p)
         if not p.exists():
             return
-        bind = bwrap.ro_bind if readonly else bwrap.bind
         # A rw workdir mount already provides everything beneath it.
         if not args.ro and p != WORK_DIR and p.is_relative_to(WORK_DIR):
             return
         # bwrap can't mount onto a symlink; bind the target, recreate the link.
         if p.is_symlink():
             target = p.resolve()
-            bind(target, target)
-            bwrap.symlink(target, p)
-        else:
-            bind(p, p)
+            symlinks.append((target, p))
+            p = target
+        bind_type = ReadOnlyBind if readonly else ReadWriteBind
+        default_binds.append(bind_type(source=p, target=p))
+
+    for p in ro_paths:
+        add_default(p, readonly=True)
+    for p in rw_paths:
+        add_default(p, readonly=False)
 
     outside_binds, inside_binds = split_binds(
-        [requested.relative_to(WORK_DIR) for requested in args.bind]
+        [
+            *default_binds,
+            *(requested.relative_to(WORK_DIR) for requested in args.bind),
+        ]
     )
-    for p in ro_paths:
-        add_bind(p, readonly=True)
-    for p in rw_paths:
-        add_bind(p, readonly=False)
-
     for requested in outside_binds:
         requested.mount(bwrap)
 
@@ -668,6 +673,9 @@ def build_command(
 
     for requested in inside_binds:
         requested.mount(bwrap)
+
+    for target, link in symlinks:
+        bwrap.symlink(target, link)
 
     # Apply this after every broader mount so the selected file cannot be read.
     if config_path is not None:
