@@ -150,6 +150,11 @@ DEFAULT_CONFIG = {
     "die_with_parent": True,
 }
 
+NO_NOTED_PROGRAM_ARGS = {
+    "claude": ["--disallowed-tools=mcp__noted__*"],
+    "pi": ["--no-noted"],
+}
+
 PROGRAM_CONFIG = {
     "claude": {
         "bind": {
@@ -354,6 +359,10 @@ class InvocationSettings(SandboxSettings):
         extra="forbid",
     )
 
+    no_noted: pydantic_settings.CliToggleFlag[bool] = pydantic.Field(
+        False,
+        description="Disable noted integration and remove NOTED_ variables",
+    )
     program: pydantic_settings.CliPositionalArg[str] = pydantic.Field(
         description="Program to run inside the sandbox"
     )
@@ -611,8 +620,8 @@ def run_sandbox(cmd: list[str]) -> int:
 def build_command(
     args: InvocationSettings,
     program: pathlib.Path,
-    endpoint: str,
-    socket: pathlib.Path,
+    endpoint: str | None,
+    socket: pathlib.Path | None,
     config_path: pathlib.Path | None,
 ) -> list[str]:
     config = DEFAULT_CONFIG
@@ -669,7 +678,8 @@ def build_command(
         requested.mount(bwrap)
 
     # The only hole to the notes, `--ro` or not, and the socket file alone.
-    bwrap.bind(socket, socket)
+    if socket is not None:
+        bwrap.bind(socket, socket)
 
     for requested in inside_binds:
         requested.mount(bwrap)
@@ -705,20 +715,32 @@ def build_command(
     for name, value in {
         **config["env"]["set"],
         **extra.get("env", {}).get("set", {}),
-        "NOTED_URL": endpoint,
     }.items():
         bwrap.setenv(name, value)
+    if endpoint is not None:
+        bwrap.setenv("NOTED_URL", endpoint)
     for name, value in args.env.items():
         bwrap.setenv(name, value)
-    bwrap.setenv(
-        "NOTED_SOURCE",
-        args.program if args.noted_source is None else args.noted_source,
-    )
+    if args.no_noted:
+        for name in (
+            set(SANDBOX_UNSETENV)
+            | {name for name in os.environ if name.startswith("NOTED_")}
+            | {name for name in args.env if name.startswith("NOTED_")}
+            | {"NOTED_URL"}
+        ):
+            bwrap.unsetenv(name)
+    else:
+        bwrap.setenv(
+            "NOTED_SOURCE",
+            args.program if args.noted_source is None else args.noted_source,
+        )
 
     bwrap.chdir(config["chdir"])
     bwrap.unshare_pid(config["unshare_pid"])
     bwrap.die_with_parent(config["die_with_parent"])
     bwrap.arg(str(program))
+    if args.no_noted:
+        bwrap.arg(*NO_NOTED_PROGRAM_ARGS.get(program.name, []))
     bwrap.arg(*args.program_args)
 
     return list(bwrap)
@@ -731,7 +753,7 @@ def main() -> None:
         if args.write_config is not None:
             write_config(args, args.write_config)
         program = resolve_program(args.program)
-        server = NotesServer.start(args.noted_scope)
+        server = None if args.no_noted else NotesServer.start(args.noted_scope)
     except (
         SandboxError,
         pydantic_settings.SettingsError,
@@ -743,15 +765,16 @@ def main() -> None:
             build_command(
                 args,
                 program,
-                server.endpoint,
-                server.socket,
+                None if server is None else server.endpoint,
+                None if server is None else server.socket,
                 config_path,
             )
         )
     except SandboxError as e:
         sys.exit(f"bwrapped: {e}")
     finally:
-        server.stop()
+        if server is not None:
+            server.stop()
     sys.exit(status)
 
 
