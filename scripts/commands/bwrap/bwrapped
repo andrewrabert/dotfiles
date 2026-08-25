@@ -296,6 +296,7 @@ class Seatbelt(Sandbox):
         "bind": {
             "rw": [
                 "/dev",
+                "/tmp",
                 WORK_DIR,
             ],
             "ro": [
