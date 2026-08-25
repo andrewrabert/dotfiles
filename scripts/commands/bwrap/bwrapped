@@ -314,6 +314,10 @@ class Seatbelt(Sandbox):
             "unset": SANDBOX_UNSETENV,
             "set": {
                 "HOME": HOME,
+                # seatbelt cannot fake an empty file at the client's global
+                # config path; denial reads as EPERM, which noted treats as
+                # fatal
+                "NOTED_ENV_FILE": "/dev/null",
             },
         },
         "chdir": WORK_DIR,
