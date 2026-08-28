@@ -1,0 +1,247 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.11"
+# dependencies = ["pyyaml"]
+# ///
+"""Delete Rust code in bulk: statements around a pattern, or comments."""
+
+import argparse
+import asyncio
+import sys
+from collections.abc import Sequence
+
+import yaml
+
+DEFAULT_KINDS = ("let_declaration", "expression_statement")
+
+
+def warn_dry_run() -> None:
+    print(
+        "warning: dry run, no files were changed. pass -a to apply",
+        file=sys.stderr,
+    )
+
+
+class AstGrep:
+    binary = "ast-grep"
+
+    async def scan(
+        self,
+        rule: dict,
+        path: str,
+        *,
+        apply: bool = False,
+        extra: Sequence[str] = (),
+    ) -> int:
+        command = [
+            self.binary,
+            "scan",
+            "--inline-rules",
+            yaml.safe_dump(rule, sort_keys=False),
+        ]
+        if apply:
+            command.append("-U")
+        command += [*extra, path]
+        process = await asyncio.create_subprocess_exec(*command)
+        code = await process.wait()
+        if not apply:
+            warn_dry_run()
+        return code
+
+
+class Uncomment:
+    binary = "uncomment"
+
+    async def strip(
+        self,
+        path: str,
+        *,
+        apply: bool = False,
+        remove_todo: bool = False,
+        remove_fixme: bool = False,
+        remove_doc: bool = False,
+        default_ignores: bool = True,
+        threads: int = 1,
+        extra: Sequence[str] = (),
+    ) -> int:
+        command = [self.binary, path, "-j", str(threads)]
+        if remove_todo:
+            command.append("--remove-todo")
+        if remove_fixme:
+            command.append("--remove-fixme")
+        if remove_doc:
+            command.append("--remove-doc")
+        if not default_ignores:
+            command.append("--no-default-ignores")
+        if not apply:
+            command += ["--dry-run", "--diff"]
+        command += extra
+        process = await asyncio.create_subprocess_exec(*command)
+        code = await process.wait()
+        if not apply:
+            warn_dry_run()
+        return code
+
+
+def drop_stmt_rule(pattern: str, kinds: Sequence[str]) -> dict:
+    inner = {"all": [{"matches": "is-stmt"}, {"matches": "holds-call"}]}
+    return {
+        "id": "drop-stmt",
+        "language": "rust",
+        "utils": {
+            "is-stmt": {"any": [{"kind": kind} for kind in kinds]},
+            "holds-call": {"has": {"pattern": pattern, "stopBy": "end"}},
+        },
+        "rule": {
+            "all": [
+                {"matches": "is-stmt"},
+                {"matches": "holds-call"},
+                {"not": {"has": dict(inner, stopBy="end")}},
+            ]
+        },
+        "fix": "",
+    }
+
+
+def drop_tests_rule() -> dict:
+    return {
+        "id": "drop-tests",
+        "language": "rust",
+        "utils": {
+            "test-attr": {
+                "kind": "attribute_item",
+                "regex": r"^#\[\s*(cfg\(test\)|([a-z_]+::)*test)\s*\]$",
+            },
+            "attr-run": {
+                "any": [
+                    {"matches": "test-attr"},
+                    {
+                        "kind": "attribute_item",
+                        "follows": {"matches": "test-attr"},
+                    },
+                ]
+            },
+        },
+        "rule": {
+            "any": [
+                {"kind": "mod_item", "follows": {"matches": "attr-run"}},
+                {"kind": "function_item", "follows": {"matches": "attr-run"}},
+                {"matches": "attr-run"},
+            ]
+        },
+        "fix": "",
+    }
+
+
+async def stmt(args: argparse.Namespace) -> int:
+    return await AstGrep().scan(
+        drop_stmt_rule(args.pattern, args.kinds.split(",")),
+        args.directory,
+        apply=args.apply,
+        extra=args.rest,
+    )
+
+
+async def tests(args: argparse.Namespace) -> int:
+    return await AstGrep().scan(
+        drop_tests_rule(),
+        args.path,
+        apply=args.apply,
+        extra=args.rest,
+    )
+
+
+async def comments(args: argparse.Namespace) -> int:
+    return await Uncomment().strip(
+        args.path,
+        apply=args.apply,
+        remove_todo=True,
+        remove_fixme=True,
+        remove_doc=True,
+        default_ignores=False,
+        threads=0,
+        extra=args.rest,
+    )
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    subcommands = parser.add_subparsers(dest="subcommand", required=True)
+
+    stmt_parser = subcommands.add_parser(
+        "stmt",
+        help="delete the innermost node of a given kind containing a pattern",
+        epilog=(
+            "discover a kind with: "
+            "ast-grep run -l rust -p 'if $C { $$$B }' --debug-query=ast FILE"
+        ),
+    )
+    stmt_parser.add_argument("directory", help="path to scan")
+    stmt_parser.add_argument(
+        "pattern", help="ast-grep pattern, e.g. 'Settings::resolve($$$A)'"
+    )
+    stmt_parser.add_argument(
+        "-k",
+        "--kinds",
+        default=",".join(DEFAULT_KINDS),
+        help="enclosing node kinds to delete, comma separated (default: %(default)s)",
+    )
+    stmt_parser.add_argument(
+        "-a",
+        "--apply",
+        action="store_true",
+        help="rewrite the files; without it the diff is printed and nothing changes",
+    )
+    stmt_parser.add_argument(
+        "rest",
+        nargs=argparse.REMAINDER,
+        help="further arguments passed through to ast-grep scan",
+    )
+    stmt_parser.set_defaults(run=stmt)
+
+    tests_parser = subcommands.add_parser(
+        "tests",
+        help="delete #[test] fns and #[cfg(test)] mods, attributes included",
+    )
+    tests_parser.add_argument("path", help="path to scan")
+    tests_parser.add_argument(
+        "-a",
+        "--apply",
+        action="store_true",
+        help="rewrite the files; without it the diff is printed and nothing changes",
+    )
+    tests_parser.add_argument(
+        "rest",
+        nargs=argparse.REMAINDER,
+        help="further arguments passed through to ast-grep scan",
+    )
+    tests_parser.set_defaults(run=tests)
+
+    comments_parser = subcommands.add_parser(
+        "comments",
+        help="delete every comment, TODO, FIXME and doc comment included",
+    )
+    comments_parser.add_argument("path", help="path to scan")
+    comments_parser.add_argument(
+        "-a",
+        "--apply",
+        action="store_true",
+        help="rewrite the files; without it the diff is printed and nothing changes",
+    )
+    comments_parser.add_argument(
+        "rest",
+        nargs=argparse.REMAINDER,
+        help="further arguments passed through to uncomment",
+    )
+    comments_parser.set_defaults(run=comments)
+
+    return parser.parse_args()
+
+
+async def main() -> int:
+    args = parse_args()
+    return await args.run(args)
+
+
+if __name__ == "__main__":
+    sys.exit(asyncio.run(main()))
