@@ -278,6 +278,17 @@ def write_json(path: pathlib.Path, value: dict) -> None:
     )
 
 
+def sync_optional_file(source: pathlib.Path, target: pathlib.Path) -> None:
+    try:
+        data = source.read_bytes()
+    except FileNotFoundError:
+        if target.is_dir() and not target.is_symlink():
+            raise UserError(f"refusing to remove directory: {target}")
+        target.unlink(missing_ok=True)
+        return
+    safe_write(target, data)
+
+
 def package_source(entry: object) -> str:
     if isinstance(entry, str):
         return entry
@@ -354,6 +365,9 @@ class ApplyCmd(pydantic.BaseModel):
                 + host_agents_source.read_bytes().lstrip(b"\n")
             )
         safe_write(target_dir / "AGENTS.md", agents_data)
+
+        for filename in ("SYSTEM.md", "APPEND_SYSTEM.md"):
+            sync_optional_file(directory / filename, target_dir / filename)
 
         models_path = target_dir / "models.json"
         if spec.models is None:

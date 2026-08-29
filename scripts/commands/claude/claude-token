@@ -1,0 +1,75 @@
+#!/usr/bin/env python3
+"""Generate a marker token and find it in the current Claude Code transcript.
+
+`token` prints a timestamped random token. `find TOKEN` locates the
+transcript for CLAUDE_SESSION_ID under CLAUDE_CONFIG_DIR (default ~/.claude)
+and prints the text of the first assistant message containing the token.
+"""
+
+import argparse
+import datetime
+import json
+import os
+import pathlib
+import secrets
+import sys
+
+
+def token(args):
+    timestamp = datetime.datetime.now(datetime.UTC).strftime("%Y%m%dT%H%M%SZ")
+    print(f"tok-{timestamp}-{secrets.token_hex(8)}")
+
+
+def transcript_path():
+    config_dir = pathlib.Path(
+        os.environ.get("CLAUDE_CONFIG_DIR") or pathlib.Path.home() / ".claude"
+    )
+    session_id = os.environ["CLAUDE_SESSION_ID"]
+    matches = sorted(config_dir.glob(f"projects/*/{session_id}.jsonl"))
+    if not matches:
+        raise SystemExit(f"error: no transcript for session {session_id} in {config_dir}")
+    return matches[0]
+
+
+def find(args):
+    with open(transcript_path(), encoding="utf-8") as file:
+        for line in file:
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if entry.get("type") != "assistant":
+                continue
+            content = entry.get("message", {}).get("content")
+            if not isinstance(content, list):
+                continue
+            text = "\n".join(
+                block["text"]
+                for block in content
+                if isinstance(block, dict) and block.get("type") == "text"
+            )
+            if args.token in text:
+                print(text)
+                return
+    raise SystemExit(f"error: token {args.token} not found in transcript")
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    parser_token = subparsers.add_parser("token", help="print a new token")
+    parser_token.set_defaults(func=token)
+
+    parser_find = subparsers.add_parser(
+        "find", help="print the first assistant message containing TOKEN"
+    )
+    parser_find.add_argument("token")
+    parser_find.set_defaults(func=find)
+
+    args = parser.parse_args()
+    args.func(args)
+
+
+if __name__ == "__main__":
+    main()
