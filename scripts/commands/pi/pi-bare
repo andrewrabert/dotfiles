@@ -1,0 +1,55 @@
+#!/usr/bin/env python3
+"""Run pi with nothing loaded: no extensions, tools, skills, prompt
+templates, context files, or themes, and no saved session.
+
+Reads the prompt from stdin, uses the hardcoded system prompt below, and
+writes pi's response to stdout.
+
+Usage: some-command | pi-bare
+"""
+
+import argparse
+import asyncio
+import sys
+
+SYSTEM_PROMPT = """\
+You are a helpful assistant. Answer the user's prompt directly and
+concisely in plain text. Do not use tools. Do not ask follow-up
+questions."""
+
+
+def read_stdin() -> str | None:
+    if sys.stdin.isatty():
+        return None
+    return sys.stdin.read()
+
+
+async def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Bare pi: hardcoded system prompt, prompt from stdin."
+    )
+    parser.parse_args()
+    prompt = read_stdin()
+    if prompt is None:
+        parser.error("no input: pipe a prompt on stdin")
+    process = await asyncio.create_subprocess_exec(
+        "pi",
+        "--print",
+        "--offline",
+        "--no-session",
+        "--no-extensions",
+        "--no-tools",
+        "--no-skills",
+        "--no-prompt-templates",
+        "--no-context-files",
+        "--no-themes",
+        "--system-prompt",
+        SYSTEM_PROMPT,
+        stdin=asyncio.subprocess.PIPE,
+    )
+    await process.communicate(prompt.encode())
+    return process.returncode or 0
+
+
+if __name__ == "__main__":
+    sys.exit(asyncio.run(main()))

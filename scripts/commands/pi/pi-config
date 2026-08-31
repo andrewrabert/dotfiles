@@ -5,6 +5,7 @@
 # ///
 """Manage Pi from declarative YAML spec files."""
 
+import asyncio
 import json
 import os
 import pathlib
@@ -31,6 +32,16 @@ SPEC_FILENAME = "pi-config.yaml"
 
 class UserError(Exception):
     pass
+
+
+class pi:
+    @staticmethod
+    async def install(source: str) -> None:
+        command = ["pi", "install", source]
+        process = await asyncio.create_subprocess_exec(*command)
+        await process.communicate()
+        if process.returncode:
+            raise subprocess.CalledProcessError(process.returncode, command)
 
 
 class Spec(pydantic.BaseModel):
@@ -320,7 +331,7 @@ def install_packages(settings: dict, settings_path: pathlib.Path) -> None:
     for entry in packages:
         source = package_source(entry)
         print(f"Installing Pi package {source}")
-        subprocess.run(["pi", "install", source], check=True)
+        asyncio.run(pi.install(source))
 
 
 def resolve_host(value: str | None) -> str:

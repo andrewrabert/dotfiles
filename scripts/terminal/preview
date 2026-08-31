@@ -115,6 +115,14 @@ preview_file() {
         # on headless system.
         export XDG_CURRENT_DESKTOP="${XDG_CURRENT_DESKTOP:=kde}"
 
+        # xdg-mime with XDG_CURRENT_DESKTOP=kde but no KDE_SESSION_VERSION
+        # falls back to KDE3 kfile, which silently outputs nothing.
+        case "$XDG_CURRENT_DESKTOP" in
+            kde|KDE)
+                export KDE_SESSION_VERSION="${KDE_SESSION_VERSION:=6}"
+                ;;
+        esac
+
         mimetype="$(xdg-mime query filetype "$file")"
     else
         mimetype="$(file --brief --mime-type "$file")"

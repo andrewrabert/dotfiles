@@ -1,0 +1,156 @@
+#!/usr/bin/env python3
+"""One-shot standards review via pi with nothing loaded: no extensions,
+tools, skills, prompt templates, context files, or themes, and no saved
+session.
+
+Takes content from stdin (a diff, a file, or an arbitrary fragment)
+and/or from file paths given as arguments — both may be used at once,
+with stdin always first in the prompt and each file preceded by a
+`==> path <==` marker. Detects whether the content looks like Rust
+and/or Python, embeds the matching standards documents from
+~/syncthing/default/notes/dev/standards/ into the system prompt in
+full, and writes pi's review to stdout. If neither or both languages
+are detected, both standards are embedded and the reviewer decides
+applicability from the content itself.
+
+Also walks up the file tree from the current directory and embeds the
+contents of every `CLAUDE.md` file found along the way as further
+requirements, outermost directory first so deeper directories take
+precedence.
+
+Usage: git diff | pi-standards-review
+       pi-standards-review some_file.py other_file.rs
+       git diff | pi-standards-review some_file.py
+"""
+
+import argparse
+import asyncio
+import pathlib
+import re
+import sys
+
+STANDARDS_DIR = pathlib.Path.home() / "syncthing/default/notes/dev/standards"
+STANDARDS = {
+    "rust": (
+        STANDARDS_DIR / "rust.md",
+        re.compile(r"\b(rs|rust|crate|cargo)\b", re.IGNORECASE),
+    ),
+    "python": (
+        STANDARDS_DIR / "python.md",
+        re.compile(r"\b(py|python|uv)\b", re.IGNORECASE),
+    ),
+}
+
+SYSTEM_PROMPT_TEMPLATE = """\
+You are a one-shot code reviewer. You receive a single piece of input on
+which to render judgment: it may be a diff, a complete file, or an
+indeterminate fragment of code. Determine for yourself what form the
+input takes and which language(s) it contains, then review it strictly
+against the requirements below. Apply language-specific requirements
+only to content actually written in that language; where requirements
+conflict, the later section wins.
+
+Report every violation, citing the specific requirement and the
+offending line or hunk. If the input meets the requirements, say so
+plainly. Do not review points the requirements do not cover, do not
+ask follow-up questions, and do not use tools. End with a one-line
+verdict: PASS or FAIL.
+
+{requirements}"""
+
+
+class pi:
+    @staticmethod
+    async def review(system_prompt: str, content: str) -> None:
+        process = await asyncio.create_subprocess_exec(
+            "pi",
+            "--print",
+            "--offline",
+            "--model",
+            "openai-codex/gpt-5.6-sol:medium",
+            "--no-session",
+            "--no-extensions",
+            "--no-tools",
+            "--no-skills",
+            "--no-prompt-templates",
+            "--no-context-files",
+            "--no-themes",
+            "--system-prompt",
+            system_prompt,
+            stdin=asyncio.subprocess.PIPE,
+        )
+        await process.communicate(content.encode())
+        if process.returncode:
+            raise RuntimeError(f"pi exited with status {process.returncode}")
+
+
+def read_stdin() -> str | None:
+    if sys.stdin.isatty():
+        return None
+    return sys.stdin.read()
+
+
+def format_source(text: str, path: pathlib.Path | None = None) -> str:
+    if path is None:
+        return text
+    return f"==> {path} <==\n{text}"
+
+
+def find_claude_md_files(start: pathlib.Path) -> list[pathlib.Path]:
+    found = []
+    stack = [start, *start.parents]
+    while stack:
+        directory = stack.pop()
+        if not directory.is_dir():
+            continue
+        candidate = directory / "CLAUDE.md"
+        if candidate.is_file():
+            found.append(candidate)
+    return found
+
+
+async def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="One-shot standards review of stdin and/or files via pi."
+    )
+    group = parser.add_argument_group("input")
+    group.add_argument(
+        "files",
+        nargs="*",
+        type=pathlib.Path,
+        help="file paths to review (appended after stdin)",
+    )
+    args = parser.parse_args()
+
+    parts = []
+    stdin_content = read_stdin()
+    if stdin_content:
+        parts.append(format_source(stdin_content))
+    for path in args.files:
+        parts.append(format_source(path.read_text(), path))
+    if not parts:
+        parser.error("no input: pipe content on stdin and/or pass file paths")
+    content = "\n\n".join(parts)
+
+    detected = [
+        lang
+        for lang, (_, pattern) in STANDARDS.items()
+        if pattern.search(content)
+    ]
+    if len(detected) != 1:
+        detected = list(STANDARDS)
+    sections = [
+        f"## {lang.capitalize()} requirements ({STANDARDS[lang][0].name})\n\n{STANDARDS[lang][0].read_text()}"
+        for lang in detected
+    ]
+    for path in find_claude_md_files(pathlib.Path.cwd()):
+        sections.append(f"## Requirements ({path})\n\n{path.read_text()}")
+
+    await pi.review(
+        SYSTEM_PROMPT_TEMPLATE.format(requirements="\n\n".join(sections)),
+        content,
+    )
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
