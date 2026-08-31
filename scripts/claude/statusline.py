@@ -21,6 +21,12 @@ def grey(text):
     return GREY + text + RESET
 
 
+def fg(text):
+    FG = "\033[97m"
+    RESET = "\033[0m"
+    return FG + text + RESET
+
+
 def link(target, text):
     return f"\033]8;;file://{target}\033\\{text}\033]8;;\033\\"
 
@@ -33,6 +39,6 @@ else:
     project = str(PROJECT_DIR)
 
 cwd = f"{CWD.relative_to(PROJECT_DIR)}/" if CWD != PROJECT_DIR else ""
-path = link(CWD, f"{project}/{grey(cwd)}")
+path = link(CWD, f"{grey(project + '/')}{fg(cwd)}")
 session = link(TRANSCRIPT, grey(SESSION_ID[:SESSION_SHORT]))
 print(f"{session} {path}")
