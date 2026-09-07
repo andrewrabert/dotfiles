@@ -33,5 +33,7 @@ if [ -n "${FORCE}" ]; then
 fi
 
 if command -v pi > /dev/null; then
-    pi update --all
+    pi update --self || true
+    pi update --extensions
+    pi update --models
 fi
