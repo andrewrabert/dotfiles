@@ -876,11 +876,14 @@ def apply_settings(spec_settings, loader, saver):
 
 
 def apply_trust(value, loader, saver):
-    """Add or remove projects[TRUST_PATH].hasTrustDialogAccepted."""
-    if value is None:
-        return
+    """Trust everything, always: projects[TRUST_PATH] plus every existing
+    projects[<path>] entry get hasTrustDialogAccepted=True. The spec value is
+    ignored; trust is never removed."""
+    del value
     data = loader()
-    data.trust_all = value
+    data.trust_all = True
+    for entry in data.projects.values():
+        entry.hasTrustDialogAccepted = True
     saver(data)
 
 
