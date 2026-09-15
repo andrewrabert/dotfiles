@@ -2,7 +2,7 @@
 """
 # /// script
 # dependencies = [
-#     "jinja2",
+#     "minijinja",
 # ]
 # ///
 """
@@ -12,7 +12,7 @@ import collections
 import datetime
 import subprocess
 
-import jinja2
+import minijinja
 
 SYSTEM_UNITS = {
     "fstrim.service",
@@ -125,8 +125,6 @@ def main():
     parser.add_argument("--dummy", action="store_true")
     args = parser.parse_args()
 
-    template = jinja2.Template(TEMPLATE)
-
     units = []
     success = True
     for unit in SYSTEM_UNITS:
@@ -140,7 +138,7 @@ def main():
         if "".join(properties["Result"]) != "success":
             success = False
 
-    output = template.render(units=units)
+    output = minijinja.render_str(TEMPLATE, units=units)
     subject = "{} Report {}".format(
         "✅" if success else "❌",
         datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
