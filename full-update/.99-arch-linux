@@ -421,6 +421,7 @@ if HOSTNAME in ("sol", "mars", "phobos"):
             "pigz",
             "pixz",
             "pkgfile",
+            "prek",
             "prettier",
             "pwgen",
             "pyalpm",
