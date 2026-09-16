@@ -440,6 +440,7 @@ if HOSTNAME in ("sol", "mars", "phobos"):
             "tcpdump",
             "time",
             "tmux",
+            "tokei",
             "traceroute",
             "transmission-cli",
             "tree-sitter-cli",  # for neovim plugins
