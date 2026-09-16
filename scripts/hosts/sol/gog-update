@@ -8,7 +8,7 @@ import sys
 CACHE_DIR = pathlib.Path("~/.cache/lgogdownloader").expanduser()
 CONFIG_DIR = pathlib.Path("~/.dotfiles/private/lgogdownloader").expanduser()
 GOG_DIR = pathlib.Path("/storage/Games/PC/GOG.com")
-IMAGE = "ghcr.io/andrewrabert/lgogdownloader"
+DEFAULT_IMAGE = "ghcr.io/andrewrabert/lgogdownloader"
 
 
 def files_to_mtime(root):
@@ -23,34 +23,45 @@ def files_to_mtime(root):
     return files
 
 
-async def run_lgogdownloader(*, pull=True, shell=False):
-    args = [
-        "podman",
-        "run",
-        "--rm",
-        "--name",
-        "gog-update",
-        "-e",
-        "HOME",
-        "-v",
-        f"{GOG_DIR}:/downloads",
-        "-v",
-        f"{CACHE_DIR}:/cache",
-        "-v",
-        f"{CONFIG_DIR}:/config",
-    ]
-    if pull:
-        args.append("--pull=always")
-    if shell:
-        args.append("-it")
-    args.append(IMAGE)
-    if shell:
-        args.extend(["--", "sh", "-l"])
+class LGOGDownloader:
+    def __init__(self, image, pull=False):
+        self.image = image
+        self.pull = pull
 
-    proc = await asyncio.create_subprocess_exec(*args)
-    await proc.wait()
-    if proc.returncode != 0:
-        raise subprocess.CalledProcessError(proc.returncode, args)
+    async def shell(self):
+        return await self._run(shell=True)
+
+    async def run(self):
+        return await self._run()
+
+    async def _run(self, *, shell=False):
+        args = [
+            "podman",
+            "run",
+            "--rm",
+            "--name",
+            "gog-update",
+            "-e",
+            "HOME",
+            "-v",
+            f"{GOG_DIR}:/downloads",
+            "-v",
+            f"{CACHE_DIR}:/cache",
+            "-v",
+            f"{CONFIG_DIR}:/config",
+        ]
+        if self.pull:
+            args.append("--pull=always")
+        if shell:
+            args.append("-it")
+        args.append(self.image)
+        if shell:
+            args.extend(["--", "sh", "-l"])
+
+        proc = await asyncio.create_subprocess_exec(*args)
+        await proc.wait()
+        if proc.returncode != 0:
+            raise subprocess.CalledProcessError(proc.returncode, args)
 
 
 async def record_file_hashes():
@@ -66,36 +77,39 @@ async def record_file_hashes():
 
 async def main():
     parser = argparse.ArgumentParser()
+    parser.add_argument("--image", default=DEFAULT_IMAGE)
+    parser.add_argument("--no-pull", action="store_true")
     parser.add_argument("--shell", action="store_true")
     args = parser.parse_args()
 
+    lgogdownloader = LGOGDownloader(image=args.image, pull=not args.no_pull)
+
     if args.shell:
-        await run_lgogdownloader(shell=True)
+        await lgogdownloader.shell()
         sys.exit()
+    else:
+        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        before = files_to_mtime(GOG_DIR)
+        await lgogdownloader.run()
+        after = files_to_mtime(GOG_DIR)
 
-    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        for path in sorted(set([*before.keys(), *after.keys()])):
+            try:
+                before_mtime = before[path]
+            except KeyError:
+                print("New:", path)
+                continue
 
-    before = files_to_mtime(GOG_DIR)
-    await run_lgogdownloader()
-    after = files_to_mtime(GOG_DIR)
+            try:
+                after_mtime = after[path]
+            except KeyError:
+                print("Deleted:", path)
+                continue
 
-    for path in sorted(set([*before.keys(), *after.keys()])):
-        try:
-            before_mtime = before[path]
-        except KeyError:
-            print("New:", path)
-            continue
+            if before_mtime != after_mtime:
+                print("Modified:", path)
 
-        try:
-            after_mtime = after[path]
-        except KeyError:
-            print("Deleted:", path)
-            continue
-
-        if before_mtime != after_mtime:
-            print("Modified:", path)
-
-    await record_file_hashes()
+        await record_file_hashes()
 
 
 if __name__ == "__main__":
