@@ -1,0 +1,4 @@
+#!/usr/bin/env sh
+if command -v bxwrp > /dev/null; then
+    exec full-update .60-bxwrp "$@"
+fi

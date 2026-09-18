@@ -12,7 +12,8 @@
 
 On Termux, noted comes from its apt repository instead. Elsewhere the build
 target is picked from the host OS and CPU and the binary lands in
-${DOTFILES}/.local/noted/bin/noted. The ETag and binary SHA-256 of the
+${DOTFILES}/.local/noted/bin/noted, symlinked from ${DOTFILES}/.local/bin/noted
+so it is on PATH. The ETag and binary SHA-256 of the
 last-installed nightly are cached so repeat runs short-circuit without
 downloading; a binary that no longer matches the recorded hash is reinstalled."""
 
@@ -104,7 +105,17 @@ def install_path():
     dotfiles = os.environ.get("DOTFILES")
     if not dotfiles:
         raise UserError("DOTFILES is not set")
-    return pathlib.Path(dotfiles) / ".local" / "noted" / "bin" / "noted"
+    local = pathlib.Path(dotfiles) / ".local"
+    return local / "noted" / "bin" / "noted", local / "bin" / "noted"
+
+
+def link(dest, symlink):
+    """Point `symlink` at `dest`, replacing whatever is there."""
+    symlink.parent.mkdir(parents=True, exist_ok=True)
+    tmp = symlink.with_name(f".{symlink.name}.tmp")
+    tmp.unlink(missing_ok=True)
+    tmp.symlink_to(dest)
+    tmp.replace(symlink)
 
 
 def cache_dir():
@@ -197,13 +208,14 @@ def install(binary, dest):
 
 async def install_nightly(force):
     target = detect_target()
-    dest = install_path()
+    dest, symlink = install_path()
     cache = InstalledCache(target)
     known_etag = None if force else cache.etag_for(dest)
 
     async with download(target) as (etag, size, chunks):
         if etag == known_etag:
             print("Already up to date")
+            link(dest, symlink)
             return
         archive = io.BytesIO()
         columns = (
@@ -224,6 +236,7 @@ async def install_nightly(force):
         binary = zf.read(sole_member(zf))
 
     digest = install(binary, dest)
+    link(dest, symlink)
     cache.write(Installed(etag=etag, sha256=digest))
 
 

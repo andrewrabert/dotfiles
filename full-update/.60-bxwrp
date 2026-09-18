@@ -1,0 +1,220 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.12"
+# dependencies = [
+#     "pydantic",
+# ]
+# ///
+"""Build and install bxwrp from the HEAD of its main branch.
+
+The repository is cloned into a cache directory, checked out at the remote
+HEAD commit of main and built with cargo. The binary lands in
+${DOTFILES}/.local/bxwrp/bin/bxwrp, symlinked from ${DOTFILES}/.local/bin/bxwrp
+so it is on PATH. The commit and binary SHA-256 of the last install are cached
+so repeat runs short-circuit without building; a binary that no longer matches
+the recorded hash is rebuilt."""
+
+import argparse
+import asyncio
+import hashlib
+import json
+import os
+import pathlib
+import platform
+import shutil
+import stat
+import sys
+
+import pydantic
+
+
+class UserError(Exception):
+    pass
+
+
+class ProcessError(Exception):
+    def __init__(self, process, message=None):
+        self.process = process
+        self.message = message
+
+    def __str__(self):
+        text = f"exit {self.process.returncode}"
+        if self.message:
+            text = f"{text} - {self.message}"
+        return text
+
+
+REPOSITORY = "https://github.com/andrewrabert/bxwrp"
+
+BRANCH = "main"
+
+
+def json_dumps(data):
+    return json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True)
+
+
+def install_path():
+    dotfiles = os.environ.get("DOTFILES")
+    if not dotfiles:
+        raise UserError("DOTFILES is not set")
+    local = pathlib.Path(dotfiles) / ".local"
+    return local / "bxwrp" / "bin" / "bxwrp", local / "bin" / "bxwrp"
+
+
+def link(dest, symlink):
+    """Point `symlink` at `dest`, replacing whatever is there."""
+    symlink.parent.mkdir(parents=True, exist_ok=True)
+    tmp = symlink.with_name(f".{symlink.name}.tmp")
+    tmp.unlink(missing_ok=True)
+    tmp.symlink_to(dest)
+    tmp.replace(symlink)
+
+
+def cache_dir():
+    if platform.system() == "Darwin":
+        return pathlib.Path.home() / "Library" / "Caches"
+    xdg = os.environ.get("XDG_CACHE_HOME")
+    return pathlib.Path(xdg) if xdg else pathlib.Path.home() / ".cache"
+
+
+class Installed(pydantic.BaseModel):
+    """What the last install recorded: the built commit and the SHA-256 of the
+    installed binary."""
+
+    commit: str
+    sha256: str
+
+
+class InstalledCache:
+    """Persists `Installed` as a single JSON file so repeat installs
+    short-circuit."""
+
+    def __init__(self):
+        self._path = cache_dir() / "bxwrp-build.json"
+
+    def commit_for(self, binary):
+        """The commit recorded for the bytes at `binary`, or None if nothing is
+        recorded, the file is missing, or its hash no longer matches."""
+        try:
+            installed = Installed.model_validate_json(self._path.read_text())
+            digest = sha256(binary)
+        except (FileNotFoundError, pydantic.ValidationError):
+            return None
+        if installed.sha256 != digest:
+            print("Installed binary does not match recorded hash")
+            return None
+        return installed.commit
+
+    def write(self, installed):
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        self._path.write_text(json_dumps(installed.model_dump()) + "\n")
+        print(f"Stored {installed.commit} for sha256 {installed.sha256}")
+
+
+def sha256(path):
+    with path.open("rb") as handle:
+        return hashlib.file_digest(handle, "sha256").hexdigest()
+
+
+async def run(*command, cwd=None, capture=False):
+    """Run `command`, raising `ProcessError` on failure. Returns its stdout
+    when `capture` is set."""
+    proc = await asyncio.create_subprocess_exec(
+        *command,
+        cwd=cwd,
+        stdout=asyncio.subprocess.PIPE if capture else None,
+    )
+    stdout, _ = await proc.communicate()
+    if proc.returncode:
+        raise ProcessError(proc, " ".join(command))
+    return stdout.decode() if capture else None
+
+
+async def remote_head():
+    """The commit SHA at the tip of the remote branch."""
+    output = await run(
+        "git", "ls-remote", REPOSITORY, f"refs/heads/{BRANCH}", capture=True
+    )
+    line = output.split("\n", 1)[0].strip()
+    if not line:
+        raise UserError(f"{REPOSITORY} has no branch {BRANCH}")
+    return line.split()[0]
+
+
+async def checkout(commit):
+    """Clone or update the cached checkout and leave it at `commit`. Returns
+    the checkout path."""
+    source = cache_dir() / "bxwrp-src"
+    if not (source / ".git").is_dir():
+        shutil.rmtree(source, ignore_errors=True)
+        source.parent.mkdir(parents=True, exist_ok=True)
+        await run("git", "clone", REPOSITORY, str(source))
+    await run("git", "fetch", "origin", BRANCH, cwd=source)
+    await run("git", "checkout", "--force", commit, cwd=source)
+    await run("git", "clean", "-fdx", cwd=source)
+    return source
+
+
+async def build(source):
+    """Build the release binary in `source` and return its path."""
+    print("Building...")
+    await run("cargo", "build", "--release", cwd=source)
+    binary = source / "target" / "release" / "bxwrp"
+    if not binary.is_file():
+        raise UserError(f"build produced no binary at {binary}")
+    return binary
+
+
+def install(binary, dest):
+    """Atomically copy `binary` to `dest` and return its SHA-256."""
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_name(f".{dest.name}.tmp")
+    shutil.copyfile(binary, tmp)
+    tmp.chmod(
+        stat.S_IRWXU
+        | stat.S_IRGRP
+        | stat.S_IXGRP
+        | stat.S_IROTH
+        | stat.S_IXOTH
+    )
+    tmp.replace(dest)
+    print(f"Installed: {dest}")
+    return sha256(dest)
+
+
+async def install_head(force):
+    dest, symlink = install_path()
+    cache = InstalledCache()
+    known_commit = None if force else cache.commit_for(dest)
+
+    commit = await remote_head()
+    if commit == known_commit:
+        print("Already up to date")
+        link(dest, symlink)
+        return
+
+    source = await checkout(commit)
+    binary = await build(source)
+    digest = install(binary, dest)
+    link(dest, symlink)
+    cache.write(Installed(commit=commit, sha256=digest))
+
+
+async def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "-f",
+        "--force",
+        action="store_true",
+        help="skip the commit check and rebuild",
+    )
+    args = parser.parse_args()
+    await install_head(force=args.force)
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(asyncio.run(main()))
+    except (ProcessError, UserError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        sys.exit(1)
