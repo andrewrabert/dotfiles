@@ -367,6 +367,12 @@ class Settings(pydantic.BaseModel):
 
     model_config = pydantic.ConfigDict(extra="allow")
     enabledPlugins: dict[str, bool] = pydantic.Field(default_factory=dict)
+    env: dict[str, typing.Any] = pydantic.Field(default_factory=dict)
+
+    @pydantic.model_validator(mode="after")
+    def pin_env(self):
+        self.env.update(PINNED_ENV)
+        return self
 
 
 class ProjectEntry(pydantic.BaseModel):
@@ -376,11 +382,29 @@ class ProjectEntry(pydantic.BaseModel):
     hasTrustDialogAccepted: bool | None = None
 
 
+class GrowthBookFeatures(pydantic.BaseModel):
+    """
+    Claude never fetches flags with telemetry off, so rollout-gated features
+    stay dark; it reads this cache when
+    CLAUDE_CODE_GB_DISK_CACHE_WHEN_TELEMETRY_OFF is set. The defaults are the
+    pins. extra="ignore" so flags already cached on disk never fail the load.
+    """
+
+    model_config = pydantic.ConfigDict(extra="ignore")
+    tengu_agents_md_mod: typing.Annotated[
+        bool,
+        Field(description="Fallback to AGENTS.md when CLAUDE.md not present"),
+    ] = True
+
+
 class ClaudeJson(pydantic.BaseModel):
     """.claude.json - extra="allow" so unmanaged keys round-trip on save."""
 
     model_config = pydantic.ConfigDict(extra="allow")
     projects: dict[str, ProjectEntry] = pydantic.Field(default_factory=dict)
+    cachedGrowthBookFeatures: GrowthBookFeatures = pydantic.Field(
+        default_factory=GrowthBookFeatures
+    )
 
     @property
     def trust_all(self):
@@ -720,6 +744,7 @@ class ClaudeConfig:
     def load_config(self):
         data = load_json(self.config_path)
         Config.model_validate(data)
+        data["cachedGrowthBookFeatures"] = GrowthBookFeatures()
         return ClaudeJson.model_validate(data)
 
     def save_config(self, data):
@@ -915,6 +940,8 @@ TRUST_PATH = "/"
 # Config keys authored in the spec that expand to something other than a
 # top-level .claude.json key, so they must not ride the passthrough merge.
 VIRTUAL_CONFIG_KEYS = frozenset({"hasTrustDialogAccepted"})
+# Env vars pinned in settings.json's env on every save.
+PINNED_ENV = {"CLAUDE_CODE_GB_DISK_CACHE_WHEN_TELEMETRY_OFF": "1"}
 MCP_KEY_ORDER = ("type", "url", "headers", "command", "args", "env")
 PLUGIN_KEY_ORDER = (
     "type",
