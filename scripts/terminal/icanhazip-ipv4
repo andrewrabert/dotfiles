@@ -1,2 +1,0 @@
-#!/usr/bin/env sh
-exec curl --connect-timeout 5 https://ipv4.icanhazip.com 2> /dev/null
