@@ -12,9 +12,10 @@
 
 On Termux, bertbox comes from its apt repository instead. Elsewhere the build
 target is picked from the host OS and CPU and the binary lands in
-${DOTFILES}/.local/bin/bertbox so it is on PATH. The ETag and binary SHA-256 of the
-last-installed nightly are cached so repeat runs short-circuit without
-downloading; a binary that no longer matches the recorded hash is reinstalled.
+${DOTFILES}/.local/bertbox/bin/bertbox, symlinked from ${DOTFILES}/.local/bin/bertbox
+so it is on PATH. The ETag and binary SHA-256 of the last-installed nightly are
+cached so repeat runs short-circuit without downloading; a binary that no longer
+matches the recorded hash is reinstalled.
 Either way the zsh completions are regenerated into
 ${DOTFILES}/.local/zcomp/_bertbox."""
 
@@ -111,7 +112,17 @@ def dotfiles_local():
 
 
 def install_path():
-    return dotfiles_local() / "bin" / "bertbox"
+    local = dotfiles_local()
+    return local / "bertbox" / "bin" / "bertbox", local / "bin" / "bertbox"
+
+
+def link(dest, symlink):
+    """Point `symlink` at `dest`, replacing whatever is there."""
+    symlink.parent.mkdir(parents=True, exist_ok=True)
+    tmp = symlink.with_name(f".{symlink.name}.tmp")
+    tmp.unlink(missing_ok=True)
+    tmp.symlink_to(dest)
+    tmp.replace(symlink)
 
 
 def write_atomic(dest, data, mode=None):
@@ -227,13 +238,14 @@ def install(binary, dest):
 
 async def install_nightly(force):
     target = detect_target()
-    dest = install_path()
+    dest, symlink = install_path()
     cache = InstalledCache(target)
     known_etag = None if force else cache.etag_for(dest)
 
     async with download(target) as (etag, size, chunks):
         if etag == known_etag:
             print("Already up to date")
+            link(dest, symlink)
             await install_completions(dest)
             return
         archive = io.BytesIO()
@@ -255,6 +267,7 @@ async def install_nightly(force):
         binary = zf.read(sole_member(zf))
 
     digest = install(binary, dest)
+    link(dest, symlink)
     cache.write(Installed(etag=etag, sha256=digest))
     await install_completions(dest)
 
