@@ -15,8 +15,7 @@ target is picked from the host OS and CPU and the binary lands in
 ${DOTFILES}/.local/bin/bertbox so it is on PATH. The ETag and binary SHA-256 of the
 last-installed nightly are cached so repeat runs short-circuit without
 downloading; a binary that no longer matches the recorded hash is reinstalled.
-Either way `bertbox install` links every tool name into
-${DOTFILES}/.local/bin and the zsh completions are regenerated into
+Either way the zsh completions are regenerated into
 ${DOTFILES}/.local/zcomp/_bertbox."""
 
 import argparse
@@ -93,7 +92,6 @@ async def install_termux():
     )
     if await proc.wait():
         raise ProcessError(proc)
-    await install_links("bertbox")
     await install_completions("bertbox")
 
 
@@ -123,17 +121,6 @@ def write_atomic(dest, data, mode=None):
     if mode is not None:
         tmp.chmod(mode)
     tmp.replace(dest)
-
-
-async def install_links(bertbox):
-    """Run `bertbox install -f` so every tool name links to the binary from
-    ${DOTFILES}/.local/bin."""
-    directory = install_path().parent
-    proc = await asyncio.create_subprocess_exec(
-        str(bertbox), "install", "-f", str(directory)
-    )
-    if await proc.wait():
-        raise ProcessError(proc, "bertbox install")
 
 
 async def install_completions(bertbox):
@@ -247,7 +234,6 @@ async def install_nightly(force):
     async with download(target) as (etag, size, chunks):
         if etag == known_etag:
             print("Already up to date")
-            await install_links(dest)
             await install_completions(dest)
             return
         archive = io.BytesIO()
@@ -270,7 +256,6 @@ async def install_nightly(force):
 
     digest = install(binary, dest)
     cache.write(Installed(etag=etag, sha256=digest))
-    await install_links(dest)
     await install_completions(dest)
 
 
