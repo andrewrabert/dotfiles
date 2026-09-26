@@ -1,5 +1,5 @@
 #!/usr/bin/env sh
-set -eux
+set -eu
 VERBOSE=
 
 INSTALL_SYSTEM=
@@ -113,8 +113,8 @@ update_repo() {
     fi
 }
 
-if ! command -v dotfiles-link-bin > /dev/null || ! command -v git-auto-update > /dev/null; then
-    "${DOTFILES}/scripts/terminal/dotfiles-link-bin"
+if ! command -v bertbox > /dev/null || ! command -v git-auto-update > /dev/null; then
+    bertbox dotfiles-link-bin
 fi
 
 update_repo "DOTFILES" "$DOTFILES"
@@ -125,4 +125,4 @@ for d in $(env | grep ^DOTFILES_ | sort); do
     update_repo "$name" "$loc"
 done
 
-dotfiles-link-bin
+bertbox dotfiles-link-bin

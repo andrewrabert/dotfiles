@@ -1,0 +1,295 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.12"
+# dependencies = [
+#     "httpx2",
+#     "pydantic",
+#     "rich",
+#     "yarl",
+# ]
+# ///
+"""Download and install the latest bertbox nightly for this machine.
+
+On Termux, bertbox comes from its apt repository instead. Elsewhere the build
+target is picked from the host OS and CPU and the binary lands in
+${DOTFILES}/.local/bertbox/bin/bertbox, symlinked from ${DOTFILES}/.local/bin/bertbox
+so it is on PATH. The ETag and binary SHA-256 of the
+last-installed nightly are cached so repeat runs short-circuit without
+downloading; a binary that no longer matches the recorded hash is reinstalled.
+Either way the zsh completions are regenerated into
+${DOTFILES}/.local/zcomp/_bertbox."""
+
+import argparse
+import asyncio
+import contextlib
+import hashlib
+import io
+import json
+import os
+import pathlib
+import platform
+import shutil
+import stat
+import sys
+import zipfile
+
+import httpx2
+import pydantic
+import rich.progress
+import yarl
+
+
+class UserError(Exception):
+    pass
+
+
+class ProcessError(Exception):
+    def __init__(self, process, message=None):
+        self.process = process
+        self.message = message
+
+    def __str__(self):
+        text = f"exit {self.process.returncode}"
+        if self.message:
+            text = f"{text} - {self.message}"
+        return text
+
+
+BASE = yarl.URL("https://nightly.link/andrewrabert/tools/workflows/ci/main")
+
+APT_REPOSITORY = (
+    "deb [trusted=yes] https://andrewrabert.github.io/tools stable main"
+)
+
+TARGETS = {
+    ("Linux", "x86_64"): "x86_64-unknown-linux-musl",
+    ("Linux", "aarch64"): "aarch64-unknown-linux-musl",
+    ("Darwin", "x86_64"): "x86_64-apple-darwin",
+    ("Darwin", "arm64"): "aarch64-apple-darwin",
+}
+
+
+def json_dumps(data):
+    return json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True)
+
+
+def is_termux():
+    return shutil.which("termux-info") is not None
+
+
+async def install_termux():
+    source = (
+        pathlib.Path(os.environ["PREFIX"])
+        / "etc"
+        / "apt"
+        / "sources.list.d"
+        / "bertbox.list"
+    )
+    if not source.exists():
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_text(f"{APT_REPOSITORY}\n")
+    proc = await asyncio.create_subprocess_exec(
+        "pkg", "install", "-y", "bertbox"
+    )
+    if await proc.wait():
+        raise ProcessError(proc)
+    await install_completions("bertbox")
+
+
+def detect_target():
+    key = (platform.system(), platform.machine())
+    try:
+        return TARGETS[key]
+    except KeyError:
+        raise UserError(f"unsupported platform: {key[0]} {key[1]}") from None
+
+
+def dotfiles_local():
+    dotfiles = os.environ.get("DOTFILES")
+    if not dotfiles:
+        raise UserError("DOTFILES is not set")
+    return pathlib.Path(dotfiles) / ".local"
+
+
+def install_path():
+    local = dotfiles_local()
+    return local / "bertbox" / "bin" / "bertbox", local / "bin" / "bertbox"
+
+
+def write_atomic(dest, data, mode=None):
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_name(f".{dest.name}.tmp")
+    tmp.write_bytes(data)
+    if mode is not None:
+        tmp.chmod(mode)
+    tmp.replace(dest)
+
+
+async def install_completions(bertbox):
+    """Write `bertbox completions zsh` to ${DOTFILES}/.local/zcomp/_bertbox."""
+    dest = dotfiles_local() / "zcomp" / "_bertbox"
+    proc = await asyncio.create_subprocess_exec(
+        str(bertbox),
+        "completions",
+        "zsh",
+        stdout=asyncio.subprocess.PIPE,
+    )
+    stdout, _ = await proc.communicate()
+    if proc.returncode:
+        raise ProcessError(proc, "bertbox completions zsh")
+    write_atomic(dest, stdout)
+    print(f"Installed: {dest}")
+
+
+def link(dest, symlink):
+    """Point `symlink` at `dest`, replacing whatever is there."""
+    symlink.parent.mkdir(parents=True, exist_ok=True)
+    tmp = symlink.with_name(f".{symlink.name}.tmp")
+    tmp.unlink(missing_ok=True)
+    tmp.symlink_to(dest)
+    tmp.replace(symlink)
+
+
+def cache_dir():
+    if platform.system() == "Darwin":
+        return pathlib.Path.home() / "Library" / "Caches"
+    xdg = os.environ.get("XDG_CACHE_HOME")
+    return pathlib.Path(xdg) if xdg else pathlib.Path.home() / ".cache"
+
+
+class Installed(pydantic.BaseModel):
+    """What the last install recorded: the nightly's ETag and the SHA-256 of
+    the installed binary."""
+
+    etag: str
+    sha256: str
+
+
+class InstalledCache:
+    """Persists `Installed` as a single JSON file per build target so repeat
+    installs short-circuit."""
+
+    def __init__(self, target):
+        self._path = cache_dir() / f"bertbox-nightly-{target}.json"
+
+    def etag_for(self, binary):
+        """The ETag recorded for the bytes at `binary`, or None if nothing is
+        recorded, the file is missing, or its hash no longer matches."""
+        try:
+            installed = Installed.model_validate_json(self._path.read_text())
+            digest = sha256(binary)
+        except (FileNotFoundError, pydantic.ValidationError):
+            return None
+        if installed.sha256 != digest:
+            print("Installed binary does not match recorded hash")
+            return None
+        return installed.etag
+
+    def write(self, installed):
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        self._path.write_text(json_dumps(installed.model_dump()) + "\n")
+        print(f"Stored {installed.etag} for sha256 {installed.sha256}")
+
+
+def sha256(path):
+    with path.open("rb") as handle:
+        return hashlib.file_digest(handle, "sha256").hexdigest()
+
+
+def sole_member(archive):
+    """Return the single file entry in `archive`, erroring on any other count."""
+    members = [m for m in archive.infolist() if not m.is_dir()]
+    if len(members) != 1:
+        raise UserError(
+            f"expected exactly one file in download, found {len(members)}"
+        )
+    return members[0]
+
+
+@contextlib.asynccontextmanager
+async def download(target):
+    """Open a streaming GET for the nightly archive of `target`. Yields
+    (etag, size, chunks): the archive's ETag, its byte length, and an async
+    iterator over its body, which is only read if iterated."""
+    url = BASE / f"bertbox-{target}.zip"
+    async with httpx2.AsyncClient() as client:
+        async with client.stream(
+            "GET", str(url), follow_redirects=True
+        ) as response:
+            response.raise_for_status()
+            size = int(response.headers["content-length"])
+            yield response.headers["etag"], size, response.aiter_bytes()
+
+
+def install(binary, dest):
+    """Atomically write `binary` to `dest` and return its SHA-256."""
+    write_atomic(
+        dest,
+        binary,
+        stat.S_IRWXU
+        | stat.S_IRGRP
+        | stat.S_IXGRP
+        | stat.S_IROTH
+        | stat.S_IXOTH,
+    )
+    print(f"Installed: {dest}")
+    return hashlib.sha256(binary).hexdigest()
+
+
+async def install_nightly(force):
+    target = detect_target()
+    dest, symlink = install_path()
+    cache = InstalledCache(target)
+    known_etag = None if force else cache.etag_for(dest)
+
+    async with download(target) as (etag, size, chunks):
+        if etag == known_etag:
+            print("Already up to date")
+            link(dest, symlink)
+            await install_completions(dest)
+            return
+        archive = io.BytesIO()
+        columns = (
+            rich.progress.TextColumn("Downloading"),
+            rich.progress.BarColumn(),
+            rich.progress.DownloadColumn(),
+            rich.progress.TransferSpeedColumn(),
+            rich.progress.TimeRemainingColumn(),
+        )
+        with rich.progress.Progress(*columns) as progress:
+            task = progress.add_task("download", total=size)
+            async for chunk in chunks:
+                archive.write(chunk)
+                progress.update(task, advance=len(chunk))
+
+    print("Extracting...")
+    with zipfile.ZipFile(archive) as zf:
+        binary = zf.read(sole_member(zf))
+
+    digest = install(binary, dest)
+    link(dest, symlink)
+    cache.write(Installed(etag=etag, sha256=digest))
+    await install_completions(dest)
+
+
+async def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "-f",
+        "--force",
+        action="store_true",
+        help="skip the ETag check and reinstall",
+    )
+    args = parser.parse_args()
+    if is_termux():
+        await install_termux()
+    else:
+        await install_nightly(force=args.force)
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(asyncio.run(main()))
+    except UserError as e:
+        print(f"error: {e}", file=sys.stderr)
+        sys.exit(1)

@@ -1,7 +1,4 @@
 #!/usr/bin/env sh
-set -e
 if command -v bertbox > /dev/null; then
-    bertbox install -f "${DOTFILES}/.local/bin"
-    mkdir -p "${DOTFILES}/.local/zcomp"
-    bertbox completions zsh > "${DOTFILES}/.local/zcomp/_bertbox"
+    exec full-update .60-bertbox "$@"
 fi
