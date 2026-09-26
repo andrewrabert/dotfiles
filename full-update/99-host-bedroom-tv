@@ -5,6 +5,6 @@ if [ "$HOST_DOTFILES" != 'bedroom-tv' ]; then
 fi
 
 if ! command -v uv > /dev/null; then
-    full-update 35-uv --force
+    bertbox full-update 35-uv --force
 fi
 "${DOTFILES}/scripts/install-jellium-desktop-nightly" flatpak

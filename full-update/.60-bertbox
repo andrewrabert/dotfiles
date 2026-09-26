@@ -12,11 +12,11 @@
 
 On Termux, bertbox comes from its apt repository instead. Elsewhere the build
 target is picked from the host OS and CPU and the binary lands in
-${DOTFILES}/.local/bertbox/bin/bertbox, symlinked from ${DOTFILES}/.local/bin/bertbox
-so it is on PATH. The ETag and binary SHA-256 of the
+${DOTFILES}/.local/bin/bertbox so it is on PATH. The ETag and binary SHA-256 of the
 last-installed nightly are cached so repeat runs short-circuit without
 downloading; a binary that no longer matches the recorded hash is reinstalled.
-Either way the zsh completions are regenerated into
+Either way `bertbox install` links every tool name into
+${DOTFILES}/.local/bin and the zsh completions are regenerated into
 ${DOTFILES}/.local/zcomp/_bertbox."""
 
 import argparse
@@ -93,6 +93,7 @@ async def install_termux():
     )
     if await proc.wait():
         raise ProcessError(proc)
+    await install_links("bertbox")
     await install_completions("bertbox")
 
 
@@ -112,8 +113,7 @@ def dotfiles_local():
 
 
 def install_path():
-    local = dotfiles_local()
-    return local / "bertbox" / "bin" / "bertbox", local / "bin" / "bertbox"
+    return dotfiles_local() / "bin" / "bertbox"
 
 
 def write_atomic(dest, data, mode=None):
@@ -123,6 +123,17 @@ def write_atomic(dest, data, mode=None):
     if mode is not None:
         tmp.chmod(mode)
     tmp.replace(dest)
+
+
+async def install_links(bertbox):
+    """Run `bertbox install -f` so every tool name links to the binary from
+    ${DOTFILES}/.local/bin."""
+    directory = install_path().parent
+    proc = await asyncio.create_subprocess_exec(
+        str(bertbox), "install", "-f", str(directory)
+    )
+    if await proc.wait():
+        raise ProcessError(proc, "bertbox install")
 
 
 async def install_completions(bertbox):
@@ -139,15 +150,6 @@ async def install_completions(bertbox):
         raise ProcessError(proc, "bertbox completions zsh")
     write_atomic(dest, stdout)
     print(f"Installed: {dest}")
-
-
-def link(dest, symlink):
-    """Point `symlink` at `dest`, replacing whatever is there."""
-    symlink.parent.mkdir(parents=True, exist_ok=True)
-    tmp = symlink.with_name(f".{symlink.name}.tmp")
-    tmp.unlink(missing_ok=True)
-    tmp.symlink_to(dest)
-    tmp.replace(symlink)
 
 
 def cache_dir():
@@ -238,14 +240,14 @@ def install(binary, dest):
 
 async def install_nightly(force):
     target = detect_target()
-    dest, symlink = install_path()
+    dest = install_path()
     cache = InstalledCache(target)
     known_etag = None if force else cache.etag_for(dest)
 
     async with download(target) as (etag, size, chunks):
         if etag == known_etag:
             print("Already up to date")
-            link(dest, symlink)
+            await install_links(dest)
             await install_completions(dest)
             return
         archive = io.BytesIO()
@@ -267,8 +269,8 @@ async def install_nightly(force):
         binary = zf.read(sole_member(zf))
 
     digest = install(binary, dest)
-    link(dest, symlink)
     cache.write(Installed(etag=etag, sha256=digest))
+    await install_links(dest)
     await install_completions(dest)
 
 

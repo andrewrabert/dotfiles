@@ -1,4 +1,4 @@
 #!/usr/bin/env sh
 if command -v noted > /dev/null; then
-    exec full-update .60-noted "$@"
+    exec bertbox full-update .60-noted "$@"
 fi
