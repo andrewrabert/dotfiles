@@ -62,9 +62,9 @@ def parse_args(args):
 
 
 async def main(args):
-    if not shutil.which("bxwrp"):
-        return
     force = parse_args(args).force
+    if not force and not shutil.which("bxwrp"):
+        return
     local = fs.dotfiles_local()
     dest = local / "bxwrp" / "bin" / "bxwrp"
     symlink = local / "bin" / "bxwrp"

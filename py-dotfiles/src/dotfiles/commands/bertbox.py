@@ -25,9 +25,9 @@ def parse_args(args):
 
 
 async def main(args):
-    if not shutil.which("bertbox"):
-        return
     force = parse_args(args).force
+    if not force and not shutil.which("bertbox"):
+        return
     bertbox = await nightly.install(
         name="bertbox", repository="andrewrabert/tools", force=force
     )

@@ -16,9 +16,9 @@ def parse_args(args):
 
 
 async def main(args):
-    if not shutil.which("noted"):
-        return
     force = parse_args(args).force
+    if not force and not shutil.which("noted"):
+        return
     await nightly.install(
         name="noted", repository="andrewrabert/noted", force=force
     )
