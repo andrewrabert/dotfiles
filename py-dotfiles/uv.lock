@@ -35,13 +35,20 @@ dependencies = [
     { name = "yarl" },
 ]
 
+[package.optional-dependencies]
+arch-linux = [
+    { name = "pyalpm" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "httpx2" },
+    { name = "pyalpm", marker = "extra == 'arch-linux'" },
     { name = "pydantic" },
     { name = "rich" },
     { name = "yarl" },
 ]
+provides-extras = ["arch-linux"]
 
 [[package]]
 name = "h11"
@@ -291,6 +298,12 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/57/be/bcc053f66a97355683884b448198e79580fae8e8fa4d96b9bb01614e9913/propcache-0.5.4-cp315-cp315t-win_arm64.whl", hash = "sha256:dc4242ca653c9b30ab51c5f8193323e7bc0928f897ee9103201e59a43abcb72e", size = 45625, upload-time = "2026-09-16T00:17:11.377Z" },
     { url = "https://files.pythonhosted.org/packages/f5/cd/785c64ed382f3f04201870267b02783f63b4678c2acfddc177a3ebcc2727/propcache-0.5.4-py3-none-any.whl", hash = "sha256:62c60aec739ed00124573cce1178138fd690c7676352d67a37328c1cf51d7468", size = 16338, upload-time = "2026-09-16T00:17:13.106Z" },
 ]
+
+[[package]]
+name = "pyalpm"
+version = "0.10.12"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/fa/33/fb965c94a703b2f62741a52911446fe85e7effc677d54d1a8cd0033f4848/pyalpm-0.10.12.tar.gz", hash = "sha256:8c6cb4bbba819f99fe6c2547f25a861f68905d96729caf1ea15ba6c43d4f1127", size = 52295, upload-time = "2025-05-27T10:33:58.208Z" }
 
 [[package]]
 name = "pydantic"
