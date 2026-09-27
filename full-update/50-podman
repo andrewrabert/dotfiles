@@ -1,11 +1,1 @@
-#!/usr/bin/env sh
-set -e
-
-if ! command -v podman > /dev/null; then
-    exit
-fi
-
-if [ "$(realpath ~/.config/containers/registries.conf 2> /dev/null)" != "${DOTFILES}/podman/registries.conf" ]; then
-    mkdir -p ~/.config/containers/
-    ln -sT "${DOTFILES}/podman/registries.conf" ~/.config/containers/registries.conf
-fi
+.py-dotfiles

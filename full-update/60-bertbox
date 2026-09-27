@@ -1,4 +1,1 @@
-#!/usr/bin/env sh
-if command -v bertbox > /dev/null; then
-    exec "${DOTFILES}/full-update/.py-dotfiles" bertbox "$@"
-fi
+.py-dotfiles

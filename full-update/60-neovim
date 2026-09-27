@@ -1,15 +1,1 @@
-#!/usr/bin/env sh
-set -e
-
-if ! command -v nvim > /dev/null; then
-    rm -rf ~/.config/nvim ~/.cache/nvim ~/.local/share/nvim
-    exit
-fi
-
-if [ "$(realpath ~/.config/nvim)" != "$DOTFILES/nvim" ]; then
-    rm -rf ~/.config/nvim
-    ln -sT "${DOTFILES}/nvim" ~/.config/nvim
-fi
-
-nvim --headless -c PackSync +qa
-nvim --headless -c "lua require('blink.cmp').build():wait(math.huge)" +qa
+.py-dotfiles

@@ -1,2 +1,1 @@
-#!/usr/bin/env sh
-exec "${DOTFILES}/full-update/.py-dotfiles" krita "$@"
+.py-dotfiles

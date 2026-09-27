@@ -1,7 +1,7 @@
 from dotfiles import host, systemd
 
 
-async def main():
+async def main(args):
     if host.name() != "mars":
         return
 

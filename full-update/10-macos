@@ -1,11 +1,1 @@
-#!/usr/bin/env sh
-set -e
-
-if [ "$(uname)" != 'Darwin' ]; then
-    exit
-fi
-
-brew update
-brew upgrade
-
-touch ~/.hushlogin
+.py-dotfiles

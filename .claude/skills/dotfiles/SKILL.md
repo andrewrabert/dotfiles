@@ -21,7 +21,7 @@ description: Use when creating scripts for dotfiles, adding files to dotfiles, w
 ```
 ${DOTFILES}/
   .bin/                    # Symlinks to scripts (auto-generated)
-  full-update/             # Update scripts (numbered for ordering)
+  full-update/             # Update script symlinks to .py-dotfiles (numbered for ordering)
   non-user/                # System files (requires sudo)
     _archlinux/            # Arch Linux specific
     ${HOST_DOTFILES}/      # Host-specific system files
@@ -60,7 +60,9 @@ Order (first wins):
 
 ## full-update System
 
-`full-update` runs numbered scripts from `"${DOTFILES}/full-update/"` and all `"${DOTFILES_*}/full-update/"`:
+`full-update` runs numbered scripts from `"${DOTFILES}/full-update/"` and all `"${DOTFILES_*}/full-update/"`.
+
+Public scripts are Python modules in `py-dotfiles/src/dotfiles/full_update/`, registered in the `SCRIPTS` dict in `py-dotfiles/src/dotfiles/commands/update.py` (values are `module:function` paths into `dotfiles.full_update` or existing dotfiles modules such as `dotfiles.arch_linux`) keyed by script name (e.g. `"60-zsh"`). Each module exposes `async def main(args)`. Each name in `"${DOTFILES}/full-update/"` is a symlink to `full-update/.py-dotfiles`, which runs `dotfiles update NAME`. Scripts in `"${DOTFILES_*}/full-update/"` still run as external executables.
 
 ```sh
 full-update              # Run all scripts
@@ -82,7 +84,7 @@ full-update 60-zsh       # Run specific script from all repos
 
 **How it works:**
 1. Runs `00-dotfiles --system` first (git pull + non-user sync)
-2. Runs all other scripts in numeric order
+2. Runs all other scripts in sorted key order
 3. Processes `${DOTFILES}` first, then each `${DOTFILES_*}` alphabetically
 
 ## non-user System Files
@@ -154,8 +156,11 @@ dotfiles-link-bin
 
 **Add full-update script:**
 ```sh
-nvim "${DOTFILES}/full-update/60-myapp"
-chmod +x "${DOTFILES}/full-update/60-myapp"
+# Module exposing `async def main(args)`
+nvim "${DOTFILES}/py-dotfiles/src/dotfiles/full_update/myapp.py"
+# Register in SCRIPTS: "60-myapp": "dotfiles.full_update.myapp:main"
+nvim "${DOTFILES}/py-dotfiles/src/dotfiles/commands/update.py"
+ln -s .py-dotfiles "${DOTFILES}/full-update/60-myapp"
 ```
 
 **Add system file (non-user):**

@@ -1,12 +1,1 @@
-#!/usr/bin/env sh
-set -e
-
-if ! command -v fc-list > /dev/null; then
-    rm -rf ~/.config/fontconfig
-else
-    if [ "$(realpath ~/.config/fontconfig)" != "$DOTFILES/fontconfig" ]; then
-        echo "Linking configuration ..."
-        rm -rf ~/.config/fontconfig
-        ln -sT "${DOTFILES}/fontconfig" ~/.config/fontconfig
-    fi
-fi
+.py-dotfiles

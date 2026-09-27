@@ -1,8 +1,14 @@
+import pathlib
 import platform
 
-if platform.system() != "Darwin":
-    raise ImportError("dotfiles.macos requires macOS")
+from dotfiles import process
 
-from . import homebrew, packages
 
-__all__ = ["homebrew", "packages"]
+async def main(args):
+    if platform.system() != "Darwin":
+        return
+
+    await process.run("brew", "update")
+    await process.run("brew", "upgrade")
+
+    (pathlib.Path.home() / ".hushlogin").touch()

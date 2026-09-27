@@ -1,12 +1,1 @@
-#!/usr/bin/env sh
-set -e
-
-if command -v psql > /dev/null; then
-    if [ "$(realpath ~/.psqlrc)" != "$DOTFILES/psql/.psqlrc" ]; then
-        echo "Linking configuration ..."
-        rm -rf ~/.psqlrc
-        ln -sT "${DOTFILES}/psql/.psqlrc" ~/.psqlrc
-    fi
-else
-    rm -rf ~/.psqlrc
-fi
+.py-dotfiles

@@ -7,7 +7,7 @@ import tempfile
 import httpx2
 import pydantic
 
-from dotfiles import errors, fs
+from dotfiles import errors, fs, host
 
 REPO = "andrewrabert/zoekt-simple"
 API_URL = f"https://api.github.com/repos/{REPO}/releases/latest"
@@ -42,8 +42,11 @@ def detect_platform():
     return os_name, arch
 
 
-def main():
+async def main(args):
     install_dir = fs.dotfiles_local() / "zoekt-simple"
+    if host.name() != "aweber":
+        fs.delete(install_dir)
+        return
     bin_dir = install_dir / "bin"
     version_file = install_dir / ".installed-version"
 

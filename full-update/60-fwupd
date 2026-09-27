@@ -1,6 +1,1 @@
-#!/usr/bin/env sh
-if command -v fwupdmgr > /dev/null; then
-    sudo fwupdmgr refresh --force
-    # tee to disable upload question
-    sudo fwupdmgr get-updates | tee
-fi
+.py-dotfiles

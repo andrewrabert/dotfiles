@@ -1,7 +1,1 @@
-#!/usr/bin/env sh
-set -eu
-if [ -f /etc/arch-release ]; then
-    pacman -Q pyalpm >/dev/null 2>&1 || sudo pacman -S --noconfirm pyalpm
-    cd "${DOTFILES}/py-dotfiles/src"
-    exec /usr/bin/python3 -m dotfiles.arch_linux "$@"
-fi
+.py-dotfiles

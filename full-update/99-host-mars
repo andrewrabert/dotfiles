@@ -1,5 +1,1 @@
-#!/usr/bin/env sh
-set -eu
-if [ "${HOST_DOTFILES}" = mars ]; then
-    exec "${DOTFILES}/full-update/.py-dotfiles" host-mars "$@"
-fi
+.py-dotfiles

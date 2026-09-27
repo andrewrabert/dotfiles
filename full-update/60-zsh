@@ -1,16 +1,1 @@
-#!/usr/bin/env sh
-set -eu
-if ! command -v zsh > /dev/null; then
-    rm -rf ~/.zshenv
-    rm -rf ~/.zshrc
-    rm -rf ~/.zlogin
-else
-    ln -sfT "${DOTFILES}/zsh/.zshenv" ~/.zshenv
-    ln -sfT "${DOTFILES}/zsh/.zshrc" ~/.zshrc
-
-    if [ -n "$HOST_DOTFILES" ] && [ -f "${DOTFILES}/zsh/hosts/${HOST_DOTFILES}/.zlogin" ]; then
-        ln -sfT "${DOTFILES}/zsh/hosts/${HOST_DOTFILES}/.zlogin" ~/.zlogin
-    fi
-    rm -f ~/.zcompdump
-    zsh -ic 'echo -n'
-fi
+.py-dotfiles

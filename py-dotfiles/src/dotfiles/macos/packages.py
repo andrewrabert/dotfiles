@@ -1,3 +1,4 @@
+import platform
 import shutil
 
 from . import homebrew
@@ -55,7 +56,9 @@ EXPECTED_PACKAGES = {
 }
 
 
-async def main():
+async def main(args):
+    if platform.system() != "Darwin":
+        return
     installed = await homebrew.Homebrew.get_installed()
     expected = EXPECTED_PACKAGES.copy()
 

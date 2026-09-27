@@ -28,7 +28,7 @@ def inject_nosplash(content):
     return "\n".join(lines)
 
 
-async def main():
+async def main(args):
     sources = []
     if shutil.which("flatpak"):
         for exports in FLATPAK_EXPORTS:

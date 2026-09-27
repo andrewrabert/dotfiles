@@ -1,12 +1,1 @@
-#!/usr/bin/env sh
-set -e
-
-if ! command -v yazi > /dev/null; then
-    rm -rf ~/.config/yazi
-else
-    if [ "$(realpath ~/.config/yazi)" != "$DOTFILES/yazi" ]; then
-        echo "Linking configuration ..."
-        rm -rf ~/.config/yazi
-        ln -s "${DOTFILES}/yazi" ~/.config/yazi
-    fi
-fi
+.py-dotfiles

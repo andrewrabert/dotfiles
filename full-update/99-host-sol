@@ -1,17 +1,1 @@
-#!/usr/bin/env sh
-set -e 
-if [ "$HOST_DOTFILES" != 'sol' ]; then
-    exit
-fi
-
-if ! [ -d ~/.config/systemd ] || [ "$(realpath ~/.config/systemd)" != "${DOTFILES}/systemd" ]; then
-    rm -rf ~/.config/systemd
-    ln -sT "${DOTFILES}/systemd" ~/.config/systemd
-fi
-
-git-auto-update ~/src/nullsum/ar/sol-docker
-sol-docker pull
-sol-repotool update
-
-echo ':: Generating NVIDIA CDI spec'
-sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml
+.py-dotfiles

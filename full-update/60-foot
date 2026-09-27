@@ -1,13 +1,1 @@
-#!/usr/bin/env sh
-set -e
-
-if ! command -v foot > /dev/null; then
-    rm -rf ~/.config/foot
-    exit
-fi
-
-if [ "$(realpath ~/.config/foot)" != "$DOTFILES/foot" ]; then
-    echo 'Linking configuration ...'
-    rm -rf ~/.config/foot
-    ln -sT "${DOTFILES}/foot" ~/.config/foot
-fi
+.py-dotfiles

@@ -4,7 +4,7 @@ import shutil
 from dotfiles import xdg
 
 
-def main():
+async def main(args):
     if not shutil.which("discord"):
         return
     path = xdg.config_home() / "discord" / "settings.json"

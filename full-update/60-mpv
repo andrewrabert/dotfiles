@@ -1,12 +1,1 @@
-#!/usr/bin/env sh
-set -e
-
-if ! command -v mpv > /dev/null; then
-    rm -rf ~/.config/mpv
-else
-    if [ "$(realpath ~/.config/mpv)" != "$DOTFILES/mpv" ]; then
-        echo "Linking configuration ..."
-        rm -rf ~/.config/mpv
-        ln -sT "${DOTFILES}/mpv" ~/.config/mpv
-    fi
-fi
+.py-dotfiles

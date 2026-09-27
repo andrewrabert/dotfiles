@@ -1,5 +1,6 @@
 import dataclasses
 import pathlib
+import shutil
 
 from dotfiles import fs, host, process, xdg
 
@@ -265,7 +266,9 @@ async def configure_kde(hostname, dotfiles):
                 desktop_file.unlink()
 
 
-async def main():
+async def main(args):
+    if not shutil.which("plasmashell"):
+        return
     hostname = host.name()
     dotfiles = fs.dotfiles()
 

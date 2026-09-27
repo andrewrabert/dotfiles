@@ -6,7 +6,7 @@ STIGNORE_INCLUDE = {
 }
 
 
-def main():
+async def main(args):
     for sync_folder, include_path in STIGNORE_INCLUDE.items():
         sync_folder = pathlib.Path.home() / sync_folder
         expected_contents = f"#include {include_path}\n"

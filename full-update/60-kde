@@ -1,5 +1,1 @@
-#!/usr/bin/env sh
-set -eu
-if command -v plasmashell > /dev/null; then
-    exec "${DOTFILES}/full-update/.py-dotfiles" kde "$@"
-fi
+.py-dotfiles

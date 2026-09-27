@@ -1,18 +1,1 @@
-#!/usr/bin/env sh
-if command -v update-mime-database > /dev/null; then
-    ln -sfT "$DOTFILES/mimeapps/mimeapps.list" ~/.config/mimeapps.list
-
-    if [ -d ~/.local/share/mime/packages ]; then
-        if [ "$(readlink -f ~/.local/share/mime/packages)" != "$DOTFILES/shared-mime-info/packages" ]; then
-            echo 'error: unexpectedly exists' >&2
-            exit 1
-        fi
-    else
-        mkdir -p ~/.local/share/mime
-        ln -sf "$DOTFILES/shared-mime-info/packages" ~/.local/share/mime/packages
-    fi
-    update-mime-database ~/.local/share/mime
-else
-    rm -rf ~/.config/mimeapps.list
-    rm -rf ~/.local/share/mime
-fi
+.py-dotfiles

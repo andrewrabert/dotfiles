@@ -1,3 +1,4 @@
+import argparse
 import shutil
 
 import pydantic
@@ -49,7 +50,21 @@ async def build(source):
     return binary
 
 
-async def main(force):
+def parse_args(args):
+    parser = argparse.ArgumentParser(prog="bxwrp")
+    parser.add_argument(
+        "-f",
+        "--force",
+        action="store_true",
+        help="skip the commit check and rebuild",
+    )
+    return parser.parse_args(args)
+
+
+async def main(args):
+    if not shutil.which("bxwrp"):
+        return
+    force = parse_args(args).force
     local = fs.dotfiles_local()
     dest = local / "bxwrp" / "bin" / "bxwrp"
     symlink = local / "bin" / "bxwrp"

@@ -1,10 +1,1 @@
-#!/usr/bin/env sh
-set -e 
-if [ "$HOST_DOTFILES" != 'bedroom-tv' ]; then
-    exit
-fi
-
-if ! command -v uv > /dev/null; then
-    bertbox full-update 35-uv --force
-fi
-"${DOTFILES}/scripts/install-jellium-desktop-nightly" flatpak
+.py-dotfiles

@@ -19,7 +19,7 @@ Use the `dotfiles` skill (`.claude/skills/dotfiles/`) for script placement, PATH
 - hosts/ - host-specific scripts
 - archlinux/, aws/, email/, provision/
 
-**Update System:** full-update/ - numbered scripts (00-99) for ordered updates
+**Update System:** full-update/ - numbered names (00-99) symlinked to .py-dotfiles, which runs the Python module registered in SCRIPTS in py-dotfiles/src/dotfiles/commands/update.py (values point at modules in dotfiles.full_update or existing dotfiles modules)
 
 **Host Configs:** non-user/ - per-machine configs (mars, sol, phobos, retro-*, lounge-htpc)
 

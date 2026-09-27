@@ -1,12 +1,1 @@
-#!/usr/bin/env sh
-set -e
-
-if ! command -v pipewire > /dev/null; then
-    rm -rf ~/.config/pipewire
-else
-    if [ "$(realpath ~/.config/pipewire)" != "$DOTFILES/pipewire" ]; then
-        echo "Linking configuration ..."
-        rm -rf ~/.config/pipewire
-        ln -sT "${DOTFILES}/pipewire" ~/.config/pipewire
-    fi
-fi
+.py-dotfiles

@@ -19,21 +19,18 @@ from dotfiles.commands import (
     zoekt_simple,
 )
 
-
-def add_force(parser, help):
-    parser.add_argument("-f", "--force", action="store_true", help=help)
+PASSTHROUGH = {"bertbox", "bxwrp", "noted"}
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    bertbox_parser = subparsers.add_parser("bertbox", help="Manage bertbox")
-    add_force(bertbox_parser, "skip the ETag check and reinstall")
+    def add_passthrough(name, help):
+        subparsers.add_parser(name, help=help, add_help=False)
 
-    bxwrp_parser = subparsers.add_parser("bxwrp", help="Manage bxwrp")
-    add_force(bxwrp_parser, "skip the commit check and rebuild")
-
+    add_passthrough("bertbox", "Manage bertbox")
+    add_passthrough("bxwrp", "Manage bxwrp")
     subparsers.add_parser("discord", help="disable discord host updates")
     subparsers.add_parser("host-mars", help="configure the mars host")
     jellium_parser = subparsers.add_parser(
@@ -55,10 +52,7 @@ def main():
         "link-bin", help="link dotfiles scripts into the dotfiles bin"
     )
     subparsers.add_parser("macos", help="install expected homebrew packages")
-
-    noted_parser = subparsers.add_parser("noted", help="Manage noted")
-    add_force(noted_parser, "skip the ETag check and reinstall")
-
+    add_passthrough("noted", "Manage noted")
     subparsers.add_parser("syncthing", help="write .stignore includes")
 
     update_parser = subparsers.add_parser(
@@ -83,45 +77,47 @@ def main():
 
     subparsers.add_parser("zoekt-simple", help="Manage zoekt-simple")
 
-    args = parser.parse_args()
+    args, rest = parser.parse_known_args()
+    if rest and args.command not in PASSTHROUGH:
+        parser.error(f"unrecognized arguments: {' '.join(rest)}")
     try:
         match args.command:
             case "bertbox":
-                asyncio.run(bertbox.main(force=args.force))
+                asyncio.run(bertbox.main(rest))
             case "bxwrp":
-                asyncio.run(bxwrp.main(force=args.force))
+                asyncio.run(bxwrp.main(rest))
             case "discord":
-                discord.main()
+                asyncio.run(discord.main([]))
             case "host-mars":
-                asyncio.run(host_mars.main())
+                asyncio.run(host_mars.main([]))
             case "jellium-desktop":
                 asyncio.run(jellium_desktop.main(args.platform, args.ssh))
             case "kde":
-                from dotfiles import kde
+                from dotfiles.kde import settings
 
-                asyncio.run(kde.settings.main())
+                asyncio.run(settings.main([]))
             case "kde-color-schemes":
-                from dotfiles import kde
+                from dotfiles.kde import color_schemes
 
-                asyncio.run(kde.color_schemes.main())
+                asyncio.run(color_schemes.main([]))
             case "krita":
-                asyncio.run(krita.main())
+                asyncio.run(krita.main([]))
             case "link-bin":
                 link_bin.main()
             case "macos":
-                from dotfiles import macos
+                from dotfiles.macos import packages
 
-                asyncio.run(macos.packages.main())
+                asyncio.run(packages.main([]))
             case "noted":
-                asyncio.run(noted.main(force=args.force))
+                asyncio.run(noted.main(rest))
             case "syncthing":
-                syncthing.main()
+                asyncio.run(syncthing.main([]))
             case "update":
                 asyncio.run(
                     update.main(args.skip, args.script, args.script_args)
                 )
             case "zoekt-simple":
-                zoekt_simple.main()
+                asyncio.run(zoekt_simple.main([]))
     except (errors.ProcessError, errors.UserError) as e:
         print(f"error: {e}", file=sys.stderr)
         sys.exit(1)

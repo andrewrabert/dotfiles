@@ -5,6 +5,7 @@ import dataclasses
 import io
 import os
 import pathlib
+import shutil
 import uuid
 
 from dotfiles import fs, process, xdg
@@ -416,7 +417,9 @@ def sync_file(path, content):
     return True
 
 
-async def main():
+async def main(args):
+    if not shutil.which("plasmashell"):
+        return
     dark_mode = await is_dark_mode()
     base16_bg, base16_active_fg, base16_inactive_fg = await get_base16_colors()
 

@@ -1,12 +1,1 @@
-#!/usr/bin/env sh
-set -e
-
-if ! command -v tmux > /dev/null; then
-    rm -rf ~/.tmux.conf
-else
-    if [ "$(realpath ~/.tmux.conf)" != "$DOTFILES/tmux/.tmux.conf" ]; then
-        echo "Linking configuration ..."
-        rm -rf ~/.tmux.conf
-        ln -s "${DOTFILES}/tmux/.tmux.conf" ~/
-    fi
-fi
+.py-dotfiles

@@ -1,12 +1,1 @@
-#!/usr/bin/env sh
-set -e
-
-if ! command -v dosbox > /dev/null; then
-    rm -rf ~/.config/dosbox
-else
-    if [ "$(realpath ~/.config/dosbox)" != "$DOTFILES/dosbox" ]; then
-        echo "Linking configuration ..."
-        rm -rf ~/.config/dosbox
-        ln -sT "${DOTFILES}/dosbox" ~/.config/dosbox
-    fi
-fi
+.py-dotfiles

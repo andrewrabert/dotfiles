@@ -1,9 +1,3 @@
 #!/usr/bin/env sh
 set -eu
-
-if ! command -v uv > /dev/null; then
-    echo "skipping dotfiles $*: uv not found" >&2
-    exit 0
-fi
-
-exec uv run --project "${DOTFILES}/py-dotfiles/" dotfiles "$@"
+exec uv run --project "${DOTFILES}/py-dotfiles/" dotfiles update -- "$0" "$@"

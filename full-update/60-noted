@@ -1,4 +1,1 @@
-#!/usr/bin/env sh
-if command -v noted > /dev/null; then
-    exec "${DOTFILES}/full-update/.py-dotfiles" noted "$@"
-fi
+.py-dotfiles

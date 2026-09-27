@@ -1,10 +1,1 @@
-#!/usr/bin/env sh
-set -e 
-
-# hostname is not set to anything useful
-if ! command -v termux-info > /dev/null; then
-    exit
-fi
-if ! command -v ty > /dev/null; then
-    pkg install ty
-fi
+.py-dotfiles

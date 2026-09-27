@@ -7,7 +7,6 @@ import shutil
 import sys
 
 from dotfiles import (
-    arch_linux,
     errors,
     flatpak,
     fs,
@@ -17,6 +16,7 @@ from dotfiles import (
     users,
     uv,
 )
+from dotfiles.arch_linux import pacman
 
 SRC = pathlib.Path(__file__).resolve().parents[2]
 MODULE = "dotfiles.arch_linux"
@@ -734,13 +734,11 @@ async def dump_installed_packages():
         / "arch-linux"
         / f"packages_{HOSTNAME}.txt"
     )
-    packages = sorted(arch_linux.pacman.local_packages(), key=lambda p: p.name)
+    packages = sorted(pacman.local_packages(), key=lambda p: p.name)
 
     lines = []
     for pkg in packages:
-        reason = (
-            "explicit" if arch_linux.pacman.is_explicit(pkg) else "dependency"
-        )
+        reason = "explicit" if pacman.is_explicit(pkg) else "dependency"
         lines.append(f"{pkg.name} {reason}")
 
     output_file.write_text("\n".join(lines) + "\n")
@@ -766,7 +764,7 @@ async def ensure_flatpaks():
 async def ensure_packages():
     expected_packages = set(EXPECTED_PACKAGES)
     installed_packages = {
-        package.name: package for package in arch_linux.pacman.local_packages()
+        package.name: package for package in pacman.local_packages()
     }
 
     missing = set()
@@ -774,22 +772,22 @@ async def ensure_packages():
     for name in expected_packages:
         if name not in installed_packages:
             missing.add(name)
-        elif not arch_linux.pacman.is_explicit(installed_packages[name]):
+        elif not pacman.is_explicit(installed_packages[name]):
             wrong_reason.add(name)
 
     if missing:
         print("Installing missing packages ...")
-        await arch_linux.pacman.Pacman.install(missing)
+        await pacman.Pacman.install(missing)
 
     if wrong_reason:
         print("Marking packages as explicitly installed ...")
-        await arch_linux.pacman.Pacman.set_reason(wrong_reason, explicit=True)
+        await pacman.Pacman.set_reason(wrong_reason, explicit=True)
 
 
 async def ensure_package_dependencies():
     provided_packages = set()
     installed_packages = set()
-    for package in arch_linux.pacman.local_packages():
+    for package in pacman.local_packages():
         installed_packages.add(package.name)
         provided_packages.add(package.name)
         provided_packages.update(package.provides)
@@ -804,7 +802,7 @@ async def ensure_package_dependencies():
 
     if missing:
         print("Installing missing dependencies ...")
-        await arch_linux.pacman.Pacman.install(missing, asdeps=True)
+        await pacman.Pacman.install(missing, asdeps=True)
 
 
 async def run_mode(mode):

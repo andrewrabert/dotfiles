@@ -1,5 +1,1 @@
-#!/usr/bin/env sh
-set -eu
-if command -v discord > /dev/null; then
-    exec "${DOTFILES}/full-update/.py-dotfiles" discord "$@"
-fi
+.py-dotfiles

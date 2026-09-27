@@ -1,9 +1,1 @@
-#!/usr/bin/env sh
-remove_broken_symlinks() {
-    if [ -d "$1" ]; then
-        cd "$1" || exit 1
-        find -L . -name . -o -type d -prune -o -type l -exec rm {} +
-    fi
-}
-
-remove_broken_symlinks ~/.local/bin
+.py-dotfiles
