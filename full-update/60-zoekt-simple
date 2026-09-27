@@ -3,8 +3,7 @@ set -eu
 
 case "${HOST_DOTFILES}" in
     aweber)
-        SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-        "${SCRIPT_DIR}/.60-zoekt-simple"
+        exec "${DOTFILES}/full-update/.py-dotfiles" zoekt-simple
         ;;
     *)
         rm -rf "${DOTFILES}/.local/zoekt-simple"

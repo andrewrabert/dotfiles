@@ -1,0 +1,508 @@
+"""Generate KDE color scheme files for per-application titlebar colors."""
+
+import configparser
+import dataclasses
+import io
+import os
+import pathlib
+import uuid
+
+from dotfiles import fs, process
+
+
+@dataclasses.dataclass
+class WindowClass:
+    description: str
+    wmclass: str
+    wmclasscomplete: bool = False
+
+
+def adjust_color_brightness(hex_color: str, factor: float) -> str:
+    """Brighten or dim a hex RGB color by a float factor.
+
+    Args:
+        hex_color: Hex color string (e.g., "#RRGGBB" or "RRGGBB")
+        factor: Brightness factor (>1.0 to brighten, <1.0 to dim)
+
+    Returns:
+        Adjusted hex color string with "#" prefix
+    """
+    hex_color = hex_color.lstrip("#")
+    r = int(hex_color[0:2], 16)
+    g = int(hex_color[2:4], 16)
+    b = int(hex_color[4:6], 16)
+
+    r = max(0, min(255, int(r * factor)))
+    g = max(0, min(255, int(g * factor)))
+    b = max(0, min(255, int(b * factor)))
+
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+
+@dataclasses.dataclass
+class ColorScheme:
+    active_bg: str | None = None
+    active_fg: str | None = None
+    inactive_bg: str | None = None
+    inactive_fg: str | None = None
+
+    def to_rgb(self, hex_color: str) -> str:
+        hex_color = hex_color.lstrip("#")
+        r = int(hex_color[0:2], 16)
+        g = int(hex_color[2:4], 16)
+        b = int(hex_color[4:6], 16)
+        return f"{r},{g},{b}"
+
+
+@dataclasses.dataclass
+class TitlebarConfig:
+    classes: list[WindowClass] = dataclasses.field(default_factory=list)
+    dark: ColorScheme | None = None
+    light: ColorScheme | None = None
+
+
+DARK_ACTIVE_FG = "#fcfcfc"
+DARK_INACTIVE_FG = adjust_color_brightness(DARK_ACTIVE_FG, 0.4)
+
+LIGHT_ACTIVE_FG = "#232629"
+LIGHT_INACTIVE_FG = "#232629"
+
+
+TITLEBAR_CONFIGS = {
+    "Element": TitlebarConfig(
+        classes=[
+            WindowClass(description="Element", wmclass="element"),
+            WindowClass(description="Element", wmclass="im.riot.Riot"),
+        ],
+        dark=ColorScheme(
+            active_bg="#181a1d",
+            inactive_fg=DARK_INACTIVE_FG,
+            inactive_bg="#181a1d",
+        ),
+        light=ColorScheme(
+            active_bg="#ffffff",
+            inactive_bg="#ffffff",
+        ),
+    ),
+    "Terminal": TitlebarConfig(
+        classes=[
+            WindowClass(description="foot", wmclass="foot"),
+            WindowClass(description="ghostty", wmclass="ghostty"),
+            WindowClass(
+                description="tmux-scratchpad",
+                wmclass="dotfiles.andrewrabert.tmux-scratchpad",
+            ),
+        ],
+        dark=ColorScheme(
+            active_bg="#181818",
+            active_fg="#7e7e7e",
+            inactive_bg="#181818",
+            inactive_fg="#7e7e7e",
+        ),
+        light=ColorScheme(
+            active_bg="#ffffff",
+            inactive_bg="#ffffff",
+        ),
+    ),
+    "Ghostty": TitlebarConfig(
+        classes=[
+            WindowClass(
+                description="com.mitchellh.ghostty",
+                wmclass="ghostty com.mitchellh.ghostty",
+                wmclasscomplete=True,
+            ),
+        ],
+        dark=ColorScheme(
+            active_bg="#181818",
+            active_fg="#7e7e7e",
+            inactive_bg="#181818",
+            inactive_fg="#7e7e7e",
+        ),
+        light=ColorScheme(
+            active_bg="#ffffff",
+            inactive_bg="#ffffff",
+        ),
+    ),
+    "Obsidian": TitlebarConfig(
+        classes=[
+            WindowClass(description="Obsidian", wmclass="obsidian"),
+        ],
+        dark=ColorScheme(
+            active_bg="#393939",
+            inactive_fg=DARK_INACTIVE_FG,
+            inactive_bg="#2a2a2a",
+        ),
+    ),
+    "Signal": TitlebarConfig(
+        classes=[
+            WindowClass(description="Signal", wmclass="signal"),
+            WindowClass(description="Signal", wmclass="org.signal.Signal"),
+        ],
+        dark=ColorScheme(
+            active_bg="#191919",
+            inactive_fg=DARK_INACTIVE_FG,
+            inactive_bg="#191919",
+        ),
+    ),
+    "Lemonade": TitlebarConfig(
+        classes=[
+            WindowClass(
+                description="Lemonade App",
+                wmclass="chrome-localhost__lemonade-Default",
+            ),
+        ],
+        dark=ColorScheme(
+            active_bg="#000000",
+            inactive_fg=DARK_INACTIVE_FG,
+            inactive_bg="#000000",
+        ),
+    ),
+    "Firefox": TitlebarConfig(
+        classes=[
+            WindowClass(
+                description="Mozilla Firefox",
+                wmclass="firefox",
+            ),
+        ],
+        dark=ColorScheme(
+            active_bg="#2e2e32",
+            inactive_fg=DARK_INACTIVE_FG,
+            inactive_bg="#222226",
+        ),
+    ),
+}
+
+
+def merge_config(
+    base: configparser.RawConfigParser,
+    color_scheme: ColorScheme,
+    app_name: str,
+):
+    color_data = {}
+
+    if color_scheme.active_bg or color_scheme.active_fg:
+        color_data["Colors:Header"] = {}
+        if color_scheme.active_bg:
+            color_data["Colors:Header"]["BackgroundNormal"] = (
+                color_scheme.to_rgb(color_scheme.active_bg)
+            )
+        if color_scheme.active_fg:
+            color_data["Colors:Header"]["ForegroundNormal"] = (
+                color_scheme.to_rgb(color_scheme.active_fg)
+            )
+
+    if color_scheme.inactive_bg or color_scheme.inactive_fg:
+        color_data["Colors:Header][Inactive"] = {}
+        if color_scheme.inactive_bg:
+            color_data["Colors:Header][Inactive"]["BackgroundNormal"] = (
+                color_scheme.to_rgb(color_scheme.inactive_bg)
+            )
+        if color_scheme.inactive_fg:
+            color_data["Colors:Header][Inactive"]["ForegroundNormal"] = (
+                color_scheme.to_rgb(color_scheme.inactive_fg)
+            )
+
+    for section, values in color_data.items():
+        base.setdefault(section, {})
+        for key, value in values.items():
+            base.set(section, key, value)
+
+    base.remove_section("General")
+    base.add_section("General")
+
+    general_data = {
+        "ColorScheme": f"Application{app_name}",
+        "Name": f"Application - {app_name}",
+    }
+
+    for key, value in general_data.items():
+        base.set("General", key, value)
+
+
+async def get_base16_colors() -> tuple[str | None, str | None, str | None]:
+    base16_theme_path = pathlib.Path.home() / ".base16_theme"
+    if not base16_theme_path.exists():
+        return None, None, None
+
+    try:
+        env = os.environ.copy()
+        env["BASE16_SHELL_ENABLE_VARS"] = "1"
+
+        result = await process.run(
+            "sh",
+            "-c",
+            ". ~/.base16_theme && echo $BASE16_COLOR_00_HEX && echo $BASE16_COLOR_05_HEX && echo $BASE16_COLOR_03_HEX",
+            check=False,
+            env=env,
+            stdout=process.PIPE,
+            stderr=process.PIPE,
+        )
+
+        if result.returncode != 0:
+            return None, None, None
+
+        lines = result.stdout.decode().strip().split("\n")
+        if len(lines) >= 3:
+            bg = f"#{lines[0]}" if lines[0] else None
+            active_fg = f"#{lines[1]}" if lines[1] else None
+            inactive_fg = f"#{lines[2]}" if lines[2] else None
+            return bg, active_fg, inactive_fg
+    except FileNotFoundError:
+        pass
+
+    return None, None, None
+
+
+async def is_dark_mode() -> bool:
+    try:
+        result = await process.run(
+            "dbus-send",
+            "--session",
+            "--print-reply",
+            "--dest=org.freedesktop.portal.Desktop",
+            "/org/freedesktop/portal/desktop",
+            "org.freedesktop.portal.Settings.Read",
+            "string:org.freedesktop.appearance",
+            "string:color-scheme",
+            check=False,
+            stdout=process.PIPE,
+            stderr=process.PIPE,
+        )
+
+        if result.returncode != 0:
+            return True
+
+        for line in result.stdout.decode().splitlines():
+            if "uint32" in line:
+                value = line.strip().split()[-1]
+                return value == "1"
+        return True
+    except FileNotFoundError:
+        return True
+
+
+def find_rule_for_wmclass(
+    kwin_config: configparser.RawConfigParser, wmclass: str
+):
+    for section in kwin_config.sections():
+        if section == "General":
+            continue
+        if kwin_config.has_option(section, "wmclass"):
+            if kwin_config.get(section, "wmclass") == wmclass:
+                return section
+    return None
+
+
+def update_kwin_rules(
+    app_name: str,
+    config: TitlebarConfig,
+    kwinrulesrc_path: pathlib.Path,
+    managed_rules: set,
+    dark_mode: bool,
+) -> bool:
+    kwin_config = configparser.RawConfigParser()
+    kwin_config.optionxform = str
+
+    old_content = ""
+    if kwinrulesrc_path.exists():
+        old_content = kwinrulesrc_path.read_text()
+        kwin_config.read_string(old_content)
+
+    if not kwin_config.has_section("General"):
+        kwin_config.add_section("General")
+
+    active_scheme = config.dark if dark_mode else config.light
+    inactive_scheme = config.light if dark_mode else config.dark
+
+    if not active_scheme:
+        return False
+
+    mode_suffix = "(Dark)" if dark_mode else "(Light)"
+
+    for window_class in config.classes:
+        rule_data = {
+            "Description": f"Application settings for {window_class.description}",
+            "decocolor": f"Titlebar - {app_name} {mode_suffix}",
+            "decocolorrule": "2",
+            "wmclass": window_class.wmclass,
+            "wmclassmatch": "1",
+        }
+
+        if window_class.wmclasscomplete:
+            rule_data["wmclasscomplete"] = "true"
+
+        existing_section = find_rule_for_wmclass(
+            kwin_config, window_class.wmclass
+        )
+
+        if existing_section:
+            existing_keys = set(kwin_config.options(existing_section))
+            new_keys = set(rule_data.keys())
+
+            if existing_keys != new_keys:
+                print(
+                    f"Warning: Rule for {window_class.wmclass} has different keys. Skipping update."
+                )
+                print(f"  Existing keys: {existing_keys}")
+                print(f"  New keys: {new_keys}")
+                managed_rules.add(existing_section)
+                continue
+
+            rule_uuid = existing_section
+            managed_rules.add(rule_uuid)
+        else:
+            rule_uuid = str(uuid.uuid4())
+            managed_rules.add(rule_uuid)
+            kwin_config.add_section(rule_uuid)
+
+        for key, value in rule_data.items():
+            kwin_config.set(rule_uuid, key, value)
+
+    if inactive_scheme:
+        inactive_suffix = "(Light)" if dark_mode else "(Dark)"
+        for section in list(kwin_config.sections()):
+            if section == "General":
+                continue
+            if kwin_config.has_option(section, "decocolor"):
+                decocolor = kwin_config.get(section, "decocolor")
+                if decocolor == f"Titlebar - {app_name} {inactive_suffix}":
+                    kwin_config.remove_section(section)
+
+    existing_rules = kwin_config.get("General", "rules", fallback="").split(
+        ","
+    )
+    existing_rules = [r.strip() for r in existing_rules if r.strip()]
+
+    all_rules = [
+        rule for rule in existing_rules if kwin_config.has_section(rule)
+    ]
+    all_rules = list(dict.fromkeys(all_rules + list(managed_rules)))
+
+    kwin_config.set("General", "rules", ",".join(all_rules))
+    kwin_config.set("General", "count", str(len(all_rules)))
+
+    output = io.StringIO()
+    kwin_config.write(output, space_around_delimiters=False)
+    new_content = output.getvalue()
+
+    if old_content != new_content:
+        fs.write_atomic(kwinrulesrc_path, new_content.encode())
+        return True
+    return False
+
+
+def write_color_scheme(output_dir, app_name, scheme, variant):
+    base = configparser.RawConfigParser()
+    base.optionxform = str
+    base.read_string(
+        pathlib.Path(
+            f"/usr/share/color-schemes/Breeze{variant}.colors"
+        ).read_text()
+    )
+
+    merge_config(base, scheme, app_name)
+
+    output = io.StringIO()
+    base.write(output, space_around_delimiters=False)
+
+    output_file = output_dir / f"Titlebar - {app_name} ({variant}).colors"
+    return output_file, sync_file(output_file, output.getvalue())
+
+
+def sync_file(path, content):
+    if path.exists() and path.read_text() == content:
+        return False
+    fs.write_atomic(path, content.encode())
+    return True
+
+
+async def main():
+    dark_mode = await is_dark_mode()
+    base16_bg, base16_active_fg, base16_inactive_fg = await get_base16_colors()
+
+    if base16_bg and "Foot" in TITLEBAR_CONFIGS:
+        TITLEBAR_CONFIGS["Foot"].dark.active_bg = base16_bg
+        TITLEBAR_CONFIGS["Foot"].dark.inactive_bg = base16_bg
+    if base16_active_fg and "Foot" in TITLEBAR_CONFIGS:
+        TITLEBAR_CONFIGS["Foot"].dark.active_fg = base16_active_fg
+    if base16_inactive_fg and "Foot" in TITLEBAR_CONFIGS:
+        TITLEBAR_CONFIGS["Foot"].dark.inactive_fg = base16_inactive_fg
+    xdg_data_home = os.environ.get(
+        "XDG_DATA_HOME", pathlib.Path.home() / ".local/share"
+    )
+    xdg_config_home = pathlib.Path(
+        os.environ.get("XDG_CONFIG_HOME", pathlib.Path.home() / ".config")
+    )
+
+    output_dir = pathlib.Path(xdg_data_home) / "color-schemes"
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    kwinrulesrc_path = pathlib.Path(xdg_config_home) / "kwinrulesrc"
+
+    created_files = set()
+    managed_rules = set()
+    colors_changed = False
+    kwinrules_changed = False
+
+    for app_name, config in TITLEBAR_CONFIGS.items():
+        variants = ((config.dark, "Dark"), (config.light, "Light"))
+        for scheme, variant in variants:
+            if scheme:
+                output_file, changed = write_color_scheme(
+                    output_dir, app_name, scheme, variant
+                )
+                created_files.add(output_file)
+                colors_changed |= changed
+
+        if update_kwin_rules(
+            app_name, config, kwinrulesrc_path, managed_rules, dark_mode
+        ):
+            kwinrules_changed = True
+
+    dotfiles_color_schemes = fs.dotfiles() / "kde/color-schemes"
+    if dotfiles_color_schemes.exists():
+        for source_file in dotfiles_color_schemes.glob("Dotfiles - *.colors"):
+            dest_file = output_dir / source_file.name
+            created_files.add(dest_file)
+            colors_changed |= sync_file(dest_file, source_file.read_text())
+
+    for pattern in ("Titlebar - *.colors", "Dotfiles - *.colors"):
+        for file in output_dir.glob(pattern):
+            if file not in created_files:
+                file.unlink()
+                print(f"Removed {file}")
+                colors_changed = True
+
+    if colors_changed:
+        await process.run(
+            "dbus-send",
+            "--type=signal",
+            "/KGlobalSettings",
+            "org.kde.KGlobalSettings.notifyChange",
+            "int32:2",
+            "int32:0",
+            check=False,
+        )
+
+    if kwinrules_changed:
+        await process.run(
+            "kwriteconfig6",
+            "--notify",
+            "--file",
+            "kwinrulesrc",
+            "--group",
+            "General",
+            "--key",
+            "count",
+            str(len(managed_rules)),
+            check=False,
+        )
+
+    await process.run(
+        "dbus-send",
+        "--type=method_call",
+        "--dest=org.kde.KWin",
+        "/KWin",
+        "org.kde.KWin.reconfigure",
+        check=False,
+    )

@@ -1,12 +1,5 @@
-#!/usr/bin/env python3
-import json
-import pathlib
-import shutil
-
-if shutil.which("discord"):
-    path = pathlib.Path("~/.config/discord/settings.json").expanduser()
-    if path.exists():
-        settings = json.loads(path.read_text())
-        if not settings.get("SKIP_HOST_UPDATE"):
-            settings["SKIP_HOST_UPDATE"] = True
-            path.write_text(json.dumps(settings))
+#!/usr/bin/env sh
+set -eu
+if command -v discord > /dev/null; then
+    exec "${DOTFILES}/full-update/.py-dotfiles" discord "$@"
+fi

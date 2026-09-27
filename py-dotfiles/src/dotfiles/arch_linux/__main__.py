@@ -1,337 +1,24 @@
-#!/usr/bin/python3
-# use /usr/bin/python3    intstead of /usr/bin/env python3
-# allows using the native pyalpm package
 import argparse
 import asyncio
 import grp
-import hashlib
 import os
 import pathlib
 import shutil
-import subprocess
 import sys
 
-if not pathlib.Path("/etc/arch-release").is_file():
-    exit()
+from dotfiles import (
+    arch_linux,
+    errors,
+    flatpak,
+    fs,
+    process,
+    systemd,
+    users,
+    uv,
+)
 
-import pyalpm
-
-
-class UV:
-    @staticmethod
-    async def find_python(version):
-        """Find python executable path, returns None if not found (retcode 2)."""
-        args = ["uv", "python", "find", version]
-        proc = await asyncio.create_subprocess_exec(
-            *args,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-        stdout, _ = await proc.communicate()
-        match proc.returncode:
-            case 0:
-                return pathlib.Path(stdout.decode().strip())
-            case 2:
-                return None
-            case _:
-                raise subprocess.CalledProcessError(proc.returncode, args)
-
-    @staticmethod
-    async def install_python(version):
-        """Install python version."""
-        args = ["uv", "python", "install", version]
-        proc = await asyncio.create_subprocess_exec(*args)
-        await proc.communicate()
-        if proc.returncode:
-            raise subprocess.CalledProcessError(proc.returncode, args)
-
-
-class Systemctl:
-    @staticmethod
-    async def is_enabled(name, user=False):
-        """Check if systemd unit is enabled."""
-        args = [
-            "systemctl",
-            "--user" if user else "--system",
-            "show",
-            "--property=UnitFileState",
-            "--",
-            name,
-        ]
-        proc = await asyncio.create_subprocess_exec(
-            *args,
-            stdout=asyncio.subprocess.PIPE,
-        )
-        stdout, _ = await proc.communicate()
-        if proc.returncode:
-            raise subprocess.CalledProcessError(proc.returncode, args)
-        match stdout.decode().strip():
-            case "UnitFileState=enabled":
-                return True
-            case "UnitFileState=disabled":
-                return False
-            case _:
-                raise RuntimeError(
-                    f"Unexpected UnitFileState: {stdout.decode().strip()}"
-                )
-
-    @staticmethod
-    async def enable(name, now=False, user=False):
-        """Enable systemd unit."""
-        if await Systemctl.is_enabled(name, user=user):
-            return
-        print(f"Enabling unit {name} (user={user}) (now={now})")
-        args = []
-        if not user:
-            args.append("sudo")
-        args.extend(
-            [
-                "systemctl",
-                "--user" if user else "--system",
-                "enable",
-            ]
-        )
-        if now:
-            args.append("--now")
-        args.extend(["--", name])
-        proc = await asyncio.create_subprocess_exec(*args)
-        await proc.communicate()
-        if proc.returncode:
-            raise subprocess.CalledProcessError(proc.returncode, args)
-
-
-class Pacman:
-    @staticmethod
-    async def install(packages, asdeps=False):
-        """Install packages via pacman."""
-        args = [
-            "sudo",
-            "pacman",
-            "-S",
-            "--needed",
-            "--overwrite",
-            "*",
-        ]
-        if asdeps:
-            args.append("--asdeps")
-        args.extend(["--", *packages])
-        proc = await asyncio.create_subprocess_exec(*args)
-        await proc.communicate()
-        if proc.returncode:
-            raise subprocess.CalledProcessError(proc.returncode, args)
-
-    @staticmethod
-    async def set_reason(packages, explicit=False, asdeps=False):
-        """Change install reason for packages."""
-        if explicit and asdeps:
-            raise ValueError("Cannot set both explicit and asdeps")
-        if not explicit and not asdeps:
-            raise ValueError("Must set either explicit or asdeps")
-        args = ["sudo", "pacman", "-D"]
-        if explicit:
-            args.append("--asexplicit")
-        if asdeps:
-            args.append("--asdeps")
-        args.extend(["--", *packages])
-        proc = await asyncio.create_subprocess_exec(*args)
-        await proc.communicate()
-        if proc.returncode:
-            raise subprocess.CalledProcessError(proc.returncode, args)
-
-
-class Flatpak:
-    @staticmethod
-    async def list_installed():
-        """Get set of installed flatpak app IDs."""
-        args = [
-            "flatpak",
-            "list",
-            "--app",
-            "--columns=application",
-        ]
-        proc = await asyncio.create_subprocess_exec(
-            *args,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-        stdout, _ = await proc.communicate()
-        if proc.returncode:
-            return set()
-        return {
-            line.strip()
-            for line in stdout.decode().splitlines()
-            if line.strip()
-        }
-
-    @staticmethod
-    async def get_permissions(app):
-        """Get filesystem permissions for a flatpak app."""
-        args = [
-            "flatpak",
-            "info",
-            "--show-permissions",
-            "--user",
-            app,
-        ]
-        proc = await asyncio.create_subprocess_exec(
-            *args,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-        stdout, _ = await proc.communicate()
-        if proc.returncode:
-            return set()
-
-        filesystems = set()
-        for line in stdout.decode().splitlines():
-            line = line.strip()
-            if line.startswith("filesystems="):
-                perms = line.split("=", 1)[1]
-                filesystems.update(
-                    p.strip() for p in perms.split(";") if p.strip()
-                )
-        return filesystems
-
-    @staticmethod
-    async def install(remote, app):
-        """Install flatpak app from remote."""
-        args = [
-            "flatpak",
-            "install",
-            "-y",
-            "--user",
-            remote,
-            app,
-        ]
-        proc = await asyncio.create_subprocess_exec(*args)
-        await proc.communicate()
-        if proc.returncode:
-            raise subprocess.CalledProcessError(proc.returncode, args)
-
-    @staticmethod
-    async def override_filesystem(app, path):
-        """Grant flatpak app filesystem access."""
-        args = [
-            "flatpak",
-            "override",
-            "--user",
-            app,
-            f"--filesystem={path}",
-        ]
-        proc = await asyncio.create_subprocess_exec(*args)
-        await proc.communicate()
-        if proc.returncode:
-            raise subprocess.CalledProcessError(proc.returncode, args)
-
-    @staticmethod
-    async def get_sockets(app):
-        """Get socket permissions for a flatpak app."""
-        args = [
-            "flatpak",
-            "info",
-            "--show-permissions",
-            "--user",
-            app,
-        ]
-        proc = await asyncio.create_subprocess_exec(
-            *args,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-        stdout, _ = await proc.communicate()
-        if proc.returncode:
-            return set()
-
-        sockets = set()
-        for line in stdout.decode().splitlines():
-            line = line.strip()
-            if line.startswith("sockets="):
-                perms = line.split("=", 1)[1]
-                sockets.update(
-                    p.strip() for p in perms.split(";") if p.strip()
-                )
-        return sockets
-
-    @staticmethod
-    async def override_socket(app, socket):
-        """Grant flatpak app socket access."""
-        args = [
-            "flatpak",
-            "override",
-            "--user",
-            app,
-            f"--socket={socket}",
-        ]
-        proc = await asyncio.create_subprocess_exec(*args)
-        await proc.communicate()
-        if proc.returncode:
-            raise subprocess.CalledProcessError(proc.returncode, args)
-
-    @staticmethod
-    async def get_sockets(app):
-        """Get socket permissions for a flatpak app."""
-        args = [
-            "flatpak",
-            "info",
-            "--show-permissions",
-            "--user",
-            app,
-        ]
-        proc = await asyncio.create_subprocess_exec(
-            *args,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-        stdout, _ = await proc.communicate()
-        if proc.returncode:
-            return set()
-
-        sockets = set()
-        for line in stdout.decode().splitlines():
-            line = line.strip()
-            if line.startswith("sockets="):
-                perms = line.split("=", 1)[1]
-                sockets.update(
-                    p.strip() for p in perms.split(";") if p.strip()
-                )
-        return sockets
-
-    @staticmethod
-    async def override_socket(app, socket):
-        """Grant flatpak app socket access."""
-        args = [
-            "flatpak",
-            "override",
-            "--user",
-            app,
-            f"--socket={socket}",
-        ]
-        proc = await asyncio.create_subprocess_exec(*args)
-        await proc.communicate()
-        if proc.returncode:
-            raise subprocess.CalledProcessError(proc.returncode, args)
-
-
-class UserGroup:
-    @staticmethod
-    async def add_to_group(user, group):
-        """Add user to group."""
-        print(f"Adding user {user} to group {group}")
-        args = [
-            "sudo",
-            "gpasswd",
-            "-a",
-            user,
-            group,
-        ]
-        proc = await asyncio.create_subprocess_exec(
-            *args,
-            stdout=asyncio.subprocess.DEVNULL,
-        )
-        await proc.communicate()
-        if proc.returncode:
-            raise subprocess.CalledProcessError(proc.returncode, args)
-
+SRC = pathlib.Path(__file__).resolve().parents[2]
+MODULE = "dotfiles.arch_linux"
 
 HOSTNAME = os.environ["HOST_DOTFILES"]
 
@@ -938,35 +625,22 @@ if HOSTNAME in ("lounge-htpc", "phobos", "sol"):
     )
 
 
-def sha256sum(path):
-    hasher = hashlib.sha256()
-    try:
-        with open(path, "rb") as handle:
-            while data := handle.read(65536):
-                hasher.update(data)
-    except OSError:
-        print(f'error reading "{path}"', file=sys.stderr)
-        raise
-    return hasher.hexdigest()
-
-
 async def install_efi_shell():
     source = pathlib.Path("/usr/share/edk2-shell/x64/Shell_Full.efi")
     target = pathlib.Path("/boot/shellx64.efi")
 
-    if not target.exists() or sha256sum(source) != sha256sum(target):
+    if not target.exists() or fs.sha256(source) != fs.sha256(target):
         print("Installing", target)
         shutil.copyfile(source, target)
 
 
 async def ensure_python_freethreaded():
-    """Install Python 3.14+ freethreaded via uv if not already installed."""
-    python_path = await UV.find_python("3.14t")
+    python_path = await uv.UV.find_python("3.14t")
 
     if python_path is None:
         print("Installing Python 3.14 freethreaded via uv")
-        await UV.install_python("3.14t")
-        python_path = await UV.find_python("3.14t")
+        await uv.UV.install_python("3.14t")
+        python_path = await uv.UV.find_python("3.14t")
 
     local_bin = pathlib.Path.home() / ".local" / "bin"
     local_bin.mkdir(parents=True, exist_ok=True)
@@ -984,8 +658,8 @@ async def ensure_python_freethreaded():
 
 async def ensure_using_systemd_resolved():
     unit = "systemd-resolved"
-    if await Systemctl.is_enabled(unit):
-        await Systemctl.enable(unit)
+    if await systemd.Systemctl.is_enabled(unit):
+        await systemd.Systemctl.enable(unit)
 
     source = pathlib.Path("/run/systemd/resolve/stub-resolv.conf")
     target = pathlib.Path("/etc/resolv.conf")
@@ -1004,17 +678,10 @@ async def ensure_users_in_expected_groups():
             g.gr_name for g in grp.getgrall() if user in g.gr_mem
         }
         for group in expected_groups - current_groups:
-            await UserGroup.add_to_group(user, group)
-
-
-def all_packages():
-    handle = pyalpm.Handle(".", "/var/lib/pacman")
-    localdb = handle.get_localdb()
-    return localdb.pkgcache
+            await users.UserGroup.add_to_group(user, group)
 
 
 async def ensure_flatpak_permissions():
-    """Configure persistent filesystem access for flatpaks."""
     # Note: using :ro will always result in a portal path like /run/user/1000/doc/74ae3507/Library
     flatpak_permissions = {}
 
@@ -1031,33 +698,32 @@ async def ensure_flatpak_permissions():
                 "/home/ar/Audio/Library/:ro",
             ]
 
-    installed_flatpaks = await Flatpak.list_installed()
+    installed_flatpaks = await flatpak.Flatpak.list_installed()
 
     for app, paths in flatpak_permissions.items():
         if app not in installed_flatpaks:
             continue
 
-        current_perms = await Flatpak.get_permissions(app)
+        current_perms = await flatpak.Flatpak.get_permissions(app)
 
         for path in paths:
             # Normalize path for comparison - remove slash before :ro/:rw suffix
             normalized_path = path.replace("/:", ":")
             if not any(p == normalized_path for p in current_perms):
                 print(f"Granting {app} access to {path}")
-                await Flatpak.override_filesystem(app, path)
+                await flatpak.Flatpak.override_filesystem(app, path)
 
     for app, sockets in EXPECTED_FLATPAK_SOCKETS.items():
         if app not in installed_flatpaks:
             continue
 
-        current_sockets = await Flatpak.get_sockets(app)
+        current_sockets = await flatpak.Flatpak.get_sockets(app)
         for socket in sockets - current_sockets:
             print(f"Granting {app} socket {socket}")
-            await Flatpak.override_socket(app, socket)
+            await flatpak.Flatpak.override_socket(app, socket)
 
 
 async def dump_installed_packages():
-    """Dump installed packages list to DOTFILES_PRIVATE if configured."""
     dotfiles_private = os.environ.get("DOTFILES_PRIVATE")
     if not dotfiles_private:
         return
@@ -1067,14 +733,12 @@ async def dump_installed_packages():
         / "arch-linux"
         / f"packages_{HOSTNAME}.txt"
     )
-    packages = sorted(all_packages(), key=lambda p: p.name)
+    packages = sorted(arch_linux.pacman.local_packages(), key=lambda p: p.name)
 
     lines = []
     for pkg in packages:
         reason = (
-            "explicit"
-            if pkg.reason == pyalpm.PKG_REASON_EXPLICIT
-            else "dependency"
+            "explicit" if arch_linux.pacman.is_explicit(pkg) else "dependency"
         )
         lines.append(f"{pkg.name} {reason}")
 
@@ -1084,7 +748,7 @@ async def dump_installed_packages():
 async def ensure_flatpaks():
     if not shutil.which("flatpak"):
         return
-    installed_flatpaks = await Flatpak.list_installed()
+    installed_flatpaks = await flatpak.Flatpak.list_installed()
 
     for remote, expected_apps in EXPECTED_FLATPAKS.items():
         missing = expected_apps - installed_flatpaks
@@ -1093,36 +757,38 @@ async def ensure_flatpaks():
             print(f"Installing missing flatpaks from {remote} ...")
             for app in missing:
                 print(f"  Installing {app}")
-                await Flatpak.install(remote, app)
+                await flatpak.Flatpak.install(remote, app)
 
     await ensure_flatpak_permissions()
 
 
 async def ensure_packages():
     expected_packages = set(EXPECTED_PACKAGES)
-    installed_packages = {package.name: package for package in all_packages()}
+    installed_packages = {
+        package.name: package for package in arch_linux.pacman.local_packages()
+    }
 
     missing = set()
     wrong_reason = set()
     for name in expected_packages:
         if name not in installed_packages:
             missing.add(name)
-        elif installed_packages[name].reason != pyalpm.PKG_REASON_EXPLICIT:
+        elif not arch_linux.pacman.is_explicit(installed_packages[name]):
             wrong_reason.add(name)
 
     if missing:
         print("Installing missing packages ...")
-        await Pacman.install(missing)
+        await arch_linux.pacman.Pacman.install(missing)
 
     if wrong_reason:
         print("Marking packages as explicitly installed ...")
-        await Pacman.set_reason(wrong_reason, explicit=True)
+        await arch_linux.pacman.Pacman.set_reason(wrong_reason, explicit=True)
 
 
 async def ensure_package_dependencies():
     provided_packages = set()
     installed_packages = set()
-    for package in all_packages():
+    for package in arch_linux.pacman.local_packages():
         installed_packages.add(package.name)
         provided_packages.add(package.name)
         provided_packages.update(package.provides)
@@ -1137,45 +803,18 @@ async def ensure_package_dependencies():
 
     if missing:
         print("Installing missing dependencies ...")
-        await Pacman.install(missing, asdeps=True)
+        await arch_linux.pacman.Pacman.install(missing, asdeps=True)
 
 
 async def run_mode(mode):
     args = []
     if mode == "root":
         args.extend(["sudo", "--preserve-env=HOST_DOTFILES"])
-    args.extend([__file__, mode])
-    proc = await asyncio.create_subprocess_exec(*args)
-    await proc.wait()
-    if proc.returncode:
-        raise ProcessError(proc)
-
-
-class ProcessError(Exception):
-    def __init__(self, process, message=None):
-        self.process = process
-        self.message = message
-
-    def __str__(self):
-        proc = self.process
-
-        text = f"exit {proc.returncode}"
-        if self.message is not None:
-            text = f"{text} - {self.message}"
-
-        try:
-            args = proc._transport._extra["subprocess"].args
-        except (AttributeError, KeyError):
-            pass
-        else:
-            text = f"{text}: {args}"
-        return text
+    args.extend([sys.executable, "-m", MODULE, mode])
+    await process.run(*args, cwd=SRC)
 
 
 async def main():
-    if not pathlib.Path("/etc/arch-release").exists():
-        return
-
     modes = ["user", "root"]
     parser = argparse.ArgumentParser()
     parser.add_argument("mode", choices=modes, nargs="?")
@@ -1196,7 +835,7 @@ async def main():
                 await ensure_python_freethreaded()
 
             for service in EXPECTED_SERVICES:
-                await Systemctl.enable(service, now=True)
+                await systemd.Systemctl.enable(service, now=True)
         case "root":
             if HOSTNAME in ("mars", "phobos"):
                 await ensure_using_systemd_resolved()
@@ -1208,4 +847,8 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except (errors.ProcessError, errors.UserError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        sys.exit(1)

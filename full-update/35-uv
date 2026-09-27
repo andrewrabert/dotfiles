@@ -5,7 +5,7 @@ show_help() {
     cat << EOF
 usage:
     -f, --force     force installation
-    --uv-sh         install uv via astral.sh even if pacman is present
+    --uv-sh         install uv via astral.sh even if pacman or brew is present
     --help          show help and exit
 EOF
 }
@@ -40,6 +40,9 @@ if ! command -v uv > /dev/null; then
     if [ -z "$UV_SH" ] && command -v pacman > /dev/null; then
         echo 'Installing uv via pacman'
         sudo pacman -S --needed --noconfirm uv
+    elif [ -z "$UV_SH" ] && command -v brew > /dev/null; then
+        echo 'Installing uv via brew'
+        brew install uv
     else
         cleanup() {
             rm -f "${TEMP_FILE}"

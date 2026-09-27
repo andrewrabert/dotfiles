@@ -1,4 +1,4 @@
 #!/usr/bin/env sh
 if command -v noted > /dev/null; then
-    exec bertbox full-update .60-noted "$@"
+    exec "${DOTFILES}/full-update/.py-dotfiles" noted "$@"
 fi

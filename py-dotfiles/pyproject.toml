@@ -1,0 +1,21 @@
+[project]
+name = "dotfiles"
+version = "0.1.0"
+description = "full-update commands for dotfiles"
+requires-python = ">=3.14"
+dependencies = [
+    "httpx2",
+    "pydantic",
+    "rich",
+    "yarl",
+]
+
+[project.optional-dependencies]
+arch-linux = ["pyalpm"]
+
+[project.scripts]
+dotfiles = "dotfiles.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
