@@ -113,8 +113,8 @@ update_repo() {
     fi
 }
 
-if ! command -v bertbox > /dev/null || ! command -v git-auto-update > /dev/null; then
-    bertbox dotfiles-link-bin
+if ! command -v git-auto-update > /dev/null; then
+    "$DOTFILES/full-update/.py-dotfiles" link-bin
 fi
 
 update_repo "DOTFILES" "$DOTFILES"
@@ -125,4 +125,4 @@ for d in $(env | grep ^DOTFILES_ | sort); do
     update_repo "$name" "$loc"
 done
 
-bertbox dotfiles-link-bin
+"$DOTFILES/full-update/.py-dotfiles" link-bin
