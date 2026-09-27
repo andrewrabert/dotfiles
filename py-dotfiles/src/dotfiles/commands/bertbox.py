@@ -1,15 +1,21 @@
 import argparse
 import shutil
 
-from dotfiles import fs, nightly, process
+from dotfiles import fs, nightly
+from dotfiles.bertbox import Bertbox
+from dotfiles.commands import link_bin
 
 
-async def install_completions(bertbox):
+async def install_completions():
     dest = fs.dotfiles_local() / "zcomp" / "_bertbox"
-    result = await process.run(
-        bertbox, "completions", "zsh", stdout=process.PIPE
-    )
-    fs.write_atomic(dest, result.stdout)
+    fs.write_atomic(dest, await Bertbox.completions("zsh"))
+    print(f"Installed: {dest}")
+
+
+async def install_tools():
+    dest = fs.dotfiles_local() / "bertbox" / "install"
+    dest.mkdir(parents=True, exist_ok=True)
+    await Bertbox.install(dest)
     print(f"Installed: {dest}")
 
 
@@ -28,7 +34,9 @@ async def main(args):
     force = parse_args(args).force
     if not force and not shutil.which("bertbox"):
         return
-    bertbox = await nightly.install(
+    await nightly.install(
         name="bertbox", repository="andrewrabert/tools", force=force
     )
-    await install_completions(bertbox)
+    await install_completions()
+    await install_tools()
+    link_bin.main()

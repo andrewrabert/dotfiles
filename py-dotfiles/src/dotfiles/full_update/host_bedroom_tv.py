@@ -1,6 +1,7 @@
 import shutil
 
 from dotfiles import fs, host, process
+from dotfiles.bertbox import Bertbox
 
 
 async def main(args):
@@ -8,7 +9,7 @@ async def main(args):
         return
 
     if not shutil.which("uv"):
-        await process.run("bertbox", "full-update", "35-uv", "--force")
+        await Bertbox.full_update("35-uv", force=True)
     await process.run(
         fs.dotfiles() / "scripts/install-jellium-desktop-nightly", "flatpak"
     )
