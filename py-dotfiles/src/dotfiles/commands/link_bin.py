@@ -1,8 +1,7 @@
 import os
 import pathlib
-import socket
 
-from dotfiles import fs
+from dotfiles import fs, host
 
 HOST_DIRS = {
     "aweber": ["scripts/mcp", ".local/zoekt-simple/bin"],
@@ -14,10 +13,6 @@ HOST_DIRS = {
         ".local/zoekt-simple/bin",
     ],
 }
-
-
-def host():
-    return os.environ.get("HOST_DOTFILES") or socket.gethostname()
 
 
 def extra_roots():
@@ -97,6 +92,6 @@ def main():
     dest = primary / ".local/bin"
     dest.mkdir(parents=True, exist_ok=True)
 
-    sources = collect_sources(primary, extra_roots(), host(), dest)
+    sources = collect_sources(primary, extra_roots(), host.name(), dest)
     install(collect_links(sources), dest)
     fs.link(primary / ".bin", dest)

@@ -7,7 +7,7 @@ import os
 import pathlib
 import uuid
 
-from dotfiles import fs, process
+from dotfiles import fs, process, xdg
 
 
 @dataclasses.dataclass
@@ -427,17 +427,10 @@ async def main():
         TITLEBAR_CONFIGS["Foot"].dark.active_fg = base16_active_fg
     if base16_inactive_fg and "Foot" in TITLEBAR_CONFIGS:
         TITLEBAR_CONFIGS["Foot"].dark.inactive_fg = base16_inactive_fg
-    xdg_data_home = os.environ.get(
-        "XDG_DATA_HOME", pathlib.Path.home() / ".local/share"
-    )
-    xdg_config_home = pathlib.Path(
-        os.environ.get("XDG_CONFIG_HOME", pathlib.Path.home() / ".config")
-    )
-
-    output_dir = pathlib.Path(xdg_data_home) / "color-schemes"
+    output_dir = xdg.data_home() / "color-schemes"
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    kwinrulesrc_path = pathlib.Path(xdg_config_home) / "kwinrulesrc"
+    kwinrulesrc_path = xdg.config_home() / "kwinrulesrc"
 
     created_files = set()
     managed_rules = set()

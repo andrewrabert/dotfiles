@@ -11,6 +11,7 @@ from dotfiles import (
     errors,
     flatpak,
     fs,
+    host,
     process,
     systemd,
     users,
@@ -20,7 +21,7 @@ from dotfiles import (
 SRC = pathlib.Path(__file__).resolve().parents[2]
 MODULE = "dotfiles.arch_linux"
 
-HOSTNAME = os.environ["HOST_DOTFILES"]
+HOSTNAME = host.name()
 
 EXPECTED_PACKAGES = {
     "logrotate",
@@ -695,7 +696,7 @@ async def ensure_flatpak_permissions():
             ]
         case "phobos":
             flatpak_permissions["org.fooyin.fooyin"] = [
-                "/home/ar/Audio/Library/:ro",
+                f"{pathlib.Path.home()}/Audio/Library/:ro",
             ]
 
     installed_flatpaks = await flatpak.Flatpak.list_installed()

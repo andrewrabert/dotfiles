@@ -1,8 +1,7 @@
 import dataclasses
-import os
 import pathlib
 
-from dotfiles import fs, process, xdg
+from dotfiles import fs, host, process, xdg
 
 from . import kconfig
 
@@ -20,9 +19,8 @@ class GlobalShortcut:
         return basename
 
 
-HOME = pathlib.Path("~").expanduser()
-CONFIG = HOME / ".config"
-LOCAL_SHARE = HOME / ".local" / "share"
+CONFIG = xdg.config_home()
+LOCAL_SHARE = xdg.data_home()
 
 
 class Rsync:
@@ -145,10 +143,7 @@ def unique_desktop_ids(shortcuts):
 
 
 async def warn_if_logout_needed():
-    runtime_dir = pathlib.Path(
-        os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
-    )
-    pid_file = runtime_dir / "kde-shortcuts-kwin-pid"
+    pid_file = xdg.runtime_dir() / "kde-shortcuts-kwin-pid"
 
     try:
         result = await process.run(
@@ -271,7 +266,7 @@ async def configure_kde(hostname, dotfiles):
 
 
 async def main():
-    hostname = os.environ["HOST_DOTFILES"]
+    hostname = host.name()
     dotfiles = fs.dotfiles()
 
     for path, target in links(hostname, dotfiles).items():

@@ -1,10 +1,8 @@
-import os
-
-from dotfiles import systemd
+from dotfiles import host, systemd
 
 
 async def main():
-    if os.environ["HOST_DOTFILES"] != "mars":
+    if host.name() != "mars":
         return
 
     await systemd.Systemctl.enable("syncthing", user=True)

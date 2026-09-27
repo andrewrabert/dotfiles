@@ -3,12 +3,11 @@ import shutil
 
 from dotfiles import xdg
 
-HOME = pathlib.Path.home()
 FLATPAK_EXPORTS = [
-    HOME.joinpath(".local/share/flatpak/exports/share/applications"),
+    xdg.data_home() / "flatpak/exports/share/applications",
     pathlib.Path("/var/lib/flatpak/exports/share/applications"),
 ]
-USER_APPS = HOME / ".local/share/applications"
+USER_APPS = xdg.data_home() / "applications"
 WMCLASS = "org.kde.krita"
 
 

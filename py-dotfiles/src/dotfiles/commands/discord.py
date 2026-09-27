@@ -1,12 +1,13 @@
 import json
-import pathlib
 import shutil
+
+from dotfiles import xdg
 
 
 def main():
     if not shutil.which("discord"):
         return
-    path = pathlib.Path("~/.config/discord/settings.json").expanduser()
+    path = xdg.config_home() / "discord" / "settings.json"
     if not path.exists():
         return
     settings = json.loads(path.read_text())

@@ -5,7 +5,7 @@ import platform
 import shutil
 import tempfile
 
-from dotfiles import errors
+from dotfiles import errors, xdg
 
 EXECUTABLE = 0o755
 
@@ -24,8 +24,7 @@ def dotfiles_local():
 def cache_dir():
     if platform.system() == "Darwin":
         return pathlib.Path.home() / "Library" / "Caches"
-    xdg = os.environ.get("XDG_CACHE_HOME")
-    return pathlib.Path(xdg) if xdg else pathlib.Path.home() / ".cache"
+    return xdg.cache_home()
 
 
 def sha256(path):
