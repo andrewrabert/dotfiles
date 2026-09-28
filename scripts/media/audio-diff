@@ -1,4 +1,0 @@
-#!/usr/bin/env sh
-set -e
-sox -m -v 1 "$1" -v -1 "$2" "$3"
-sox "$3" -n spectrogram -o "$3".png
