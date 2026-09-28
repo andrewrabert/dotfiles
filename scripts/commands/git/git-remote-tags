@@ -1,6 +1,0 @@
-#!/usr/bin/env sh
-if [ $# != 1 ]; then
-    echo 'usage: git-remote-tags URL' >&2
-    exit 1
-fi
-git -c 'versionsort.suffix=-' ls-remote --tags --sort='v:refname' "$1" | cut --delimiter='/' --fields=3

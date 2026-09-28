@@ -4,23 +4,19 @@ if command -v git > /dev/null; then
     }
 
     gs() {
-        local -a opt_u opt_b opt_c opt_r opt_create
+        local -a opt_u opt_b opt_c
         zparseopts -D -E -K -- \
             u=opt_u -update=opt_u \
             b=opt_b -backup=opt_b \
-            c=opt_c -clone-from-backup=opt_c \
-            r=opt_r -remote=opt_r \
-            -create=opt_create || return 1
+            c=opt_c -clone-from-backup=opt_c || return 1
 
         local update_cache=$#opt_u
         local use_backup=$#opt_b
         local use_clone_from_backup=$#opt_c
-        local only_remote=$#opt_r
         local -a args=("$@")
-        [[ -n $opt_create ]] && args+=(--create)
 
         if [[ $update_cache -eq 1 ]]; then
-            git-sync --build-cache --remote
+            git-sync --build-cache
         fi
 
         # If --clone-from-backup is set, select from backup cache and clone to regular location
@@ -75,14 +71,8 @@ if command -v git > /dev/null; then
                         return 130
                     fi
                     target="backup/$target"
-                elif [[ $only_remote -eq 1 ]]; then
-                    target="$(git-sync --show-remote-cache | fzf --tac --exact --no-sort)"
-                    if [ -z "$target" ]; then
-                        return 130
-                    fi
-                    target="backup/$target"
                 else
-                    target="$(git-sync --show-cache --remote | fzf --tac --exact --no-sort)"
+                    target="$(git-sync --show-cache | fzf --tac --exact --no-sort)"
                     if [ -z "$target" ]; then
                         return 130
                     fi
@@ -100,7 +90,7 @@ if command -v git > /dev/null; then
         esac
 
         if ! [ -t 1 ]; then
-            git-sync --show-dir "$target"
+            git-sync "$target"
             return
         fi
 

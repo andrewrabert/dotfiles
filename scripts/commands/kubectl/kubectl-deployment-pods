@@ -1,5 +1,0 @@
-#!/usr/bin/env sh
-DEPLOYMENT="$1"
-shift
-SELECTOR="$(kubectl-deployment-selector "$DEPLOYMENT" "$@")"
-kubectl get pods "$@" -l "${SELECTOR}" -o 'jsonpath={range .items[*]}{"\n"}{.metadata.name}' | sed '/^$/d' | sort -u

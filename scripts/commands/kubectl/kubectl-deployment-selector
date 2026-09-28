@@ -1,2 +1,0 @@
-#!/usr/bin/env sh
-exec kubectl get deployment -o wide "$@" | awk '{print $9}' | tail -n 1

@@ -1,5 +1,0 @@
-#!/usr/bin/env python3
-import sys
-import shlex
-
-sys.stdout.write(shlex.quote(sys.stdin.read()))

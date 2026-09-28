@@ -21,7 +21,14 @@ async def install_tools():
 
 def parse_args(args):
     parser = argparse.ArgumentParser(prog="bertbox")
-    parser.add_argument(
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument(
+        "-n",
+        "--no-download",
+        action="store_true",
+        help="skip the download and use the installed bertbox",
+    )
+    group.add_argument(
         "-f",
         "--force",
         action="store_true",
@@ -31,12 +38,14 @@ def parse_args(args):
 
 
 async def main(args):
-    force = parse_args(args).force
+    parsed = parse_args(args)
+    force = parsed.force
     if not force and not shutil.which("bertbox"):
         return
-    await nightly.install(
-        name="bertbox", repository="andrewrabert/tools", force=force
-    )
+    if not parsed.no_download:
+        await nightly.install(
+            name="bertbox", repository="andrewrabert/tools", force=force
+        )
     await install_completions()
     await install_tools()
     link_bin.main()

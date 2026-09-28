@@ -1,3 +1,0 @@
-#!/usr/bin/env sh
-SRCH="${1:-.}"
-exec fd -t f --search-path "$SRCH" '\.sync-conflict-\d{8}-\d{6}'
