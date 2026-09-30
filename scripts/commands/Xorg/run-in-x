@@ -1,5 +1,0 @@
-#!/usr/bin/env sh
-HOME=~
-export XAUTHORITY="${HOME}/.Xauthority"
-export DISPLAY="$(ps e -u "$(whoami)" | sed -rn 's/.* DISPLAY=(:[0-9]*).*/\1/p' | head -n 1)"
-exec "$@"
