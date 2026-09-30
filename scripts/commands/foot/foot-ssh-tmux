@@ -15,5 +15,5 @@ TITLE="${SSH_HOST} - ssh-tmux"
 foot \
     --title "${TITLE}" \
     --app-id  "${TITLE}" \
-    -- sh -c ". ~/.base16_theme; exec ssh-tmux-attach ${SSH_HOST}" 2> /dev/null > /dev/null &
+    -- sh -c ". ~/.base16_theme; exec bertbox tmux-attach-ssh ${SSH_HOST}" 2> /dev/null > /dev/null &
 disown
