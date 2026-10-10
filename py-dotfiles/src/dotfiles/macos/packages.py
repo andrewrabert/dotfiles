@@ -35,13 +35,11 @@ EXPECTED_PACKAGES = {
     "node",
     "openssh",
     "oxipng",
-    "pandoc",
     "prettier",
     "ripgrep",
     "rsync",
     "ruff",
     "sevenzip",  # aka _the_ 7zip
-    "shellcheck",
     "stylua",
     "tmux",
     "tree-sitter-cli",
