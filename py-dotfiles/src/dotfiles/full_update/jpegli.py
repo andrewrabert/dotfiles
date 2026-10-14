@@ -95,7 +95,7 @@ async def main(args):
     result = await capture("git", "-C", install_dir, "rev-parse", "HEAD")
     current_commit = result.stdout.decode().strip()
 
-    await process.run("brew", "install", *BREW_DEPS)
+    await process.run("brew", "install", "--no-ask", *BREW_DEPS)
 
     prefixes = []
     for dep in PREFIX_DEPS:

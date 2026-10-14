@@ -34,4 +34,4 @@ class Homebrew:
 
     @staticmethod
     async def install(packages):
-        await process.run("brew", "install", "--", *packages)
+        await process.run("brew", "install", "--no-ask", "--", *packages)

@@ -9,6 +9,6 @@ async def main(args):
         return
 
     await process.run("brew", "update")
-    await process.run("brew", "upgrade")
+    await process.run("brew", "upgrade", "--no-ask")
 
     (pathlib.Path.home() / ".hushlogin").touch()

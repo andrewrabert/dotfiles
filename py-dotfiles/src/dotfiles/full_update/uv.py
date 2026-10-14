@@ -60,7 +60,7 @@ async def main(args):
             )
         elif not uv_sh and shutil.which("brew"):
             print("Installing uv via brew")
-            await process.run("brew", "install", "uv")
+            await process.run("brew", "install", "--no-ask", "uv")
         else:
             await install_uv_sh(env)
 
