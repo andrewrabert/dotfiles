@@ -34,6 +34,7 @@ SCRIPTS = {
     "60-base16-shell": "dotfiles.full_update.base16_shell:main",
     "60-bertbox": "dotfiles.commands.bertbox:main",
     "60-bxwrp": "dotfiles.commands.bxwrp:main",
+    "60-cloneholio": "dotfiles.commands.cloneholio:main",
     "60-dash": "dotfiles.full_update.dash:main",
     "60-discord": "dotfiles.commands.discord:main",
     "60-dosbox": "dotfiles.full_update.dosbox:main",

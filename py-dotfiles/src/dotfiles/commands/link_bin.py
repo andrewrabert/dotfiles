@@ -58,6 +58,7 @@ def collect_sources(primary, extras, hostname, dest):
     sources.append(primary / ".local/bertbox/bin")
     sources.append(primary / ".local/bertbox/install")
     sources.append(primary / ".local/bxwrp/bin")
+    sources.append(primary / ".local/cloneholio/bin")
     sources.extend(root / "scripts/terminal" for root in extras)
     sources.extend(primary / d for d in HOST_DIRS.get(hostname, []))
     return sources

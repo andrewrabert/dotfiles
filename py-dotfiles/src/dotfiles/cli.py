@@ -8,6 +8,7 @@ from dotfiles import errors
 from dotfiles.commands import (
     bertbox,
     bxwrp,
+    cloneholio,
     discord,
     host_mars,
     jellium_desktop,
@@ -20,7 +21,7 @@ from dotfiles.commands import (
     zoekt_simple,
 )
 
-PASSTHROUGH = {"bertbox", "bxwrp", "noted", "redump-verifier"}
+PASSTHROUGH = {"bertbox", "bxwrp", "cloneholio", "noted", "redump-verifier"}
 
 
 def main():
@@ -32,6 +33,7 @@ def main():
 
     add_passthrough("bertbox", "Manage bertbox")
     add_passthrough("bxwrp", "Manage bxwrp")
+    add_passthrough("cloneholio", "Manage cloneholio")
     subparsers.add_parser("discord", help="disable discord host updates")
     subparsers.add_parser("host-mars", help="configure the mars host")
     jellium_parser = subparsers.add_parser(
@@ -88,6 +90,8 @@ def main():
                 asyncio.run(bertbox.main(rest))
             case "bxwrp":
                 asyncio.run(bxwrp.main(rest))
+            case "cloneholio":
+                asyncio.run(cloneholio.main(rest))
             case "discord":
                 asyncio.run(discord.main([]))
             case "host-mars":
