@@ -67,7 +67,6 @@ if HOSTNAME in ("sol", "mars", "phobos"):
             "guestfs-tools",
             "hdparm",
             "htop",
-            "hugo",
             "hyperfine",
             "iftop",
             "imagemagick",
@@ -146,6 +145,7 @@ if HOSTNAME in ("sol", "mars", "phobos"):
             "yazi",
             "yt-dlp",
             "zip",
+            "zola",
             "zsh",
         }
     )
