@@ -14,12 +14,13 @@ from dotfiles.commands import (
     krita,
     link_bin,
     noted,
+    redump_verifier,
     syncthing,
     update,
     zoekt_simple,
 )
 
-PASSTHROUGH = {"bertbox", "bxwrp", "noted"}
+PASSTHROUGH = {"bertbox", "bxwrp", "noted", "redump-verifier"}
 
 
 def main():
@@ -53,6 +54,7 @@ def main():
     )
     subparsers.add_parser("macos", help="install expected homebrew packages")
     add_passthrough("noted", "Manage noted")
+    add_passthrough("redump-verifier", "verify dumps against redump")
     subparsers.add_parser("syncthing", help="write .stignore includes")
 
     update_parser = subparsers.add_parser(
@@ -110,6 +112,8 @@ def main():
                 asyncio.run(packages.main([]))
             case "noted":
                 asyncio.run(noted.main(rest))
+            case "redump-verifier":
+                asyncio.run(redump_verifier.main(rest))
             case "syncthing":
                 asyncio.run(syncthing.main([]))
             case "update":

@@ -1,13 +1,4 @@
-#!/usr/bin/env -S uv run --script
-"""
-Redump database verification tool with HTTP client support.
-
-# /// script
-# dependencies = [
-#     "httpx",
-# ]
-# ///
-"""
+"""Redump database verification tool."""
 
 import argparse
 import asyncio
@@ -25,7 +16,9 @@ import tempfile
 import xml.etree.ElementTree
 import zipfile
 
-import httpx
+import httpx2
+
+from dotfiles import fs
 
 ISO_SUFFIXES = (
     ".iso",
@@ -84,16 +77,13 @@ def setup_logging(name, level=logging.INFO):
     logger.addHandler(sh)
 
 
+DAT_PATH = fs.cache_dir() / "redump.pickle"
+
+
 class Redump:
-    _DEFAULT_DAT_PATH = pathlib.Path("/storage/Cache/redump.pickle")
-
     def __init__(self):
-        pathlib.Path(self._DEFAULT_DAT_PATH).parent.mkdir(
-            parents=True, exist_ok=True
-        )
-
-        if self._DEFAULT_DAT_PATH.exists():
-            self.hashes = pickle.loads(self._DEFAULT_DAT_PATH.read_bytes())
+        if DAT_PATH.exists():
+            self.hashes = pickle.loads(DAT_PATH.read_bytes())
         else:
             self.hashes = {}
 
@@ -122,19 +112,19 @@ class Redump:
             "xbox",  # xbox
             "xbox360",  # xbox 360
         ]
-        client = httpx.AsyncClient()
-        for system in systems:
-            LOGGER.debug("Downloading dat for %s", system)
-            url = f"http://redump.org/datfile/{system}"
-            response = await client.get(url, timeout=15)
-            response.raise_for_status()
-            archive = zipfile.ZipFile(io.BytesIO(response.content))
-            if len(archive.namelist()) != 1:
-                raise RuntimeError("expected archive to contain one file")
-            dat_file = io.BytesIO()
-            dat_file.write(archive.read(archive.namelist()[0]))
-            dat_file.seek(0)
-            systems_dict[system] = xml.etree.ElementTree.parse(dat_file)
+        async with httpx2.AsyncClient() as client:
+            for system in systems:
+                LOGGER.debug("Downloading dat for %s", system)
+                url = f"http://redump.org/datfile/{system}"
+                response = await client.get(url, timeout=15)
+                response.raise_for_status()
+                archive = zipfile.ZipFile(io.BytesIO(response.content))
+                if len(archive.namelist()) != 1:
+                    raise RuntimeError("expected archive to contain one file")
+                dat_file = io.BytesIO()
+                dat_file.write(archive.read(archive.namelist()[0]))
+                dat_file.seek(0)
+                systems_dict[system] = xml.etree.ElementTree.parse(dat_file)
 
         self.hashes.clear()
         for system, x in systems_dict.items():
@@ -152,7 +142,7 @@ class Redump:
                     hashes_by_name[name] for name in sorted(hashes_by_name)
                 )
                 self.hashes[thing_hashes] = system, thing.attrib["name"]
-        self._DEFAULT_DAT_PATH.write_bytes(pickle.dumps(self.hashes))
+        fs.write_atomic(DAT_PATH, pickle.dumps(self.hashes))
 
 
 async def find_dump_hashes(root, recorded=None):
@@ -351,8 +341,8 @@ async def process_path(redump, path, args):
                     path.replace(target)
 
 
-async def main():
-    parser = argparse.ArgumentParser()
+async def main(argv):
+    parser = argparse.ArgumentParser(prog="redump-verifier")
     parser.add_argument(
         "--hashes",
         type=pathlib.Path,
@@ -363,7 +353,7 @@ async def main():
     parser.add_argument("--verbose", action="store_true")
     parser.add_argument("--no-prefix", action="store_true")
     parser.add_argument("path", type=pathlib.Path, nargs="*")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     paths = {path.absolute() for path in args.path}
     if paths:
@@ -412,7 +402,3 @@ async def main():
             await process_path(redump, path, args)
         except Exception as e:
             LOGGER.error("💣error processing %s (%s)", path, e)
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
