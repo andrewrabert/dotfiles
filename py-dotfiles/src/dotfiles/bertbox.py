@@ -5,7 +5,7 @@ class Bertbox:
     @staticmethod
     async def completions(shell):
         result = await process.run(
-            "bertbox", "completions", shell, stdout=process.PIPE
+            "bertbox", "completions", "--all", shell, stdout=process.PIPE
         )
         return result.stdout
 

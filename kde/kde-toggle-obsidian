@@ -1,8 +1,8 @@
 #!/usr/bin/env sh
-APP_ID='obsidian'
+APP_ID='md.obsidian.Obsidian'
 exec kwinctrl \
     --toggle \
     --center=initial \
     --filter "${APP_ID}" \
-    --process-regex '^/app/obsidian\x00' \
+    --process-regex '^/app/obsidian[\x00 ]' \
     -- kioclient exec ~/.local/share/flatpak/exports/share/applications/md.obsidian.Obsidian.desktop
