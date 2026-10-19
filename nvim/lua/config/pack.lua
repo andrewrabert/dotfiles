@@ -22,7 +22,6 @@ end, {})
 vim.pack.add({
 	'https://github.com/tinted-theming/tinted-vim',
 	'https://github.com/ibhagwan/fzf-lua',
-	'https://github.com/Vimjas/vim-python-pep8-indent',
 	'https://github.com/dhruvasagar/vim-table-mode',
 	'https://github.com/stevearc/conform.nvim',
 	'https://github.com/Saghen/blink.lib',
