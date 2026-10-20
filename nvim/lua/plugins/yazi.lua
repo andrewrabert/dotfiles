@@ -5,5 +5,5 @@ require("yazi").setup({
 	},
 })
 
-vim.keymap.set("n", "<leader>-", "<cmd>Yazi<cr>", { desc = "Open yazi at the current file" })
+vim.keymap.set("n", "<leader>a", "<cmd>Yazi<cr>", { desc = "Open yazi at the current file" })
 vim.keymap.set("n", "<leader>cw", "<cmd>Yazi cwd<cr>", { desc = "Open the file manager in nvim's working directory" })
