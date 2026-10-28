@@ -93,6 +93,7 @@ class McpRemoteServer(pydantic.BaseModel):
     type: typing.Literal["http", "sse"]
     url: str
     headers: dict[str, str] = pydantic.Field(default_factory=dict)
+    headersHelper: str | None = None
 
 
 McpServer = typing.Annotated[
@@ -961,7 +962,15 @@ TRUST_PATH = "/"
 VIRTUAL_CONFIG_KEYS = frozenset({"hasTrustDialogAccepted"})
 # Env vars pinned in settings.json's env on every save.
 PINNED_ENV = {"CLAUDE_CODE_GB_DISK_CACHE_WHEN_TELEMETRY_OFF": "1"}
-MCP_KEY_ORDER = ("type", "url", "headers", "command", "args", "env")
+MCP_KEY_ORDER = (
+    "type",
+    "url",
+    "headers",
+    "headersHelper",
+    "command",
+    "args",
+    "env",
+)
 PLUGIN_KEY_ORDER = (
     "type",
     "source",
