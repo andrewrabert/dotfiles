@@ -273,7 +273,7 @@ class MacosPlatform(Platform):
     async def _is_quarantined(host, app):
         # com.apple.provenance is ignored - macOS re-adds it on launch and it
         # cannot be cleared, so it is not a meaningful signal.
-        output = await host.run("xattr", "-r", app)
+        output = await host.run("xattr", "-rs", app)
         return "com.apple.quarantine" in output
 
     async def install(self, host, path):
@@ -283,7 +283,13 @@ class MacosPlatform(Platform):
         await host.mkdir(mount)
         try:
             await host.run(
-                "hdiutil", "attach", "-nobrowse", "-mountpoint", mount, path
+                "diskutil",
+                "image",
+                "attach",
+                "--nobrowse",
+                "--mountPoint",
+                mount,
+                path,
             )
             app = mount / self.APP_NAME
             if not await host.is_dir(app):
@@ -311,12 +317,12 @@ class MacosPlatform(Platform):
                 await host.run("ditto", app, dest)
                 print(f"Installed: {dest}")
         finally:
-            await host.run("hdiutil", "detach", mount)
+            await host.run("diskutil", "eject", mount)
 
         if await self._is_quarantined(host, dest):
             print("Clearing quarantine (sudo)...")
             await host.run(
-                "sudo", "xattr", "-dr", "com.apple.quarantine", dest
+                "sudo", "xattr", "-drs", "com.apple.quarantine", dest
             )
 
 
