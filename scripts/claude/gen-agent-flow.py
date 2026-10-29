@@ -65,6 +65,8 @@ class TranscriptRecord(pydantic.BaseModel, abc.ABC):
 
     uuid: str | None = None
     parentUuid: str | None = None
+    logicalParentUuid: str | None = None
+    subtype: str | None = None
     timestamp: datetime.datetime | None = None
     effort: str | None = None
     message: TranscriptMessage = pydantic.Field(
@@ -202,7 +204,7 @@ class TranscriptRepository:
 
     def load_records(self, path: pathlib.Path) -> list[TranscriptRecord]:
         try:
-            lines = path.read_text().splitlines()
+            lines = path.read_text().split("\n")
         except UnicodeDecodeError as exc:
             raise UserError(f"{path}: invalid UTF-8") from exc
         except OSError as exc:
@@ -461,6 +463,8 @@ def build_children(
     for record in records:
         uuid = typing.cast(str, record.uuid)
         parent = record.parentUuid
+        if parent is None and record.subtype == "compact_boundary":
+            parent = record.logicalParentUuid
         if parent is None:
             if root is not None:
                 raise UserError(f"{source}: uuid {uuid}: second root record")
