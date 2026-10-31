@@ -16,6 +16,15 @@ require("conform").setup({
 			command = "ruff",
 			args = { "check", "--fix", "--exit-zero", "--stdin-filename", "$FILENAME", "-" },
 		},
+		-- not in formatters_by_ft; only run explicitly (e.g. :JSON)
+		json_sort = {
+			command = function()
+				return vim.fn.executable("jaq") == 1 and "jaq" or "jq"
+			end,
+			args = function(_, ctx)
+				return { "-S", "--indent", ctx.shiftwidth, "." }
+			end,
+		},
 	},
 })
 

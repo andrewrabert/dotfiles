@@ -226,7 +226,7 @@ if HOSTNAME in ("mars", "phobos"):
             "plasma-keyboard",
             "plasma-login-manager",
             "plasma6-runners-emojirunner",
-            "plasma6-runners-markdown-bookmarks",
+            "plasma6-runners-markdown-bookmarks-git",
             "podman",
             "powertop",
             "print-manager",
