@@ -3,13 +3,9 @@ set autoread
 autocmd InsertLeave,TextChanged,FocusLost,BufLeave * :update
 autocmd FocusGained,BufEnter * :checktime
 
-" talbe_mode_always_active breaks highlighting
-TableModeEnable
-
 setlocal formatlistpat=^\\s*\\d\\+[.\)]\\s\\+\\\|^\\s*[*+~-]\\s\\+\\\|^\\(\\\|[*#]\\)\\[^[^\\]]\\+\\]:\\s
 setlocal comments=n:>
 setlocal formatoptions+=cn
-nnoremap <leader>m 0:TableModeRealign<Cr>
 set linebreak
 set list& listchars&
 highlight Title cterm=bold
