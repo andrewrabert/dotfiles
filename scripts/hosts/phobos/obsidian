@@ -1,2 +1,4 @@
 #!/bin/sh
-exec flatpak run --user --branch=stable --arch=x86_64 md.obsidian.Obsidian "$@"
+# fix dbus stderr with
+#   flatpak override --user --system-no-talk-name=org.freedesktop.login1 md.obsidian.Obsidian
+exec flatpak run --command=/app/obsidian-cli md.obsidian.Obsidian "$@"
