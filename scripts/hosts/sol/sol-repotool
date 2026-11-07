@@ -38,6 +38,7 @@ LOCK_FILE = (
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
+
 HAD_ERROR = False
 
 
@@ -314,20 +315,27 @@ class ConfigFile:
     def _load(self):
         self.aur = set()
         self.manual = set()
+        self.package_options: dict[str, dict] = {}
         if self.path.exists():
             data = json.loads(self.path.read_text())
             packages = data.get("packages", {})
             self.aur.update(packages.get("aur", []))
             self.manual.update(packages.get("manual", []))
+            self.package_options = data.get("package_options", {})
 
     def _dump(self):
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        data = {
+        data: dict[str, object] = {
             "packages": {
                 "aur": sorted(self.aur),
                 "manual": sorted(self.manual),
             }
         }
+        options = {
+            pkg: opts for pkg, opts in self.package_options.items() if opts
+        }
+        if options:
+            data["package_options"] = options
         self.path.write_text(json.dumps(data, indent=2, sort_keys=True))
 
     def get_explicit_packages(self):
@@ -361,6 +369,55 @@ class ConfigFile:
         if updated != self.manual:
             self.manual = updated
             self._dump()
+
+    def get_ignored_versions(self, package: str) -> list[dict[str, str]]:
+        return list(
+            self.package_options.get(package, {}).get("ignore_versions", [])
+        )
+
+    def get_ignore_reason(self, package: str, version: str) -> str | None:
+        """Return the reason if version is ignored for package, else None."""
+        for entry in self.get_ignored_versions(package):
+            if entry["version"] in ("*", version):
+                return entry["reason"]
+        return None
+
+    def add_ignored_version(
+        self, package: str, version: str, reason: str
+    ) -> None:
+        entries = [
+            e
+            for e in self.get_ignored_versions(package)
+            if e["version"] != version
+        ]
+        entries.append({"version": version, "reason": reason})
+        entries.sort(key=lambda e: e["version"])
+        self.package_options.setdefault(package, {})["ignore_versions"] = (
+            entries
+        )
+        self._dump()
+
+    def remove_ignored_version(
+        self, package: str, version: str | None = None
+    ) -> int:
+        """Remove one ignored version, or all if version is None. Returns count removed."""
+        entries = self.get_ignored_versions(package)
+        kept = (
+            []
+            if version is None
+            else [e for e in entries if e["version"] != version]
+        )
+        removed = len(entries) - len(kept)
+        if removed:
+            opts = self.package_options[package]
+            if kept:
+                opts["ignore_versions"] = kept
+            else:
+                del opts["ignore_versions"]
+                if not opts:
+                    del self.package_options[package]
+            self._dump()
+        return removed
 
 
 class Database:
@@ -1098,8 +1155,8 @@ class Database:
         pkg_updates = {}
 
         total = len(pkgbases_to_check)
-        for i, pkgbase in enumerate(pkgbases_to_check, 1):
-            logger.info(f"[{i}/{total}] Checking {pkgbase}")
+        for i, pkgbase in enumerate(sorted(pkgbases_to_check), 1):
+            logger.debug(f"[{i}/{total}] Checking {pkgbase}")
 
             # Find current version from any package with this pkgbase
             current_version = None
@@ -1125,7 +1182,7 @@ class Database:
                 # VCS versions (e.g. git commit hashes) don't have
                 # meaningful ordering - any change means an update
                 if new_version != current_version:
-                    logger.info(
+                    logger.debug(
                         f"  {pkgbase}: {current_version} -> {new_version}"
                     )
                     deps = await self._parse_srcinfo(pkgbase)
@@ -1183,7 +1240,16 @@ class Database:
                     continue
 
                 # Compare versions
-                if pyalpm.vercmp(new_version, current_version) > 0:
+                cmp = pyalpm.vercmp(new_version, current_version)
+                if cmp < 0:
+                    message = f"  {pkgbase}: AUR version {new_version} is older than repo version {current_version}"
+                    reason = self.config.get_ignore_reason(
+                        pkgbase, current_version
+                    )
+                    if reason is not None:
+                        message += f" (ignored: {reason})"
+                    logger.warning(message)
+                elif cmp > 0:
                     # Has update - parse dependencies
                     deps = await self._parse_srcinfo(pkgbase)
                     pkg_updates[pkgbase] = PackageUpdateInfo(
@@ -1420,6 +1486,59 @@ class Database:
             for pkg in sorted(skipped_packages):
                 logger.warning(f"  - {pkg}")
 
+    def _resolve_pkgbases_to_check(
+        self, packages: list[str] | None = None
+    ) -> set[str]:
+        """
+        Resolve package names or pkgbases to the pkgbases to check.
+
+        Args:
+            packages: Optional package names or pkgbases; defaults to all
+                non-manual pkgbases in the repository
+        """
+        package_to_pkgbase = {pkg.name: pkg.pkgbase for pkg in self.packages()}
+        repo_pkgbases = set(package_to_pkgbase.values())
+
+        if not packages:
+            return repo_pkgbases - self.config.manual
+
+        pkgbases_to_check = set()
+        not_in_repo = set()
+        for pkg in packages:
+            if pkg in package_to_pkgbase:
+                pkgbases_to_check.add(package_to_pkgbase[pkg])
+            elif pkg in repo_pkgbases:
+                # User passed a pkgbase directly
+                pkgbases_to_check.add(pkg)
+            else:
+                not_in_repo.add(pkg)
+        if not_in_repo:
+            logger.warning(f"{len(not_in_repo)} package(s) not in repository:")
+            for pkg in sorted(not_in_repo):
+                logger.warning(f"  - {pkg}")
+        return pkgbases_to_check
+
+    async def check(self, packages: list[str] | None = None) -> None:
+        """
+        Print out-of-date pkgbases without building or changing the repository.
+
+        Args:
+            packages: Optional list of specific packages to check
+        """
+        await self._pacsync()
+        self.aurutils_cache.mkdir(exist_ok=True, parents=True)
+
+        pkgbases_to_check = self._resolve_pkgbases_to_check(packages)
+        logger.debug("Checking for package updates...")
+        pkg_updates = await self._check_package_updates(pkgbases_to_check)
+
+        if not pkg_updates:
+            logger.debug("No updates available")
+            return
+
+        for pkg_name, info in sorted(pkg_updates.items()):
+            print(f"{pkg_name}: {info.current_version} -> {info.new_version}")
+
     async def update(self, packages=None, makepkg_flags=None):
         """
         Update packages in the repository.
@@ -1473,38 +1592,7 @@ class Database:
                 await self.remove(*to_remove)
                 repo_packages = {pkg.name for pkg in self.packages()}
 
-        # Determine which pkgbases to check
-        # Build mapping of pkgbase -> packages and package -> pkgbase
-        pkgbase_to_packages = {}
-        package_to_pkgbase = {}
-        for pkg in self.packages():
-            package_to_pkgbase[pkg.name] = pkg.pkgbase
-            if pkg.pkgbase not in pkgbase_to_packages:
-                pkgbase_to_packages[pkg.pkgbase] = []
-            pkgbase_to_packages[pkg.pkgbase].append(pkg.name)
-
-        repo_pkgbases = set(pkgbase_to_packages.keys())
-
-        if packages:
-            # Resolve package names to pkgbases
-            pkgbases_to_check = set()
-            not_in_repo = set()
-            for pkg in packages:
-                if pkg in package_to_pkgbase:
-                    pkgbases_to_check.add(package_to_pkgbase[pkg])
-                elif pkg in repo_pkgbases:
-                    # User passed a pkgbase directly
-                    pkgbases_to_check.add(pkg)
-                else:
-                    not_in_repo.add(pkg)
-            if not_in_repo:
-                logger.warning(
-                    f"{len(not_in_repo)} package(s) not in repository:"
-                )
-                for pkg in sorted(not_in_repo):
-                    logger.warning(f"  - {pkg}")
-        else:
-            pkgbases_to_check = repo_pkgbases - self.config.manual
+        pkgbases_to_check = self._resolve_pkgbases_to_check(packages)
 
         # STEP 1: Check all pkgbases for updates
         logger.info("Checking for package updates...")
@@ -1926,13 +2014,16 @@ class Database:
         )
 
     async def _pacsync(self):
-        await run_cmd(
+        result = await run_cmd(
             "sudo",
             "pacsync",
             self.name,
+            stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
             check=True,
         )
+        for line in result.stdout.decode(errors="replace").splitlines():
+            logger.debug(line)
 
 
 def db_list(orphans=False, as_json=False, show_all=False, depends_on=None):
@@ -2191,6 +2282,36 @@ async def db_add(
                 path.unlink()
 
 
+def db_ignore_add(package: str, version: str, reason: str) -> None:
+    if not reason.strip():
+        logger.error("--reason must not be empty")
+        sys.exit(1)
+    ConfigFile(CONFIG_PATH).add_ignored_version(package, version, reason)
+    print(f"{package}: ignoring {version} ({reason})")
+
+
+def db_ignore_remove(package: str, version: str | None = None) -> None:
+    removed = ConfigFile(CONFIG_PATH).remove_ignored_version(package, version)
+    if not removed:
+        target = f"{package} {version}" if version else package
+        logger.error(f"No ignored version found for {target}")
+        sys.exit(1)
+    print(f"{package}: removed {removed} ignored version(s)")
+
+
+def db_ignore_list(package: str | None = None) -> None:
+    config = ConfigFile(CONFIG_PATH)
+    packages = [package] if package else sorted(config.package_options)
+    for pkg in packages:
+        for entry in config.get_ignored_versions(pkg):
+            print(f"{pkg} {entry['version']}: {entry['reason']}")
+
+
+async def db_check(packages: list[str] | None = None) -> None:
+    database = Database(DATABASE)
+    await database.check(packages=packages)
+
+
 async def db_update(packages=None, makepkg_flags=None):
     database = Database(DATABASE)
     await database.update(packages=packages, makepkg_flags=makepkg_flags)
@@ -2428,6 +2549,13 @@ def main():
 
     subparsers.add_parser("sync", help="Sync repository to remote")
 
+    check_parser = subparsers.add_parser(
+        "check", help="List out-of-date packages without building"
+    )
+    check_parser.add_argument(
+        "package", nargs="*", help="Specific packages to check (optional)"
+    )
+
     update_parser = subparsers.add_parser("update", help="Update packages")
     update_parser.add_argument(
         "package", nargs="*", help="Specific packages to update (optional)"
@@ -2441,6 +2569,32 @@ def main():
     update_parser.add_argument(
         "--skipchecksums", action="store_true", help="Skip checksum checks"
     )
+
+    ignore_parser = subparsers.add_parser(
+        "ignore", help="Manage repo versions ignored by update warnings"
+    )
+    ignore_subparsers = ignore_parser.add_subparsers(
+        dest="ignore_command", metavar="ACTION", required=True
+    )
+    ignore_add_parser = ignore_subparsers.add_parser(
+        "add", help="Ignore a repo version of a package"
+    )
+    ignore_add_parser.add_argument("package")
+    ignore_add_parser.add_argument(
+        "version", help='Repo version to ignore ("*" for any)'
+    )
+    ignore_add_parser.add_argument(
+        "--reason", required=True, help="Why this version is ignored"
+    )
+    ignore_remove_parser = ignore_subparsers.add_parser(
+        "remove", help="Stop ignoring a version (all if VERSION omitted)"
+    )
+    ignore_remove_parser.add_argument("package")
+    ignore_remove_parser.add_argument("version", nargs="?")
+    ignore_list_parser = ignore_subparsers.add_parser(
+        "list", help="List ignored versions"
+    )
+    ignore_list_parser.add_argument("package", nargs="?")
 
     rebuild_parser = subparsers.add_parser("rebuild", help="Rebuild packages")
     rebuild_parser.add_argument(
@@ -2488,6 +2642,8 @@ def main():
             )
         case "prune":
             asyncio.run(db_prune(dry_run=args.dry_run))
+        case "check":
+            asyncio.run(db_check(args.package if args.package else None))
         case "update":
             packages = args.package if args.package else None
             makepkg_flags = []
@@ -2549,6 +2705,16 @@ def main():
             asyncio.run(db_sign(all_pkgs=args.all))
         case "sync":
             asyncio.run(db_sync())
+        case "ignore":
+            match args.ignore_command:
+                case "add":
+                    db_ignore_add(args.package, args.version, args.reason)
+                case "remove":
+                    db_ignore_remove(args.package, args.version)
+                case "list":
+                    db_ignore_list(args.package)
+                case _:
+                    raise ValueError
         case _:
             raise ValueError
 
