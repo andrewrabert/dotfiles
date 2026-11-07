@@ -3,6 +3,7 @@
 # /// script
 # dependencies = [
 #     "pyalpm",
+#     "pydantic",
 # ]
 # ///
 """
@@ -19,8 +20,10 @@ import re
 import shutil
 import subprocess
 import sys
+import typing
 
 import pyalpm
+import pydantic
 
 # Use system PATH for subcommands (exclude uv/venv directories)
 os.environ["PATH"] = ":".join(
@@ -307,115 +310,146 @@ DOTFILES_PRIVATE = pathlib.Path(os.environ["DOTFILES_PRIVATE"])
 CONFIG_PATH = DOTFILES_PRIVATE / "sol-repotool.json"
 
 
+PackageName = typing.NewType("PackageName", str)
+PackageVersion = typing.NewType("PackageVersion", str)
+IgnoreReason = typing.NewType("IgnoreReason", str)
+
+
+class IgnoredVersion(pydantic.BaseModel):
+    """A repo version that update checks skip, and why."""
+
+    model_config = pydantic.ConfigDict(extra="forbid", frozen=True)
+
+    version: PackageVersion
+    reason: IgnoreReason
+
+
+class PackageOptions(pydantic.BaseModel):
+    model_config = pydantic.ConfigDict(extra="forbid")
+
+    ignore_versions: list[IgnoredVersion] = pydantic.Field(
+        default_factory=list
+    )
+
+
+class Packages(pydantic.BaseModel):
+    model_config = pydantic.ConfigDict(extra="forbid")
+
+    aur: set[PackageName] = pydantic.Field(default_factory=set)
+    manual: set[PackageName] = pydantic.Field(default_factory=set)
+
+    @pydantic.field_serializer("aur", "manual")
+    def _sorted(self, value: set[PackageName]) -> list[PackageName]:
+        return sorted(value)
+
+
+class RepoConfig(pydantic.BaseModel):
+    """The whole sol-repotool.json file."""
+
+    model_config = pydantic.ConfigDict(extra="forbid")
+
+    packages: Packages = pydantic.Field(default_factory=Packages)
+    package_options: dict[PackageName, PackageOptions] = pydantic.Field(
+        default_factory=dict
+    )
+
+
 class ConfigFile:
     def __init__(self, path):
         self.path = pathlib.Path(path)
-        self._load()
-
-    def _load(self):
-        self.aur = set()
-        self.manual = set()
-        self.package_options: dict[str, dict] = {}
-        if self.path.exists():
-            data = json.loads(self.path.read_text())
-            packages = data.get("packages", {})
-            self.aur.update(packages.get("aur", []))
-            self.manual.update(packages.get("manual", []))
-            self.package_options = data.get("package_options", {})
+        self.data = (
+            RepoConfig.model_validate(json.loads(self.path.read_text()))
+            if self.path.exists()
+            else RepoConfig()
+        )
 
     def _dump(self):
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        data: dict[str, object] = {
-            "packages": {
-                "aur": sorted(self.aur),
-                "manual": sorted(self.manual),
-            }
-        }
-        options = {
-            pkg: opts for pkg, opts in self.package_options.items() if opts
-        }
-        if options:
-            data["package_options"] = options
-        self.path.write_text(json.dumps(data, indent=2, sort_keys=True))
+        self.path.write_text(
+            json.dumps(
+                self.data.model_dump(mode="json"), indent=2, sort_keys=True
+            )
+        )
 
-    def get_explicit_packages(self):
-        return set(self.aur)
+    @property
+    def aur(self) -> set[PackageName]:
+        return self.data.packages.aur
 
-    def get_no_update_packages(self):
-        return set(self.manual)
+    @property
+    def manual(self) -> set[PackageName]:
+        return self.data.packages.manual
+
+    def get_explicit_packages(self) -> set[str]:
+        return set[str](self.aur)
+
+    def get_no_update_packages(self) -> set[str]:
+        return set[str](self.manual)
 
     def add_packages(self, *packages):
-        updated = self.aur.copy()
-        updated.update(packages)
-        if updated != self.aur:
-            self.aur = updated
+        if not self.aur.issuperset(packages):
+            self.aur.update(packages)
             self._dump()
 
     def remove_packages(self, *packages):
-        updated = self.aur - set(packages)
-        if updated != self.aur:
-            self.aur = updated
+        if not self.aur.isdisjoint(packages):
+            self.aur.difference_update(packages)
             self._dump()
 
     def add_no_update(self, *packages):
-        updated = self.manual.copy()
-        updated.update(packages)
-        if updated != self.manual:
-            self.manual = updated
+        if not self.manual.issuperset(packages):
+            self.manual.update(packages)
             self._dump()
 
     def remove_no_update(self, *packages):
-        updated = self.manual - set(packages)
-        if updated != self.manual:
-            self.manual = updated
+        if not self.manual.isdisjoint(packages):
+            self.manual.difference_update(packages)
             self._dump()
 
-    def get_ignored_versions(self, package: str) -> list[dict[str, str]]:
-        return list(
-            self.package_options.get(package, {}).get("ignore_versions", [])
+    def find_ignored_version(
+        self, package: PackageName, version: PackageVersion
+    ) -> IgnoredVersion | None:
+        """Return the entry that ignores version for package, if any."""
+        options = self.data.package_options.get(package)
+        if options is None:
+            return None
+        return next(
+            (e for e in options.ignore_versions if e.version == version), None
         )
 
-    def get_ignore_reason(self, package: str, version: str) -> str | None:
-        """Return the reason if version is ignored for package, else None."""
-        for entry in self.get_ignored_versions(package):
-            if entry["version"] in ("*", version):
-                return entry["reason"]
-        return None
-
     def add_ignored_version(
-        self, package: str, version: str, reason: str
+        self, package: PackageName, ignored: IgnoredVersion
     ) -> None:
-        entries = [
-            e
-            for e in self.get_ignored_versions(package)
-            if e["version"] != version
-        ]
-        entries.append({"version": version, "reason": reason})
-        entries.sort(key=lambda e: e["version"])
-        self.package_options.setdefault(package, {})["ignore_versions"] = (
-            entries
+        options = self.data.package_options.setdefault(
+            package, PackageOptions()
+        )
+        options.ignore_versions = sorted(
+            [
+                e
+                for e in options.ignore_versions
+                if e.version != ignored.version
+            ]
+            + [ignored],
+            key=lambda e: e.version,
         )
         self._dump()
 
     def remove_ignored_version(
-        self, package: str, version: str | None = None
+        self, package: PackageName, version: PackageVersion | None = None
     ) -> int:
         """Remove one ignored version, or all if version is None. Returns count removed."""
-        entries = self.get_ignored_versions(package)
-        kept = (
+        options = self.data.package_options.get(package)
+        if options is None:
+            return 0
+        before = len(options.ignore_versions)
+        options.ignore_versions = (
             []
             if version is None
-            else [e for e in entries if e["version"] != version]
+            else [e for e in options.ignore_versions if e.version != version]
         )
-        removed = len(entries) - len(kept)
+        removed = before - len(options.ignore_versions)
+        if not options.ignore_versions:
+            del self.data.package_options[package]
         if removed:
-            opts = self.package_options[package]
-            if kept:
-                opts["ignore_versions"] = kept
-            else:
-                del opts["ignore_versions"]
-                if not opts:
-                    del self.package_options[package]
             self._dump()
         return removed
 
@@ -1168,6 +1202,14 @@ class Database:
             if not current_version:
                 continue
 
+            # Ignored repo versions are never updated. Without --verbose
+            # they're skipped outright; with it, still compare and warn.
+            ignored = self.config.find_ignored_version(
+                PackageName(pkgbase), PackageVersion(current_version)
+            )
+            if ignored is not None and not logger.isEnabledFor(logging.DEBUG):
+                continue
+
             is_vcs = self._is_vcs_package(pkgbase)
 
             if is_vcs:
@@ -1181,7 +1223,11 @@ class Database:
 
                 # VCS versions (e.g. git commit hashes) don't have
                 # meaningful ordering - any change means an update
-                if new_version != current_version:
+                if ignored is not None:
+                    logger.warning(
+                        f"  {pkgbase}: {current_version} -> {new_version} (ignored: {ignored.reason})"
+                    )
+                elif new_version != current_version:
                     logger.debug(
                         f"  {pkgbase}: {current_version} -> {new_version}"
                     )
@@ -1243,12 +1289,13 @@ class Database:
                 cmp = pyalpm.vercmp(new_version, current_version)
                 if cmp < 0:
                     message = f"  {pkgbase}: AUR version {new_version} is older than repo version {current_version}"
-                    reason = self.config.get_ignore_reason(
-                        pkgbase, current_version
-                    )
-                    if reason is not None:
-                        message += f" (ignored: {reason})"
+                    if ignored is not None:
+                        message += f" (ignored: {ignored.reason})"
                     logger.warning(message)
+                elif cmp > 0 and ignored is not None:
+                    logger.warning(
+                        f"  {pkgbase}: {current_version} -> {new_version} (ignored: {ignored.reason})"
+                    )
                 elif cmp > 0:
                     # Has update - parse dependencies
                     deps = await self._parse_srcinfo(pkgbase)
@@ -2282,15 +2329,14 @@ async def db_add(
                 path.unlink()
 
 
-def db_ignore_add(package: str, version: str, reason: str) -> None:
-    if not reason.strip():
-        logger.error("--reason must not be empty")
-        sys.exit(1)
-    ConfigFile(CONFIG_PATH).add_ignored_version(package, version, reason)
-    print(f"{package}: ignoring {version} ({reason})")
+def db_ignore_add(package: PackageName, ignored: IgnoredVersion) -> None:
+    ConfigFile(CONFIG_PATH).add_ignored_version(package, ignored)
+    print(f"{package}: ignoring {ignored.version} ({ignored.reason})")
 
 
-def db_ignore_remove(package: str, version: str | None = None) -> None:
+def db_ignore_remove(
+    package: PackageName, version: PackageVersion | None = None
+) -> None:
     removed = ConfigFile(CONFIG_PATH).remove_ignored_version(package, version)
     if not removed:
         target = f"{package} {version}" if version else package
@@ -2299,12 +2345,12 @@ def db_ignore_remove(package: str, version: str | None = None) -> None:
     print(f"{package}: removed {removed} ignored version(s)")
 
 
-def db_ignore_list(package: str | None = None) -> None:
-    config = ConfigFile(CONFIG_PATH)
-    packages = [package] if package else sorted(config.package_options)
-    for pkg in packages:
-        for entry in config.get_ignored_versions(pkg):
-            print(f"{pkg} {entry['version']}: {entry['reason']}")
+def db_ignore_list(package: PackageName | None = None) -> None:
+    options = ConfigFile(CONFIG_PATH).data.package_options
+    for pkg in [package] if package else sorted(options):
+        if pkg in options:
+            for entry in options[pkg].ignore_versions:
+                print(f"{pkg} {entry.version}: {entry.reason}")
 
 
 async def db_check(packages: list[str] | None = None) -> None:
@@ -2579,22 +2625,27 @@ def main():
     ignore_add_parser = ignore_subparsers.add_parser(
         "add", help="Ignore a repo version of a package"
     )
-    ignore_add_parser.add_argument("package")
+    ignore_add_parser.add_argument("package", type=PackageName)
     ignore_add_parser.add_argument(
-        "version", help='Repo version to ignore ("*" for any)'
+        "version", type=PackageVersion, help="Repo version to ignore"
     )
     ignore_add_parser.add_argument(
-        "--reason", required=True, help="Why this version is ignored"
+        "--reason",
+        type=IgnoreReason,
+        required=True,
+        help="Why this version is ignored",
     )
     ignore_remove_parser = ignore_subparsers.add_parser(
         "remove", help="Stop ignoring a version (all if VERSION omitted)"
     )
-    ignore_remove_parser.add_argument("package")
-    ignore_remove_parser.add_argument("version", nargs="?")
+    ignore_remove_parser.add_argument("package", type=PackageName)
+    ignore_remove_parser.add_argument(
+        "version", type=PackageVersion, nargs="?"
+    )
     ignore_list_parser = ignore_subparsers.add_parser(
         "list", help="List ignored versions"
     )
-    ignore_list_parser.add_argument("package", nargs="?")
+    ignore_list_parser.add_argument("package", type=PackageName, nargs="?")
 
     rebuild_parser = subparsers.add_parser("rebuild", help="Rebuild packages")
     rebuild_parser.add_argument(
@@ -2708,7 +2759,12 @@ def main():
         case "ignore":
             match args.ignore_command:
                 case "add":
-                    db_ignore_add(args.package, args.version, args.reason)
+                    db_ignore_add(
+                        args.package,
+                        IgnoredVersion(
+                            version=args.version, reason=args.reason
+                        ),
+                    )
                 case "remove":
                     db_ignore_remove(args.package, args.version)
                 case "list":
