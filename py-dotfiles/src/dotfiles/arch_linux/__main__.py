@@ -100,7 +100,7 @@ if HOSTNAME in ("sol", "mars", "phobos"):
             "pacman-contrib",
             "pbzip2",
             "perl-image-exiftool",
-            "pi-coding-agent",
+            "pi",
             "pigz",
             "pixz",
             "pkgfile",

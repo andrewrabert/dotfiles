@@ -553,8 +553,8 @@ def parse_mcp(conf):
 
 
 def dump_mcp(server):
-    """Serialize an McpServer to an ordered mapping with every key present."""
-    return order_keys(server.model_dump(), MCP_KEY_ORDER)
+    """Serialize an McpServer to an ordered mapping, omitting unset (None) keys."""
+    return order_keys(server.model_dump(exclude_none=True), MCP_KEY_ORDER)
 
 
 def safe_write_bytes(path, data):
