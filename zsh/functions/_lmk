@@ -1,7 +1,0 @@
-#compdef lmk
-_arguments : \
-    '(-a --all)'{-a,--all} \
-    '(-q --quiet)'{-q,--quiet} \
-    '(-w --wait)'{-w,--wait} \
-    --help \
-    '*::command arguments:_normal'

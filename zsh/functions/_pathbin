@@ -1,6 +1,0 @@
-#compdef pathbin
-_arguments \
-    '(-h --help)'{-h,--help}'[show this help message and exit]' \
-    '-c[group by command. directories are ordered as they appear in the path list]' \
-    '-d[group by directory]' \
-    '*:: :->args'

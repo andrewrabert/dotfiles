@@ -1,6 +1,0 @@
-#compdef proton
-_arguments : \
-    --help \
-    --show-prefix \
-    --version \
-    '*:: :_files'

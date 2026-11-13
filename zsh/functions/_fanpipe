@@ -1,8 +1,0 @@
-#compdef fanpipe
-_arguments : \
-    '(-p --publish)'{-p,--publish} \
-    '(-s --subscribe)'{-s,--subscribe} \
-    '(-f --follow)'{-f,--follow} \
-    '(-t --topic)'{-t,--topic}:topic \
-    --help \
-    '*::command arguments:_normal'
