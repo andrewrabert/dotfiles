@@ -86,6 +86,7 @@ class McpStdioServer(pydantic.BaseModel):
     command: str
     args: list[str] = pydantic.Field(default_factory=list)
     env: dict[str, str] = pydantic.Field(default_factory=dict)
+    enabled: bool = True
 
 
 class McpRemoteServer(pydantic.BaseModel):
@@ -94,6 +95,7 @@ class McpRemoteServer(pydantic.BaseModel):
     url: str
     headers: dict[str, str] = pydantic.Field(default_factory=dict)
     headersHelper: str | None = None
+    enabled: bool = True
 
 
 McpServer = typing.Annotated[
@@ -552,9 +554,24 @@ def parse_mcp(conf):
     return pydantic.TypeAdapter(McpServer).validate_python(conf)
 
 
-def dump_mcp(server):
-    """Serialize an McpServer to an ordered mapping, omitting unset (None) keys."""
-    return order_keys(server.model_dump(exclude_none=True), MCP_KEY_ORDER)
+def dump_mcp(server, spec=False):
+    """Serialize an McpServer to an ordered mapping, omitting unset (None) keys.
+
+    `enabled` is spec-only: the config form never carries it, and the spec
+    form carries it only when false.
+    """
+    data = server.model_dump(exclude_none=True, exclude={"enabled"})
+    if spec and not server.enabled:
+        data["enabled"] = False
+    return order_keys(data, MCP_KEY_ORDER)
+
+
+def load_mcp_specs(directory):
+    """Parse mcp/<name>.yaml into {name: McpServer}."""
+    return {
+        name: parse_mcp(conf)
+        for name, conf in load_yaml_dir(directory, MCP_DIRNAME).items()
+    }
 
 
 def safe_write_bytes(path, data):
@@ -970,6 +987,7 @@ MCP_KEY_ORDER = (
     "command",
     "args",
     "env",
+    "enabled",
 )
 PLUGIN_KEY_ORDER = (
     "type",
@@ -1460,8 +1478,9 @@ async def cmd_apply(cmd, cfg):
     apply_settings(spec.settings, cfg.load_settings, cfg.save_settings)
     apply_mcp_servers(
         {
-            name: dump_mcp(parse_mcp(conf))
-            for name, conf in load_yaml_dir(directory, MCP_DIRNAME).items()
+            name: dump_mcp(server)
+            for name, server in load_mcp_specs(directory).items()
+            if server.enabled
         },
         cfg.load_config,
         cfg.save_config,
@@ -1738,6 +1757,11 @@ async def cmd_export(cmd, cfg):
             getattr(cfg.load_config(), "mcpServers", None) or {}
         ).items()
     }
+    # Disabled specs are absent from config by design; carry them over so
+    # export doesn't prune them.
+    for name, server in load_mcp_specs(directory).items():
+        if not server.enabled and name not in mcp_servers:
+            mcp_servers[name] = dump_mcp(server, spec=True)
     marketplaces = {
         e.name: order_keys(
             e.model_dump(exclude={"name"}), MARKETPLACE_KEY_ORDER
