@@ -31,7 +31,6 @@ if HOSTNAME in ("sol", "mars", "phobos"):
     EXPECTED_PACKAGES.update(
         {
             "7zip",
-            "advancecomp",
             "aria2",
             "aweber-cli",
             "base",

@@ -4,7 +4,6 @@ import shutil
 from . import homebrew
 
 EXPECTED_PACKAGES = {
-    "advancecomp",
     "aria2",
     "ast-grep",
     "bat",
