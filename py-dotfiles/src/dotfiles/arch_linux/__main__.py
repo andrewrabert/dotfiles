@@ -36,7 +36,6 @@ if HOSTNAME in ("sol", "mars", "phobos"):
             "base",
             "base-devel",
             "bat",
-            "bchunk",
             "bind",  # dig
             "busybox",
             "cabextract",
