@@ -38,7 +38,6 @@ if HOSTNAME in ("sol", "mars", "phobos"):
             "bat",
             "bchunk",
             "bind",  # dig
-            "binmerge",
             "busybox",
             "cabextract",
             "cdemu-client",
