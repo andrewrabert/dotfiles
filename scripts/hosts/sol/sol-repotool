@@ -503,19 +503,24 @@ class Database:
             )
 
     async def cleanup(self):
+        """Remove untracked files (downloaded sources, src/, pkg/) from each
+        AUR clone, as in the aur-gc example from aur(1)."""
         for path in self.aurutils_cache.iterdir():
+            if not (path / ".git").is_dir():
+                continue
+            # Build trees can contain read-only files (e.g. Go module cache)
             for subpath in (path / "src", path / "pkg"):
-                if not subpath.exists():
-                    continue
-                await run_cmd(
-                    "chmod", "-R", "777", "--", str(subpath), check=True
+                if subpath.exists():
+                    await run_cmd(
+                        "chmod", "-R", "u+rwX", "--", str(subpath), check=True
+                    )
+            result = await run_cmd(
+                "git", "-C", str(path), "clean", "-xdfq", capture_output=True
+            )
+            if result.returncode != 0:
+                logger.warning(
+                    f"Failed to clean {path}: {result.stderr.decode().strip()}"
                 )
-                try:
-                    shutil.rmtree(subpath)
-                except FileNotFoundError:
-                    pass
-                except OSError as e:
-                    logger.warning(f"Failed to remove {subpath}: {e}")
 
     async def _get_dependencies(self, package_name, pkg_db=None):
         """
@@ -761,6 +766,9 @@ class Database:
             if path.name not in needed_packages:
                 logger.debug(f"Clearing cache for {path.name}")
                 shutil.rmtree(path)
+
+        # Remove stale downloads and build trees from the remaining clones
+        await self.cleanup()
 
         await self._sign_database()
         await self._pacsync()
@@ -2564,7 +2572,8 @@ def main():
     )
 
     prune_parser = subparsers.add_parser(
-        "prune", help="Remove packages not in config"
+        "prune",
+        help="Remove packages not in config and clean the aurutils cache",
     )
     prune_parser.add_argument(
         "--dry-run",
