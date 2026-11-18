@@ -189,7 +189,7 @@ if HOSTNAME in ("mars", "phobos"):
             "docker",
             "docker-compose",
             "dolphin",
-            "dosbox-x",
+            "dosbox-staging",
             "dvd+rw-tools",
             "evtest",
             "flatpak-builder",
