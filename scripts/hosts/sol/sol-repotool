@@ -504,7 +504,8 @@ class Database:
 
     async def cleanup(self):
         """Remove untracked files (downloaded sources, src/, pkg/) from each
-        AUR clone, as in the aur-gc example from aur(1)."""
+        AUR clone, as in the aur-gc example from aur(1); -ff also removes
+        nested repos such as makepkg working copies in src/."""
         for path in self.aurutils_cache.iterdir():
             if not (path / ".git").is_dir():
                 continue
@@ -515,7 +516,7 @@ class Database:
                         "chmod", "-R", "u+rwX", "--", str(subpath), check=True
                     )
             result = await run_cmd(
-                "git", "-C", str(path), "clean", "-xdfq", capture_output=True
+                "git", "-C", str(path), "clean", "-xffdq", capture_output=True
             )
             if result.returncode != 0:
                 logger.warning(
