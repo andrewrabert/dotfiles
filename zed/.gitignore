@@ -1,0 +1,5 @@
+*
+!/.gitignore
+!/settings.json
+!/themes/
+!/themes/**
