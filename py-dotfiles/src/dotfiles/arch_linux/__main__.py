@@ -84,7 +84,6 @@ if HOSTNAME in ("sol", "mars", "phobos"):
             "mp3val",
             "mprime-bin",
             "mpv",
-            "ms-sys",
             "neovim",
             "nfs-utils",
             "nmap",
