@@ -1,0 +1,1 @@
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="5fc9", ATTR{idProduct}=="0063", GROUP="wheel", MODE="0660"
