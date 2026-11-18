@@ -112,7 +112,6 @@ if HOSTNAME in ("sol", "mars", "phobos"):
             "rsync",
             "ruff",
             "rustup",
-            "shntool",
             "speedtest-go",
             "sshfs",
             "sshuttle",
