@@ -54,6 +54,7 @@ SCRIPTS = {
     "60-psql": "dotfiles.full_update.psql:main",
     "60-remove-broken-symlinks": "dotfiles.full_update.remove_broken_symlinks:main",
     "60-tmux": "dotfiles.full_update.tmux:main",
+    "60-uncomment": "dotfiles.commands.uncomment:main",
     "60-update-mime-database": "dotfiles.full_update.update_mime_database:main",
     "60-yazi": "dotfiles.full_update.yazi:main",
     "60-zed": "dotfiles.full_update.zed:main",

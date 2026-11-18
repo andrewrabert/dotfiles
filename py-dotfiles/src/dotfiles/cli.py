@@ -17,11 +17,19 @@ from dotfiles.commands import (
     noted,
     redump_verifier,
     syncthing,
+    uncomment,
     update,
     zoekt_simple,
 )
 
-PASSTHROUGH = {"bertbox", "bxwrp", "cloneholio", "noted", "redump-verifier"}
+PASSTHROUGH = {
+    "bertbox",
+    "bxwrp",
+    "cloneholio",
+    "noted",
+    "redump-verifier",
+    "uncomment",
+}
 
 
 def main():
@@ -58,6 +66,7 @@ def main():
     add_passthrough("noted", "Manage noted")
     add_passthrough("redump-verifier", "verify dumps against redump")
     subparsers.add_parser("syncthing", help="write .stignore includes")
+    add_passthrough("uncomment", "Manage uncomment")
 
     update_parser = subparsers.add_parser(
         "update", help="run every full-update script"
@@ -120,6 +129,8 @@ def main():
                 asyncio.run(redump_verifier.main(rest))
             case "syncthing":
                 asyncio.run(syncthing.main([]))
+            case "uncomment":
+                asyncio.run(uncomment.main(rest))
             case "update":
                 asyncio.run(
                     update.main(args.skip, args.script, args.script_args)
