@@ -2,7 +2,6 @@ import argparse
 import hashlib
 import io
 import platform
-import shutil
 import tarfile
 
 import httpx2
@@ -45,13 +44,29 @@ class ReleaseTag(pydantic.BaseModel):
 
 def parse_args(args):
     parser = argparse.ArgumentParser(prog=NAME)
-    parser.add_argument(
+    subparsers = parser.add_subparsers(dest="command", required=True)
+    install_parser = subparsers.add_parser(
+        "install", help="install the latest release"
+    )
+    install_parser.add_argument(
         "-f",
         "--force",
         action="store_true",
         help="skip the version check and reinstall",
     )
+    subparsers.add_parser("uninstall", help="remove the installed release")
+    subparsers.add_parser(
+        "update", help="install the latest release if already installed"
+    )
     return parser.parse_args(args)
+
+
+def binary_path():
+    return fs.dotfiles_local() / NAME / "bin" / NAME
+
+
+def symlink_path():
+    return fs.dotfiles_local() / "bin" / NAME
 
 
 def detect_target():
@@ -116,10 +131,9 @@ def extract_binary(archive):
 
 async def install(force):
     target = detect_target()
-    local = fs.dotfiles_local()
-    dest = local / NAME / "bin" / NAME
-    symlink = local / "bin" / NAME
-    version_file = local / NAME / ".installed-version"
+    dest = binary_path()
+    symlink = symlink_path()
+    version_file = fs.dotfiles_local() / NAME / ".installed-version"
 
     async with httpx2.AsyncClient() as client:
         tag = await latest_tag(client)
@@ -156,8 +170,36 @@ async def install(force):
     version_file.write_text(installed + "\n")
 
 
-async def main(args):
-    force = parse_args(args).force
-    if not force and not shutil.which(NAME):
+async def update():
+    if not binary_path().exists():
+        print(f"{NAME} is not installed")
         return
-    await install(force)
+    await install(force=False)
+
+
+def uninstall():
+    dest = binary_path()
+    symlink = symlink_path()
+    if symlink.is_symlink() and symlink.readlink() == dest:
+        symlink.unlink()
+    install_dir = fs.dotfiles_local() / NAME
+    if not install_dir.exists():
+        print(f"{NAME} is not installed")
+        return
+    fs.delete(install_dir)
+    print(f"Removed: {install_dir}")
+
+
+async def main_update(args):
+    await update()
+
+
+async def main(args):
+    parsed = parse_args(args)
+    match parsed.command:
+        case "install":
+            await install(parsed.force)
+        case "uninstall":
+            uninstall()
+        case "update":
+            await update()
