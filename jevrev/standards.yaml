@@ -1,0 +1,266 @@
+description: >-
+  Rust standards: correct by construction, error propagation, domain abstractions.
+  standards-v4.yaml without the rules that over-flagged accepted code:
+  layer-knows-foreign-encoding, duplicate-literal, layer-reaches-outward, fabricated-placeholder,
+  erased-error-type, hand-built-format. Calibrated in calibration/standards against cases mined
+  from sessions in tools, jellium-desktop, noted, bertbox, bxwrp, kwinctrl, cloneholio and keygen.
+when:
+  - language: [rust]
+error_threshold: 0.75
+rules:
+  - flags: An added line requires a caller to remember to perform a check before a value is safe to use, where a type could have enforced it instead.
+    good:
+      - >-
+        Every added value is usable as soon as it exists, or the type system forces the check, for
+        example a newtype with a private constructor, an enum, or a Result the caller must unwrap; or
+        a bool is plain state the value carries, such as whether an item is shown enabled.
+    bad:
+      - >-
+        Added code hands out a value together with a separate bool, Option, flag, status field or
+        validation function that a caller must inspect before using the value correctly, and nothing
+        stops a caller from skipping it. Examples are an is_valid() call, or an index or id that must
+        be checked against a collection before use.
+  - flags: An added line validates a value after it has already been constructed.
+    good:
+      - >-
+        Added code checks inputs before or while constructing, through a fallible constructor
+        returning Result, or the value cannot be built in an invalid state. Checks on external
+        input such as user text, files or the network before parsing it into a type are not this.
+    bad:
+      - >-
+        Added code builds a struct, enum or other value and later tests whether that value is valid,
+        complete or consistent, for example an assert, an if on its fields, a validate() method,
+        or a debug_assert, because the constructor accepted inputs it should have rejected.
+  - flags: An added line discards an error from a failed operation instead of propagating it.
+    good:
+      - >-
+        Every error the added code receives is returned to its caller with ? or an explicit Err,
+        or the function that reports failures to the user, such as main, prints the error and exits
+        with a failure status, or the added code receives no fallible result.
+      - >-
+        The fallback replaces a lookup or optional value whose absence is an ordinary outcome, for
+        example a map lookup miss, an optional part of a grammar, or a parser alternative that falls
+        through to the next rule by design.
+    bad:
+      - >-
+        Added code receives a Result or failure and does not pass it to the caller: let _ = on a
+        Result, drop() of a Result, .ok() or is_ok_and(..) that drops the error, unwrap_or,
+        unwrap_or_default, unwrap_or_else returning a fallback, if let Ok without an else that propagates, a match arm that logs the error and
+        continues, or an Err mapped to None, false, an empty value or a default.
+      - >-
+        The fallback replaces the result of an operation that failed, for example a file read, a
+        network call, a parse of required input, or a system call, so the caller never learns it
+        failed; or it substitutes a specific value for a setting or field the input did not give.
+  - flags: An added function reports failure through something other than Result.
+    good:
+      - >-
+        Every added function that can fail returns Result, or no added function can fail. An Option
+        that means "absent", not "failed", is not a failure report, and neither is the return value
+        of a callback whose signature a C ABI fixes.
+      - >-
+        The operation before each expect or unwrap succeeds for every input, for example a parser
+        built only from parts that accept any text, or a conversion the types already guarantee; or
+        the panic is an assertion inside a test.
+    bad:
+      - >-
+        An added function signals that it failed by returning bool, Option, a sentinel number, an
+        empty collection or string, a status enum, by setting an out parameter or field, by logging,
+        or by panicking, where Result with an error type is the Rust way to report that failure.
+      - >-
+        An added expect, unwrap or panic can be reached at run time because the operation before it
+        fails on some input the program can receive, such as user text, a file, or a network
+        response.
+  - flags: Added code handles an error from a failed operation at a low layer that should have passed it up to a caller.
+    good:
+      - >-
+        Added code returns each error upward until it reaches the function that decides the
+        outcome, such as main, an event loop, a top-level request handler or a user-facing action.
+      - >-
+        The fallback replaces a lookup or optional value whose absence is an ordinary outcome, for
+        example a map lookup miss, an optional part of a grammar, or a parser alternative that falls
+        through to the next rule by design.
+    bad:
+      - >-
+        A helper, adapter, callback or library-level function in the added code catches an error and
+        decides what happens next, for example logging it, retrying, substituting a value, or
+        showing it to the user, when the function that called it is the one that knows how to react.
+      - >-
+        The fallback replaces the result of an operation that failed, for example a file read, a
+        network call, a parse of required input, or a system call, so the caller never learns it
+        failed; or it substitutes a specific value for a setting or field the input did not give.
+  - flags: An added type, field, parameter or return value uses a mechanism type where a domain type belongs.
+    good:
+      - >-
+        Added types, fields, parameters and return values name the domain concept they hold, or the
+        code is a thin FFI or serialization boundary where raw types are required.
+    bad:
+      - >-
+        Added code passes or stores a domain concept as a raw mechanism type: u32 or i32 or usize
+        ids, String for identifiers or keys, bool flags for modes, tuples, HashMap, channels,
+        callbacks or generic wrappers named Handler, Manager, Data, Info or Helper, where a named
+        type for the concept, such as MenuItemId or a domain enum, would carry the meaning.
+  - flags: An added line edits external text or an external structure in place instead of parsing it into a type the app owns.
+    good:
+      - >-
+        Added code converts the external value once into a named type or enum through a parser,
+        FromStr, TryFrom or a library parser, and uses that type afterwards, or the added code
+        builds its own value without reshaping an external one.
+    bad:
+      - >-
+        Added code takes a string, label, tag or foreign model that came from outside the app, or
+        text the app itself rendered for display, and
+        reshapes it with character or item surgery, for example stripping marker characters,
+        replacing one separator with another, splitting off suffixes, changing case, or deleting
+        entries from a library's data structure, and then passes the reshaped value on as the same
+        kind of raw value.
+  - flags: An added const, static or array lists enum variants or pairs them with other values, where an exhaustive match would let the compiler check the mapping.
+    good:
+      - >-
+        Added code maps each variant with an exhaustive match or a method on the enum, or the
+        table is keyed by external strings read at run time, such as a locale tag to translation
+        lookup, where no enum exists to match on.
+    bad:
+      - >-
+        Added code declares a list of every variant, a list of values indexed by position, or an
+        array of (id, variant) tuples, and then searches it with find or position or indexes it by
+        number,
+        so adding, removing or reordering a variant still compiles while the mapping silently
+        goes wrong; a hand-written array length such as [T; 9] is a sign of this.
+  - flags: An added line describes an error with hand-written text that names a cause the error value does not state.
+    good:
+      - >-
+        Added code reports the error value as it is, for example "{error}" or ?, or adds only
+        context the code at that line knows for certain, such as the path or id it was working on.
+    bad:
+      - >-
+        Added code logs, prints, formats or wraps an error with a prefix or message such as
+        "failed to read config: {error}" that guesses which operation or cause failed, so the text becomes wrong when the function
+        gains another error case; or text that repeats what the error's own type or variant already
+        says.
+  - flags: An added function, closure or parameter returns bool to say which kind a value is, where an enum or a typed value would carry that kind.
+    good:
+      - >-
+        Added code decides the kind once and returns it as an enum variant, an Option of the typed
+        value, or a typed collection; or the bool is a plain state of one value, such as whether
+        it is enabled, and not a classification of it.
+    bad:
+      - >-
+        Added code introduces a predicate such as is_kind(x) -> bool, a filter parameter of type
+        impl Fn(T) -> bool, or a lookup reduced to .is_some(), and the caller branches on
+        that bool to decide what the value is or which group it belongs to, so the classification
+        is recomputed at each use instead of being decided once.
+  - flags: An added public item exposes a specific default or fallback choice that only its owning module should make.
+    good:
+      - >-
+        The default is private to its module and other code reaches it only through one function
+        that decides and returns the value, or the added code
+        exposes no default at all.
+    bad:
+      - >-
+        Added code makes a fallback value public or chooses one outside the module that owns it,
+        for example a public constant holding the fallback, a public constructor for one specific
+        default value called from another module, so other modules can pick or repeat the default
+        themselves.
+  - flags: An added comment only repeats, defends or narrates what the code beside it already shows.
+    good:
+      - >-
+        Every added comment names a non-obvious fact about the code as it stands whose absence
+        would cause a specific wrong edit, or the added lines contain no comments. A function,
+        method, class or module docstring or doc comment that summarizes what the thing does or
+        is, even when its code shows the same, such as "Fetch a subscriber from a list." on
+        fetch_subscriber.
+    bad:
+      - >-
+        An added comment restates what the next line does, labels it, vouches
+        that it is safe or correct, cites where the design came from, or narrates what the code
+        used to do, and deleting it would not lead a competent reader to write a wrong line. Or
+        an added docstring or doc comment that narrates the body step by step, such as "Validate
+        the body, then load the client, then return 400 if missing.", or a test docstring that
+        repeats the test's assertions, such as "A missing client returns 400.".
+  - flags: An added function, method or type only forwards to, wraps, or repeats a path the code already has.
+    good:
+      - >-
+        Each added function, method or type does work that no existing path in the code does,
+        or it is the single place that a decision or conversion is made, and its callers use it
+        in place of building the result themselves.
+    bad:
+      - >-
+        Added code introduces a helper, method, struct or loader step whose whole job is to pass
+        values to one other call, to build an input that an existing option or flag already
+        builds, or to repeat an existing method for a second group of the same kind of value,
+        for example a function that assembles a config overlay equal to one more config file,
+        a method that loads one more file the way an existing option already does, or a second
+        lookup method that does the same thing as the first for a different enum.
+  - flags: An added type, trait, field or parameter generalizes over choices that only one case in the code uses.
+    good:
+      - >-
+        Every added type, trait, field and parameter has at least two real uses in the code, or the
+        added code states its one case directly as plain functions and values.
+    bad:
+      - >-
+        Added code introduces a configurable struct with a single fixed instance, a trait or
+        generic wrapper with layers for variations nobody asked for, fields that hold settings
+        only ever set to one value, or a builder with one option, so the code carries machinery
+        for cases that do not exist.
+  - flags: An added static or global holds a runtime value that an owning object should hold instead.
+    good:
+      - >-
+        Added statics hold only compile-time constants or values that never change and need no
+        setup, or the added code creates the value in a constructor or entry point and passes it
+        as a field or parameter.
+    bad:
+      - >-
+        Added code declares a static, LazyLock, OnceLock, OnceCell, thread_local or global
+        variable that holds loaded resources, settings or service objects, and other code reads
+        it through a free function or the static itself, instead of the application object or
+        constructor creating the value and passing it to the code that needs it.
+  - flags: An added error type or variant only wraps or renames errors from called code that the function could return unchanged.
+    good:
+      - >-
+        Added code returns the callee's error with ?, or adds a variant only for a failure the
+        callee does not report, and a caller matches on that variant to react to it; or the added
+        lines declare no error type.
+    bad:
+      - >-
+        Added code declares an error enum or struct, with Display and Error impls, whose variants
+        hold an io::Error, a parse error or another library error together with a description of
+        the call, and the functions map each failure into it with map_err, where ? on the original
+        error would report the same failure; or the new type is converted into a catch-all error
+        at its first caller.
+
+  - flags: An added Option stands for something other than a value that is absent.
+    good:
+      - >-
+        Every added Option means the value may be missing and nothing more, for example an
+        optional setting, a lookup that can miss, or a field the format leaves out; or the added
+        lines contain no Option.
+    bad:
+      - >-
+        Added code uses None or Some to mean "not computed yet", "not loaded yet", a mode or policy
+        the callee switches on, or one of two kinds of value, for example a field filled lazily on
+        first use, a parameter where None selects one behaviour and Some selects another, or two
+        Option fields of which exactly one is ever set.
+  - flags: Added code waits a fixed length of time, or gives up after a fixed timeout, in place of waiting for the event it depends on.
+    good:
+      - >-
+        Added code blocks on the event itself, such as waiting for a child process, reading until
+        end of input or a delimiter, or receiving from a channel; or the added lines contain no
+        sleep, deadline or timeout.
+    bad:
+      - >-
+        Added code calls thread::sleep, a sleep in a polling loop, or a read loop bounded by a
+        hard-coded deadline or Duration constant, so that correctness depends on another process
+        or device answering within that time, for example sleeping after asking a server to
+        refresh before reading its state, or stopping a terminal read after some milliseconds.
+
+  - flags: An added numeric literal stands for a named situation that the code does not name.
+    good:
+      - >-
+        Every added number is a plain quantity, offset, size or arithmetic constant, or the
+        situation is expressed through a named constant, an enum, a bool or an Option.
+    bad:
+      - >-
+        Added code writes a number such as 0, 1, -1 or 6 where the number means a situation, for
+        example a handled or not-handled status, a "nothing selected" marker, a presence flag, or a
+        position in a message whose meaning is fixed by convention, and the reader must know the
+        convention to understand the line.

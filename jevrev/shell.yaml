@@ -1,0 +1,47 @@
+description: >-
+  POSIX sh standards: the rules in the user's shell standard that need judgment. Brace expansion,
+  set -eu, the function keyword, indentation and naming are left to a linter. Not calibrated.
+when:
+  - language: [sh]
+error_threshold: 0.75
+rules:
+  - flags: An added line uses a bash or zsh feature that POSIX sh does not have.
+    good:
+      - >-
+        Every added line is valid POSIX sh, such as [ ], . file, $(( )) arithmetic expansion,
+        ${var%suffix}, ${var#prefix}, printf, and case.
+    bad:
+      - >-
+        Added code uses syntax or a builtin that POSIX sh lacks, for example [[ ]], arrays,
+        source, function name(), local -a, $'...' strings, <<< here-strings, (( )) arithmetic
+        commands, ${var//a/b} substitution, ${var:0:3} slicing, &> redirection, or echo -e.
+  - flags: An added line prints an error or warning message to standard output instead of standard error.
+    good:
+      - >-
+        Every added error or warning message is redirected with >&2, or the added lines print only
+        normal output such as results, help text the user asked for, or progress.
+    bad:
+      - >-
+        Added code reports a failure, a warning or a usage error with echo or printf and no >&2,
+        for example before an exit 1 or in a branch that handles a missing file or a bad option.
+  - flags: An added line leaves a variable, "$@" or command substitution unquoted where word splitting or globbing can change it.
+    good:
+      - >-
+        Every expansion in an argument position is double-quoted, or sits where the shell does
+        not split it, such as the right side of a plain assignment or the word after case; or an
+        unquoted expansion is meant to split, such as a list of flags, and a comment says so.
+    bad:
+      - >-
+        Added code passes ${var}, $var, $@, $* or $(...) unquoted as a command argument, a test
+        operand or a for-loop list, where a value holding a space, a newline or a * would become
+        several words or match files; paths and "$@" are the usual cases.
+  - flags: An added line creates a temporary file or directory that no trap removes when the script exits.
+    good:
+      - >-
+        Every temporary file or directory the added code creates is removed by a trap on EXIT, or
+        the added lines create none; a file the script is meant to leave behind is not temporary.
+    bad:
+      - >-
+        Added code calls mktemp or writes a scratch file under /tmp, and neither the added lines
+        nor the context set a trap on EXIT that removes it, so an error or an interrupt leaves it
+        behind.

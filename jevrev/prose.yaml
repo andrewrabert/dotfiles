@@ -1,0 +1,12 @@
+description: >-
+  Prose standards for documents. Not calibrated.
+when:
+  - matches: ["*", "!*.lock"]
+error_threshold: 0.75
+rules:
+  - flags: Does the text state a rule as something to avoid, where it could state the desired outcome instead?
+    good:
+      - >-
+        A flags: field of a jev rule set (a YAML file under rules/ with rules: entries), or one
+        of its bad: entries, that describes the violation jev looks for. The schema requires these fields to
+        describe the violation, so wording them as the thing to avoid is the desired outcome.

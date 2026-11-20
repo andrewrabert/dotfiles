@@ -1,0 +1,138 @@
+description: >-
+  apis/aardwolf-mcp standards: the defects review feedback pointed out on aardwolf-mcp pull
+  requests opened 2026-08-04 to 2026-11-04, mostly ones the AI agent opened (#100-#161), generalized
+  into rules a single hunk can decide. Error propagation, correct-by-construction models, app-owned
+  configuration and dependencies, and comments. Applies to Python under src/ of a repo that has src/aardwolf_mcp/, not its tests.
+  Not calibrated.
+when:
+  - exists: ["/src/aardwolf_mcp/"]
+    matches: ["/src/"]
+    language: [python]
+error_threshold: 0.75
+rules:
+  - flags: Added code turns an upstream 401, or a 403 for a missing scope, into an ordinary tool error or generic client error, instead of raising the unauthorized or insufficient-scope exception that makes the server answer 401 or 403.
+    good:
+      - >-
+        if e.code == 401: raise exceptions.UnauthorizedError() from e, or a client-specific subclass of it,
+        and a missing-scope 403 raised as an insufficient-scope exception naming the scopes. 404, 409 and 422
+        mapped to ToolExecutionError messages.
+    bad:
+      - >-
+        A client or tool maps status 401 or a missing-scope 403 to errors.ToolExecutionError('... please
+        re-authenticate'), an entry in a _STATUS_MESSAGES dict, a generic WebContentError(status_code=401) or
+        an isError text result; or a new upstream client's status handling has no 401 branch, so a 401
+        becomes its generic error.
+  - flags: Added client code wraps one request in its own try/except HTTPError to map the error body to typed exceptions, where the client already sends every HTTPError through one shared mapping method.
+    good:
+      - >-
+        The new error.type cases are added inside the shared _raise_for_http_error, for example
+        match error.type: case 'BroadcastDatetimeExpired': raise exceptions.BroadcastDatetimeExpired() from e.
+        A per-call except for an already typed exception, such as except exceptions.NotFound: raise
+        ListNotFound. A new client that adds its first shared mapping.
+    bad:
+      - >-
+        In a client method such as schedule_broadcast or cancel_broadcast in clients/public_api/client.py:
+        try: await self._client.request(...) with except httpclient.HTTPError as e:
+        _raise_for_scheduling_error(e); or a module-level _SCHEDULING_ERRORS dict from error.type to
+        exception class with a helper that raises from it, while the context shows request() or
+        _raise_for_http_error() mapping HTTP errors.
+  - flags: An added upstream client method returns raw bytes, a dict or a dict of models, instead of one pydantic model of the response.
+    good:
+      - >-
+        A named pydantic model, such as models.BatchGetMessagesResponse.model_validate_json(response.body), or
+        -> list[models.NewSubscribersDailyEntry] when the upstream returns an array. Existing shared transport
+        helpers. Scalar returns such as -> str or -> int.
+    bad:
+      - >-
+        A method under clients/ declared or returning -> bytes with response.body for the caller to parse,
+        -> dict, -> dict[str, Any], or -> dict[str, models.OpensEntry] built by a comprehension over the
+        decoded JSON and keyed by date or id. Also a generic response_model: type[T] parameter added to a
+        private fetch helper when the module already has the concrete model, such as
+        BatchGetMessagesResponse.
+  - flags: Added code puts a field on a model under clients/ that the external service does not send, which aardwolf-mcp's tool layer fills in.
+    good:
+      - >-
+        A field that mirrors a real upstream response field. A presentation field on a model in models/,
+        including a subclass of a client model such as
+        class WorkflowWithControlPanelUrl(campaign_models.Workflow): control_panel_url: str.
+    bad:
+      - >-
+        A file under src/aardwolf_mcp/clients/, such as clients/campaign/models.py, gains an attribute outside
+        the service's contract, such as html_url, control_panel_url, widget_data, display_state or a subject
+        resolved from another service, often with a comment such as "not part of the service's payload" or
+        "populated by the tools layer". Example: html_url: str | None = None on campaign.models.Workflow.
+  - flags: Added tool or resource code passes an access token or account identity into an upstream client call, instead of calling a client already authenticated for the request.
+    good:
+      - >-
+        Calls on context clients without credentials, such as await context.public_api.get_lists(params=...).
+        context.account_id read for a purpose that is not a credential. Code under clients/ or session.py that
+        attaches the stored token to the Authorization header, and the pre-auth identity lookup in
+        Sessions.authenticate.
+    bad:
+      - >-
+        In tools/, resources/ or their helpers, code reads session.access_token or passes access_token,
+        account_id or account_uuid to a client method:
+        await client.get_lists(session.access_token, session.account_id, params), or a helper
+        def _fetch_stats(token: str, account_uuid: str, ...). Also a new authenticated-client method that
+        still takes a token or account id argument.
+  - flags: An added tool module defines its own literal for an identifier another module owns, such as a ui://widget/ resource URI, instead of importing it.
+    good:
+      - >-
+        The definition in the owning module, such as resources/widgets.py next to LISTS_WIDGET_URI. An import
+        of the constant and its use in output_template= or resource_uri=.
+    bad:
+      - >-
+        A file under src/aardwolf_mcp/tools/ adds WORKFLOW_STATS_WIDGET_URI = 'ui://widget/workflow-stats.html'
+        or a similar literal naming a resource that aardwolf_mcp.resources.widgets registers.
+  - flags: An added tool module imports a helper from another aardwolf_mcp.tools module, where shared logic belongs in a module that is not a tool, such as aardwolf_mcp.models.
+    good:
+      - >-
+        Imports from aardwolf_mcp.models, clients, mcp, resources or handlers. A tools/__init__.py importing the
+        tool modules so they register.
+    bad:
+      - >-
+        A file under src/aardwolf_mcp/tools/ adds from aardwolf_mcp.tools.<other> import <helper>, or
+        import aardwolf_mcp.tools.<other> to call a serializer, describer or resolver from it, such as
+        serialize_steps or _resolve_message_subjects.
+  - flags: |-
+      Each client under src/aardwolf_mcp/clients/ owns its upstream, the external service or store it calls (an HTTP API, Redis, Kafka, a rate limiter library). Code in this repo, including tools, their results and the MCP dispatch around them, is never an upstream. The client alone reads the upstream's responses and does everything that depends on how the upstream reported a result: parsing, classifying errors, logging the details and counting the outcomes. It hands its caller the outcome in the caller's terms, a domain value or a typed error that says what happened and what the caller can do about it, such as how long to wait.
+      The added lines move part of a client's job out of the client: a handler or tool logs, counts or branches on how an upstream reported a result, or a client hands its caller the upstream's own account of a result for the caller to act on.
+    good:
+      - >-
+        A client counting or logging its own upstream, such as
+        self._increment_counter('upstream.campaign.rate_limited.429') next to the code that reads the
+        response. A handler or tool counting or logging its own work, which is not an upstream:
+        tool.<name>.error or tool.<name>.success counters, tool call events, rpc metrics, a request rejected
+        before any client call. A caller turning a typed client error into its own response, such as a 429
+        with Retry-After from the error's wait time, or fixed text chosen by the error's class such as
+        RATE_LIMIT_TEXT for a RateLimitError. A client field in the caller's terms, such as a wait time, an
+        id or a typed result.
+    bad:
+      - >-
+        In handlers/ or tools/: a counter, metric name, log line or branch built from a field of a client's
+        exception or return value that records the upstream's own account, such as which of the upstream's
+        limits, rules, windows or quotas applied, or its raw status code, error type or response body. In
+        clients/: an exception or return value that gains such a field, with the raise or return copying it
+        from the upstream response, for example raise SomeError(response.retry_after, response.matched_rules)
+        where matched_rules names the upstream's rules.
+  - flags: Added tool code reads or changes an upstream record by a caller-supplied id, from a service whose URL is not scoped to the account, without checking the record belongs to the authenticated account.
+    good:
+      - >-
+        Public API calls whose path includes the account id, such as accounts/{id}/lists/..., which the
+        upstream scopes. Records checked against the account by a model invariant on every construction path.
+        Ids taken from a listing already scoped to the account.
+    bad:
+      - >-
+        context.web_content.get_page(input.page_id) or update_page(input.page_id, ...) used without comparing
+        the record's account to context.account_uuid or context.account_id; or an upstream model for such a
+        record that has no account field.
+  - flags: Added code publishes an analytics event for a request naming something the server does not know, such as an unknown tool, method or resource, so caller-invented names get stored.
+    good:
+      - >-
+        Events for registered tools, including failed calls. A statsd counter with a fixed name such as
+        tool._unknown.error. Logging the name without publishing an event.
+    bad:
+      - >-
+        In a branch taken because a lookup by a caller-supplied name failed, such as except KeyError: after
+        tool_registry.get(tool_name) or a method-not-found branch, code calls self._publish_tool_call_event(...)
+        or a Kafka publisher, or puts the raw or truncated name in an event field.

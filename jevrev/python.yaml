@@ -1,0 +1,595 @@
+description: >-
+  apis/aardwolf-mcp standards: the defects review feedback pointed out on aardwolf-mcp pull
+  requests opened 2026-08-04 to 2026-11-04, mostly ones the AI agent opened (#100-#161), generalized
+  into rules a single hunk can decide. Error propagation, correct-by-construction models, app-owned
+  configuration and dependencies, and comments. Applies to Python under src/ of a repo that has src/aardwolf_mcp/, not its tests.
+  Not calibrated.
+when:
+  - matches: ["/src/**", "!/tests/**", "!/acceptance/**"]
+    exists: ["/src/aardwolf_mcp/"]
+    language: [python]
+error_threshold: 0.75
+rules:
+  - flags: Added Tornado handler code writes an HTTP error response in place and returns, instead of raising an error that the handler's exception hook renders.
+    good:
+      - >-
+        The added failure path raises, for example raise errors.OAuthError('invalid_request', desc),
+        raise errors.ClientMetadataOAuthError(e) from e, a RegistrationThrottledOAuthError(wait_seconds)
+        or tornado.web.HTTPError, and _handle_request_exception or write_error renders it. The edge hook
+        itself calling set_status, write and finish. A success return such as self.redirect(...) or
+        self.finish(body). A JSON-RPC error object returned as a value from a dispatch method, where the
+        protocol sends errors in a normal response body. Error returns on unchanged context lines.
+    bad:
+      - >-
+        An added line in a request handler method (get, post and so on) or one of its helpers ends a
+        failure path by writing the error itself: return self._error_response('invalid_request', ...),
+        return self._error_response('slow_down', ..., 429) after self.set_header('Retry-After', ...),
+        self.set_status(400); self.write(...); self.finish(); return, or return self.send_error(400).
+        This includes an added line that turns an existing raise into a returned error response, and an
+        added error return in a method that raises errors.OAuthError on its other paths.
+  - flags: An added exception hook renders an error by calling a response helper that handler code can still call directly, so handler code can skip the raise.
+    good:
+      - >-
+        The hook writes the response itself with set_status, set_header, write and finish, and the old
+        helper is removed. A hook that calls super()._handle_request_exception(e) for exception types it
+        does not handle. A module-level function that only builds the response body dict and writes
+        nothing.
+    bad:
+      - >-
+        An added _handle_request_exception or write_error override renders a raised error by calling a
+        separate method that stays on the class, for example
+        if isinstance(e, errors.OAuthError): self._error_response(e.error, e.description, e.status),
+        while def _error_response(self, error, description=None, status=400) is still defined on the
+        handler.
+  - flags: An added helper reports a failure by returning an error object or sentinel next to or in place of its result, so every caller must check it, instead of raising.
+    good:
+      - >-
+        The helper raises, for example raise errors.ToolExecutionError(...) or raise campaign.CampaignError,
+        and the exception reaches the tool edge. The tool function itself returning its final
+        types.CallToolResult(isError=True) to the MCP client. A lookup whose name and signature make absence
+        a normal answer, such as find_tag(...) -> Tag | None or a cache miss.
+    bad:
+      - >-
+        An added return in an except block or failure branch returns a pair or union that holds an error:
+        return None, _error_result('Ruleset validation failed'), return [], result where result is a
+        types.CallToolResult, return {'error': str(e)} from a helper whose normal return is a model, or a
+        signature such as -> tuple[Workflow | None, types.CallToolResult | None] or
+        -> Workflow | types.CallToolResult. A caller that skips the check passes the failure on silently.
+  - flags: An added guard or helper reports a denial or caught exception as a bool or an allowed flag the caller must check, so a caller that skips the check lets the request through.
+    good:
+      - >-
+        The guard returns None and raises an exception that carries the details, such as
+        RegistrationThrottledError(wait_seconds), when it denies. The try/except is inline where the work is
+        done. A predicate whose False is a normal answer and not a caught exception, such as
+        _is_loopback(host) -> bool or _is_move_subscriber_already_exists_error(error) -> bool.
+    bad:
+      - >-
+        An added function that enforces a limit, permission or policy returns bool, or a model such as
+        ThrottleResult(allowed=..., wait_seconds=...), and callers write if not result.allowed: to block.
+        Or an added private helper whose body is mostly a try around one call, whose except blocks write or
+        record the error and return False or None, and whose caller does
+        if not await self._send_authorization_metadata(...): return.
+  - flags: An added except block saves the failure in a local variable that later code checks, instead of raising or returning where the failure is caught.
+    good:
+      - >-
+        Each except block raises, re-raises or returns at once. An except that assigns the normal result of
+        the operation, such as except KeyError: value = default. A retry loop that keeps last_exc and
+        re-raises it after the last attempt. Validation messages collected into a list that is raised
+        together.
+    bad:
+      - >-
+        handoff_error = None before a try, handoff_error = ('invalid_request', '...') in the except, then
+        if handoff_error: return self._error_response(*handoff_error) after it; or ok = False, failed = True
+        or error = e set in an except and tested later. This includes doing it to keep the count of returns
+        low for a linter rule such as SonarQube S1142.
+  - flags: Added code catches a connection or availability error from a backing service around a guard such as a throttle, auth or quota check, and lets the request go on as if the check passed.
+    good:
+      - >-
+        The guard call has no except, so its errors propagate. An except that re-raises or raises a
+        translated error such as OAuthError or ToolExecutionError. An except around a side effect the
+        request result does not depend on, such as a statsd increment or a telemetry publish.
+    bad:
+      - >-
+        An added try around a guard call, such as
+        await self.application.registration_throttle.evaluate(...), with an except for
+        redis.exceptions.ConnectionError, redis.exceptions.TimeoutError,
+        throttler.exceptions.NotConnectedError, httpx.ConnectError or Exception, whose branch logs, passes,
+        sets allowed = True or falls through to the protected action. A "fail open" comment or one saying an
+        outage must not block the action is a strong sign.
+  - flags: Added code catches an exception from parsing upstream data or from a pure computation and returns a substitute value instead of raising, so bad data becomes plausible-looking output.
+    good:
+      - >-
+        The except re-raises, raises a domain error such as raise errors.ToolExecutionError(...) from e, or
+        re-raises the original HTTPError when an error body does not match the APIError model. Catching a
+        ValidationError of tool-call input to raise an invalid-params error. An except around I/O that
+        handles a specific status such as a 404. A catch a nearby comment justifies with a concrete known
+        case.
+    bad:
+      - >-
+        An added except pydantic.ValidationError, alone or in a tuple such as
+        except (web_content.WebContentError, pydantic.ValidationError), around a client call or
+        Model.model_validate(...) of an upstream response, whose branch logs and returns an empty list, None,
+        an entry built with None fields, "no warnings", or continues the loop. Or an added except ValueError,
+        KeyError, TypeError or Exception around a computation on data Aardwolf's own services validated, such
+        as except ValueError, zoneinfo.ZoneInfoNotFoundError: return timezone, or except ValueError:
+        return [], [] around int() parsing of RRULE values, with nothing in the hunk showing the failure can
+        happen.
+  - flags: Added code reads a fixed internal mapping with .get(key, default), so an unknown key passes through silently where a mismatch should raise.
+    good:
+      - >-
+        A plain subscript such as _STATE_DISPLAY[raw_state], which raises KeyError on a value the table does
+        not know. .get() on an open dict where absence is normal: HTTP headers, os.environ, optional JSON
+        fields, query parameters, a cache or registry. .get() followed by if value is None: raise. A
+        membership filter such as [d for d in days if d in _RRULE_DAY_MAP].
+    bad:
+      - >-
+        The mapping is a module-level dict the code defines over a closed set of values such as states,
+        action types or day codes, and the lookup has a fallback: _STATE_DISPLAY.get(raw_state, raw_state),
+        _RRULE_DAY_MAP.get(code, code), _ACTION_LABELS.get(action.type, 'Unknown') or
+        CONTENT_TYPES.get(name) or 'html'.
+  - flags: Added code reports every validation error from building a model with several fallible fields as a failure of one named field.
+    good:
+      - >-
+        The except checks e.errors() and uses the field message only for the expected loc, with a generic
+        response otherwise. A message that names no field. A try whose only fallible input is the field it
+        names. Passing e to an exception class that sorts the error by loc itself, such as
+        raise errors.ClientMetadataOAuthError(e) from e.
+    bad:
+      - >-
+        An added except pydantic.ValidationError or except ValueError gives a message or code naming one
+        field, such as 'redirect_uri must use HTTPS or a loopback HTTP host' or 'invalid_redirect_uri', but
+        the try builds models with more than one field that can fail, for example
+        AuthorizationMetadata(authorization_parameters=..., client_metadata=ClientMetadata(client_name=..., redirect_uri=...)),
+        and the handler never checks e.errors() for that field's loc.
+  - flags: Added handler code reads a pydantic.ValidationError in place to choose an error code and message, instead of passing it to a reusable exception class.
+    good:
+      - >-
+        The except hands the error to an exception class, such as raise errors.ClientMetadataOAuthError(e)
+        from e or errors.ClientRegistrationOAuthError(e); the loc inspection inside that class's __init__ in
+        errors.py is the intended place. An except that maps every validation error to one fixed response
+        without reading e.errors().
+    bad:
+      - >-
+        An added except pydantic.ValidationError as e: block in a handler reads e.errors() and the loc
+        values inline to pick the error, description or status, for example
+        if any(err['loc'][:1] == ('redirect_uris',) for err in e.errors()): ... followed by an
+        invalid_request error, whether it then returns an error response or raises errors.OAuthError(...).
+  - flags: Added tool code maps exception classes to user-facing messages through a tuple, dict or match helper, instead of each exception class defining its own message under a shared base class caught once.
+    good:
+      - >-
+        class BroadcastScheduleError(AardwolfAPIError) with subclasses whose __init__ passes its own message to
+        super().__init__, and the tool doing except BroadcastScheduleError as e:
+        raise errors.ToolExecutionError(str(e)) from e. A single except with one inline message.
+    bad:
+      - >-
+        A _SCHEDULING_ERRORS = (ExcA, ExcB, ...) tuple used in except _SCHEDULING_ERRORS as e:, with a helper
+        such as _raise_scheduling_tool_error(e, broadcast_id) that does match error: case ExcA():
+        message = '...' and a case _: fallback; or a dict from exception type to message in tools/.
+  - flags: Added code uses the text of an upstream error response as the user-facing message of a tool error.
+    good:
+      - >-
+        A message written in this repo that says what went wrong and what to do, such as "The requested send
+        time has already passed. Choose a time in the future and try again.", including str(e) when e's class
+        defines that message. Upstream text that only goes to a log call, or to a structured warnings field
+        documented as upstream validation output.
+    bad:
+      - >-
+        The message of errors.ToolExecutionError, an invalid-params error or a typed exception is built from
+        upstream fields: raise exceptions.BroadcastDatetimeExpired(error.message),
+        ToolExecutionError(problem.detail), ToolExecutionError(e.response.body.decode()), or an f-string that
+        puts error.message, detail or faults into the text the MCP client gets.
+
+  - flags: An added pydantic field is declared optional with T | None = None, or a list holds Model | None, when the value is always present or a missing value must be an error.
+    good:
+      - >-
+        A required field. A field absent by design: a pagination cursor, a field returned only when the
+        request selects it (body_html when content_types can exclude html), a field the upstream OpenAPI
+        schema marks nullable, or a PATCH model field where None means leave unchanged.
+    bad:
+      - >-
+        A new field that the code always sets or that identifies the record is | None = None, such as
+        list_id: int | None = None or subject: str | None = None on a tool response, or
+        aardwolf_www_url: str | None = None filled from a required setting; messages:
+        list[MessageContent | None] where a null entry should fail the call; or a model whose every field is
+        | None = None.
+  - flags: The change makes a required field of a model that parses an upstream response optional, so records that lack a value they need to be valid now pass.
+    good:
+      - >-
+        A new field added as optional because the upstream API documents it as optional or omits it. Optional
+        fields on MCP tool input or tool response models. A field that stays required with a stricter type.
+        Making a field required.
+    bad:
+      - >-
+        A field on a model under clients/, such as Broadcast in clients/public_api/models.py, goes from
+        required to optional: "-    uuid: str" becomes "+    uuid: str | None = None", often with a comment
+        that legacy or some upstream records return null. Also an identifier, foreign key or status field
+        given | None or = None only so bad upstream data validates.
+  - flags: An added tool input field is typed X | None = None only so None can mean "not passed", adding an explicit-null input that the tool does not accept, instead of a real default or model_fields_set.
+    good:
+      - >-
+        A field with a real default, such as apply: list[str] = [] or discard: bool = False. A required field.
+        Code that reads self.model_fields_set to tell whether a field was passed. A field where null has its
+        own meaning, such as clearing a value upstream.
+    bad:
+      - >-
+        Input fields such as name: str | None = None or apply: list[str] | None = None where null is not a
+        valid input, with code that folds None back into "absent": a helper such as _present(model) returning
+        {k for k, v in model if v is not None}, or if input.status is not None: deciding whether to change a
+        field.
+  - flags: An added pydantic field holds an identifier with a known format as bare str or list[str], with no constrained type or pattern.
+    good:
+      - >-
+        Id fields typed with a constrained alias or pattern, such as list[MessageId] or
+        pydantic.Field(pattern=WORKFLOW_ID_PATTERN). Free text such as name, subject or description. Ids whose
+        upstream format is documented as any string.
+    bad:
+      - >-
+        A new field whose name or description shows it holds ids of a known format, such as processed:
+        list[str] holding 24-hex Message-Editor ids, message_id: str or workflow_id: str, with no
+        pydantic.Field(pattern=...) or Annotated alias such as MessageId.
+  - flags: Added code writes members of a fixed vocabulary as bare strings or string constants, instead of a StrEnum or a single typing.Literal alias.
+    good:
+      - >-
+        Members of an enum such as CodeChallengeMethod.S256, MessageField.SUBJECT or
+        list[MessageContentType]. The StrEnum class body defining them. A string allowlist defined once as a
+        typing.Literal alias, such as ContentTypeLiteral = typing.Literal['html', 'text'], used directly as a
+        field type, with its runtime values derived by typing.get_args(ContentTypeLiteral).
+        A comparison such as if content_type == 'html': where content_type is typed with that alias,
+        since the type checker checks the string. A pydantic discriminator field typed with an enum
+        member, such as kind: typing.Literal[MessageKind.HTML] = MessageKind.HTML.
+        JSON body keys,
+        header names, log or error text, Field descriptions, and tests comparing against the wire string. A
+        single constant not part of a set, such as MAX_CONCURRENT_BROADCAST_FETCHES = 10.
+    bad:
+      - >-
+        A value from a fixed set the server compares against, sends or advertises written as a string at a
+        use site where the value is not typed with a Literal alias:
+        {'fields': 'subject'} or 'list_id,subject,body_text,body_html', 'S256' as a default,
+        comparison or metadata entry, a field that accepts one value written twice as
+        typing.Literal['S256'] = 'S256' instead of a single-member StrEnum
+        (typed typing.Literal[Enum.X] = Enum.X when the field is a pydantic discriminator),
+        or the same
+        typing.Literal['html', 'text'] spelled out again at several sites instead of one alias. Or two or more added
+        module constants naming members of one set, such as _HTML = 'html', _TEXT = 'text', _AMP = 'amp', or
+        a constant that only wraps a token under a name that hides it, such as
+        DEFAULT_CODE_CHALLENGE_METHOD = 'S256', including constants added to satisfy a duplicate-string lint
+        rule.
+  - flags: Added code states the supported values of an enum by naming some of its members, instead of deriving them from the enum.
+    good:
+      - >-
+        list(CodeChallengeMethod) or ', '.join(CodeChallengeMethod). One member as a field default. A caller
+        choosing specific members as a real choice, such as get_messages([MessageField.SUBJECT], ids).
+    bad:
+      - >-
+        A supported or allowed list, error message or metadata field built from named members of an enum that
+        is itself the supported set: code_challenge_methods_supported=[CodeChallengeMethod.S256],
+        f'code_challenge_method must be {CodeChallengeMethod.S256}', or method = CodeChallengeMethod.S256 in
+        an except ValueError: to describe what is accepted.
+  - flags: Added tool or handler code checks a value by hand against a rule the receiving model's type already enforces, or a rule the upstream API enforces on the same request.
+    good:
+      - >-
+        Constraints declared on the model itself: pattern=, ge=, min_length=, a model_validator. Checks whose
+        result the code uses for its own logic, such as skipping a no-op call. Presence checks that must run
+        before a lookup or redirect, such as if not client_id. Checks of rules the upstream does not enforce,
+        such as local pagination caps.
+    bad:
+      - >-
+        if scheduled_for <= datetime.datetime.now(datetime.UTC): raise InvalidParamsError('... must be in the
+        future') before calling schedule_broadcast, or a docstring line added only to describe that check;
+        if scheduled_for.tzinfo is None: raise ... when the input pattern requires an offset;
+        try: CodeChallengeMethod(value) except ValueError: ... before passing the same raw value to a model
+        whose field is CodeChallengeMethod; or self.get_argument(..., default) repeating the model field's
+        default.
+  - flags: Added code converts a str field of a pydantic model after the model is built, instead of the field having a type that converts it during validation.
+    good:
+      - >-
+        A field typed datetime.datetime, AwareDatetime or a custom type whose validator parses the value, and
+        a method on that type that only computes from the parsed value, such as to_datetime(). Formatting a
+        typed value for output. Parsing a value that comes from no model.
+    bad:
+      - >-
+        Tool logic or a model method calls datetime.datetime.fromisoformat, isodate.parse_duration, int or
+        uuid.UUID on input.<field> or on an upstream model's str field, often with except ValueError mapped to
+        an invalid-params error or a fix for naive datetimes. Examples: resolve_scheduled_for() parsing
+        self.scheduled_for: str, so a pattern-valid 2024-13-45T10:00:00+00:00 fails inside the tool; a
+        _modified_timestamp helper parsing a Workflow's modified_at: str.
+  - flags: Added code checks the type or allowed values of an upstream response value after it is parsed, instead of the upstream pydantic model making it correct by construction.
+    good:
+      - >-
+        The same constraints on the model: typing.Literal['page'] fields, strict types, field validators, or a
+        subclass such as UniversalPageRecord. match or if on an already typed enum or Literal to pick
+        behavior. Checks on tool input. Telling apart two modeled upstream shapes with isinstance.
+    bad:
+      - >-
+        isinstance checks, try/except TypeError, ValueError or KeyError fallbacks, or equality checks on fields
+        of an upstream response or client model: a _total_size_and_has_more helper checking
+        isinstance(total_size, int) with a fallback, or _require_universal_page(record) testing
+        record.type != 'page' or record.builder != 'universal' after ContentRecord is built.
+  - flags: An added pydantic validator enforces an invariant only when a validation context is passed, so a model built without that context skips it.
+    good:
+      - >-
+        Validators that check only the model's own data. Validators that require the context and raise when
+        it is absent. Context used only for something that does not decide validity, such as a display
+        format.
+    bad:
+      - >-
+        A field_validator or model_validator reads info.context and returns early when the context or key is
+        missing, for example if not info.context or 'account_uuid' not in info.context: return self, before
+        checking self.account == info.context['account_uuid'].
+  - flags: Added client code sends an upstream JSON request body built as an ad-hoc dict, instead of from a pydantic request model.
+    good:
+      - >-
+        A body from a model, such as ValidatePageRequest(html=html).model_dump_json(). Query parameter and
+        header dicts. An empty body for an endpoint that takes no parameters.
+    bad:
+      - >-
+        A client method builds the payload as a dict literal or comprehension and sends it, such as
+        body=json.dumps({'html': html}) in validate_page, while sibling methods use request models such as
+        CreatePageRequest with request.model_dump_json(exclude_none=True).
+  - flags: Added code writes its own version of a validation rule or field type that another service's model owns, instead of reusing that type or copying it verbatim.
+    good:
+      - >-
+        The code imports and uses the owning type, such as list[oauth2login_models.RedirectURL], or copies the
+        field together with its validator. A validator for a rule only this repo owns. A plain str field in a
+        model that claims to mirror nothing.
+    bad:
+      - >-
+        An added function, validator or field rebuilds a rule the code or its comments say comes from
+        elsewhere: a new _has_disallowed_redirect_uri_scheme(uri) with its own
+        _LOOPBACK_HOSTS = frozenset({'localhost', '127.0.0.1', '[::1]'}) and a docstring saying it mirrors
+        oauth2login's validator; or redirect_uri: str in a module that says it mirrors oauth2login's
+        models.py, where the source types it RedirectURL.
+  - flags: The change edits a file that is vendored or generated and marked do-not-modify.
+    good:
+      - >-
+        A wrapper module that subclasses or overrides vendored types, such as _PatchedKwargs24(ruleset.Kwargs24)
+        in clients/campaign/models.py. A wholesale re-copy that also updates the header's source commit. A
+        hand-written file that imports from vendor/.
+    bad:
+      - >-
+        The file's path or content shows it is a verbatim upstream copy or generated output: a path under
+        vendor/, such as src/aardwolf_mcp/vendor/workflows/models/ruleset.py, a "VENDORED FILE — DO NOT MODIFY"
+        or "generated by datamodel-codegen" header, or generated-style classes such as Kwargs24 with
+        constr(pattern=...) fields; and added lines change its code, such as making meapi_id optional.
+  - flags: An added method is named with an as_ prefix but computes a new value instead of returning a view of the same value.
+    good:
+      - >-
+        to_<thing>() methods that compute. as_<thing>() that returns the stored value or a cheap typed view of
+        it, such as return self.root. Properties.
+    bad:
+      - >-
+        def as_<thing>(self) whose body computes something, such as
+        return datetime.datetime.now(datetime.UTC) + self._value, does a conversion that builds a new object,
+        or calls the network.
+
+  - flags: Added code builds a URL from a hardcoded Aardwolf host instead of reading the host from configuration.
+    good:
+      - >-
+        The host comes from a setting or context value, such as context.aardwolf_www_url / 'users' / 'campaigns'
+        or self.settings['aardwolf_api_url']. The production default inside the if environment == 'production':
+        branch of app.py configuration. Docstrings, comments and Field description examples.
+    bad:
+      - >-
+        A scheme-and-host literal for an Aardwolf service, such as 'https://www.aardwolf.example' or
+        'https://api.aardwolf.example', used to build a URL returned or sent at runtime, for example
+        edit_url = f'https://www.aardwolf.example/users/campaigns/edit/{workflow_id}/message/{meapi_id}'.
+  - flags: Added code stores or passes a URL as a plain str instead of keeping it a yarl.URL until the final string is needed.
+    good:
+      - >-
+        'aardwolf_www_url': yarl.URL(aardwolf_www_url) or a field typed yarl.URL. str(url) at the final consumer,
+        such as httpclient.HTTPRequest, or str(base / 'path') assigned to a response model field typed str.
+    bad:
+      - >-
+        aardwolf_www_url=str(self.settings['aardwolf_www_url']) when building a context or settings entry; a new
+        context, settings or dataclass field for a base URL annotated str; a settings entry set without
+        yarl.URL(...); or a path built by concatenating or f-string formatting onto a base URL string, such as
+        f'{base_url}/users/{id}'.
+  - flags: An added environment variable read in a configuration block does not follow the pattern its sibling reads in the same block use.
+    good:
+      - >-
+        The added read repeats the sibling pattern exactly. No sibling pattern visible in the hunk. Unrelated
+        settings that already have their own default pattern.
+    bad:
+      - >-
+        The context shows siblings read one way and the added read differs: in a non-production else: branch
+        where AARDWOLF_AUTH_URL and AARDWOLF_API_URL are read with os.environ.get('X') and then
+        if not x: raise RuntimeError(...), the added AARDWOLF_WWW_URL read has a fallback default or no
+        RuntimeError; or the new variable is read outside the if environment == 'production': ... else: block
+        that holds its siblings, often with a comment explaining why.
+  - flags: Added code fixes an operational tuning value such as a rate limit, period, timeout, pool size or retry count as a constant or literal in a client or handler, instead of a setting read in app.py and passed to the client.
+    good:
+      - >-
+        Values read in app.py from environment variables with defaults and passed to the client's constructor.
+        Protocol or format constants such as JSON-RPC error codes, content types, patterns, metric names or
+        Redis key prefixes.
+    bad:
+      - >-
+        LIMITS = {'minute': throttler.RateLimit(key_format='{minute}', threshold=60, period=60), ...} in
+        clients/redis/throttle.py, or timeout=30 hard-coded in a new client call. A comment justifying the
+        number with production data is a strong sign.
+  - flags: Added code holds a runtime dependency in a mutable module-level variable, or reads one from it, instead of getting it from the Application or the handler context.
+    good:
+      - >-
+        Module-level constants and immutable values: patterns, loggers, enum and model classes. Dependencies
+        read from context.public_api, self.application.kafka or a constructor argument.
+    bad:
+      - >-
+        A module-level client: Client | None = None, producer = None, guides_data = {} or a set assigned later;
+        app.py assigning into a module, such as public_api.client = self.public_api; global x in a function; a
+        tool body reading analytics_view.client or kafka.producer.
+  - flags: Added code makes an app-owned dependency optional or guards it against None, although the application always binds it at startup.
+    good:
+      - >-
+        None checks on values that can be absent: an optional request argument, a nullable upstream field, an
+        optional env var such as MCP_UI_RESOURCES_PATH, or a batch entry the API documents as nullable.
+    bad:
+      - >-
+        self.public_api = None or self.kafka = None placeholders in Application.configure(); attributes or
+        context fields typed Client | None for clients the application always constructs; a tool doing
+        if context.message_editor is None: return a "not configured" or "not available" error; fallbacks such
+        as guides or {} for packaged content loaded at boot.
+  - flags: Added code works out the caller's IP by parsing forwarding headers itself instead of using Tornado's self.request.remote_ip.
+    good:
+      - >-
+        self.request.remote_ip used directly. Headers read for other reasons, such as Authorization,
+        Mcp-Session-Id or Content-Type.
+    bad:
+      - >-
+        Code reads X-Forwarded-For, X-Real-IP or Forwarded from self.request.headers, splits it on ',' and
+        picks an entry, or falls back between a header and self.request.remote_ip, often in a helper such as
+        def _client_ip(self) -> str, for a throttle key, log field or audit value.
+  - flags: Added code implements request rate limiting itself instead of using Aardwolf's throttler library.
+    good:
+      - >-
+        Imports and calls of the throttler library, such as throttler.RateLimit policies. asyncio.Semaphore or
+        MAX_CONCURRENT_* concurrency caps. Retry or backoff after an upstream 429. Redis incr for metrics.
+    bad:
+      - >-
+        Code counts requests per key over a time window to allow or reject them: count = await
+        redis_client.incr(key) then expire on the first hit, a RegistrationRateLimiter with is_allowed(ip), an
+        in-memory dict of timestamps compared with time.monotonic(), or token-bucket arithmetic.
+  - flags: Added code parses a standardized format by hand with a regex or string splitting, where a library parser exists.
+    good:
+      - >-
+        Calls to isodate.parse_duration, datetime.datetime.fromisoformat, dateutil.rrule.rrulestr or yarl.URL.
+        A regex validating an Aardwolf identifier such as ^[0-9a-fA-F]{24}$. Output formatting with strftime.
+    bad:
+      - >-
+        _DURATION_RE = re.compile(r'^P(?:(\d+)D)?(?:T(?:(\d+)H)?...') with manual group math for ISO 8601
+        durations instead of isodate.parse_duration; rrule.removeprefix('RRULE:').split(';') and partition('=')
+        to read BYDAY or BYHOUR instead of dateutil.rrule.rrulestr; manual slicing of ISO datetimes instead of
+        datetime.datetime.fromisoformat.
+
+  - flags: One added tool call makes two separate mutating upstream calls, so a failure of the second leaves the first change applied while the tool reports an error.
+    good:
+      - >-
+        One write, or reads followed by one write. Several changes the upstream applies in one request. A
+        create-then-configure sequence that deletes the created resource when a later step fails.
+    bad:
+      - >-
+        Inside one @registry.tool function, a write followed by another write with no rollback, such as
+        if input.segment_id is not None: await context.public_api.update_broadcast(...) followed by
+        await context.public_api.schedule_broadcast(...), usually from a new optional input that adds a side
+        change another tool already makes.
+  - flags: Added code adds an early return for empty input whose only purpose is to skip work that is harmless for empty input.
+    good:
+      - >-
+        Guards whose removal changes behavior or raises: an upstream API that rejects an empty list, len()
+        division, x[0], or required-argument checks that produce an error response.
+    bad:
+      - >-
+        if not meapi_ids: return {}, if not ids: return [] or a similar guard at the top of a function whose
+        following batch request, loop or comprehension also works for the empty case.
+
+  - flags: An added comment or docstring sentence only says again what the nearby code or test assertions already show.
+    good:
+      - >-
+        A comment giving a fact the code cannot show: why it is there, a limit an outside system sets, or a
+        non-obvious upstream behavior such as "the list endpoint does not return rulesets". A function,
+        method, class or module docstring that summarizes what the thing does or is, even when its code
+        shows the same, such as "Fetch a subscriber from a list." on fetch_subscriber, and its Args or
+        Raises sections. Tool docstrings that describe the tool to MCP clients.
+    bad:
+      - >-
+        # Initialize Web-Content client for landing page tools. above web_content.Client(...);
+        # WEB_CONTENT_URL defaults to aardwolf_api_url above os.environ.get('WEB_CONTENT_URL', aardwolf_api_url);
+        "Reject cleanly rather than let the pydantic.ValidationError surface as an uncaught 500" above a
+        try/except that raises a 400; "# Load registered client" above
+        registered_client = await store.get_client(client_id). A docstring that narrates the body step by
+        step, such as "Validate the body, then load the client, then return 400 if missing.", or a test
+        docstring that repeats the test's assertions, such as "A missing client returns 400.".
+  - flags: An added docstring describes who builds, calls or uses the thing, or details callers own such as TTL and lifecycle wiring, instead of what the thing is.
+    good:
+      - >-
+        A docstring stating what the object is, holds or returns, its key pattern and value type such as
+        "Pattern: mcp:dcr:throttle:{ip}", its invariants or the errors it raises. A comment beside the code
+        that sets a TTL.
+    bad:
+      - >-
+        A Redis key model docstring with "Used by: RegisterHandler" or "TTL: 3600 seconds, set by the
+        throttle"; a module docstring saying "app.py constructs one RegistrationThrottle, connects it in
+        on_start() ... RegisterHandler calls evaluate()".
+  - flags: An added comment, docstring or string refers to a ticket id or a spec document section instead of explaining the code itself.
+    good:
+      - >-
+        References to stable external standards or upstream APIs a reader can look up, such as RFC 7591, an
+        upstream OpenAPI schema name or a public documentation URL. Comments that give the reason in their own
+        words.
+    bad:
+      - >-
+        A Jira key such as CCPANEL-14507, ASE-12742 or INT-7246, or phrases such as "per the spec",
+        "spec §6.3", "# spec: nullable" or "see ticket", in comments, docstrings, validator docstrings or
+        user-facing text.
+  - flags: An added comment, docstring or tool or field description says what something is not, lacks or avoids, instead of stating what it is or the goal it reaches.
+    good:
+      - >-
+        Text stating the value, its allowed values and its default, such as 'Types of content to retrieve. Can
+        include "html" and/or "text". Default: both.' Warnings about a real external constraint. Negation that
+        is the rule itself, such as "401 is not retried because the token is invalid". Raises sections.
+    bad:
+      - >-
+        Field(description='... Workflow messages have no AMP body.'), 'Default: metadata only, no body
+        content', 'not sourced from click analytics, unlike get_workflow_message_stats', or a comment such as
+        "so a retry doesn't leave behind a duplicate draft" where the positive goal ("a failed create leaves no
+        page, so a retry creates the only copy") is the real reason. Mentioning a feature that does not exist
+        only to say it is absent.
+  - flags: An added comment justifying a noqa or other lint suppression points to other code for its reason instead of stating the reason itself.
+    good:
+      - >-
+        A justification a reader can check at that spot, such as "tool description must be one line for the
+        MCP listing". A noqa without a comment. A reference given as extra context next to a reason that
+        stands on its own.
+    bad:
+      - >-
+        A comment next to # noqa, # type: ignore or # pragma: no cover whose reason is "see X", "same as X",
+        "like subscribers.search_subscribers" or "matches the other tools", such as "keeps the tool description
+        on 1 line -- see subscribers.search_subscribers."
+  - flags: An added helper in the authentication or authorization path has a name that reads as an auth decision, such as reject, deny, revoke, authorize or verify, while it only builds or sends a response.
+    good:
+      - >-
+        The response logic inline in the existing error-rendering method. Helpers with response-shaped names
+        such as _write_401. Functions with decision names that do make the decision, such as validating a token
+        or checking a scope.
+    bad:
+      - >-
+        A new def _reject_token(...), _deny_request or _authorize_* beside auth error handling whose body only
+        sets status and headers, writes an error or ends a session after the decision was made elsewhere.
+  - flags: An added import brings in a function, class or other name from a module instead of the module itself.
+    good:
+      - >-
+        Every added import imports a module, such as import pathlib, import yarl or import
+        os.path, and the code uses names through it, such as pathlib.Path; "from __future__
+        import" and "from package import submodule" where the name is a module are allowed.
+    bad:
+      - >-
+        An added line has the form "from module import name", for example from pathlib import
+        Path or from yarl import URL, so the code uses Path or URL without the module prefix.
+  - flags: An added import sits inside a function or method instead of at the top of the file.
+    good:
+      - >-
+        Every added import is at module level, or it is a lazy import of textual inside the
+        function that launches a TUI, so the script's other subcommands do not load it.
+    bad:
+      - >-
+        An added import or from-import statement is indented inside a def, a method, or a branch
+        of one, where it could have been at the top of the module.
+  - flags: An added line runs a subprocess with the subprocess or os module instead of asyncio.subprocess.
+    good:
+      - >-
+        Every added subprocess is started with asyncio.create_subprocess_exec or
+        asyncio.create_subprocess_shell, or the added code starts no subprocess.
+    bad:
+      - >-
+        Added code calls subprocess.run, subprocess.Popen, subprocess.check_output,
+        subprocess.call, os.system or os.popen to run another program.
+  - flags: Added code branches on one value through an if/elif chain where a match statement would fit.
+    good:
+      - >-
+        Added multi-branch conditionals use match, or each branch tests a different condition
+        that match could not express as a pattern, or the added code has fewer than three
+        branches.
+    bad:
+      - >-
+        Added code has an if with two or more elif branches that each compare the same variable
+        or expression to a different literal, string, constant or type, such as if command ==
+        "scan": ... elif command == "list": ...

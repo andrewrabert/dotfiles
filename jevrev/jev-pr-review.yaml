@@ -1,0 +1,29 @@
+when:
+  - exists: ["/src/jev_pr_review/"]
+    language: [python]
+error_threshold: 0.35
+rules:
+  - flags: A report or PR comment body is built by string concatenation, joins or f-strings instead of being rendered from its own single minijinja template.
+    good:
+      - All reports and PR comments each have a single minijinja template defined.
+    bad:
+      - Reports or PR comment bodies are manually built using string concatenation or f-strings
+  - flags: A minijinja template is rendered with context that is not a pydantic model.
+    good:
+      - Minijinja templates receive only pydantic models as their inputs.
+    bad:
+      - templates receive context that is not some sort of Pydantic model
+  - flags: A minijinja template or a snippet reused across templates is defined outside the dedicated templates module, or that module exposes in __all__ something other than the full templates.
+    good:
+      - Minijinja templates and their reused snippets reside in a dedicated module with only the full templates exposed in __all__
+      - a global constant is named with a leading underscore and contains a snippet reused across multiple templates
+      - the template module exposes only templates that are used to render a complete edge-facing result
+    bad:
+      - the template module exposes templates that are used external to the module as intermediate string results
+      - a minijinja template or a snippet reused across templates is defined in a module other than the templates module
+  - flags: The templates module exposes something other than one template string per kind of template.
+    good:
+      - Every public name of the templates module is a string holding the full template of one kind of report or comment.
+    bad:
+      - The templates module exposes a function, class, enum or minijinja Environment, such as a render helper.
+      - A template the templates module exposes is read from an external file instead of being a string literal in the module.

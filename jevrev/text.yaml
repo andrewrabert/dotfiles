@@ -1,0 +1,42 @@
+description: >-
+  Text standards for any file: comments, hand-written error text and prose rules.
+  comment-restates-code and invented-error-context are standards.yaml's rules without "Rust";
+  negative_framing is prose.yaml's rule. Not calibrated.
+when:
+  - matches: ["*", "!*.lock"]
+error_threshold: 0.75
+rules:
+  - flags: An added comment only repeats, defends or narrates what the code beside it already shows.
+    good:
+      - >-
+        Every added comment names a non-obvious fact about the code as it stands whose absence
+        would cause a specific wrong edit, or the added lines contain no comments. A function,
+        method, class or module docstring or doc comment that summarizes what the thing does or
+        is, even when its code shows the same, such as "Fetch a subscriber from a list." on
+        fetch_subscriber.
+    bad:
+      - >-
+        An added comment restates what the next line does, labels it, vouches
+        that it is safe or correct, cites where the design came from, or narrates what the code
+        used to do, and deleting it would not lead a competent reader to write a wrong line. Or
+        an added docstring or doc comment that narrates the body step by step, such as "Validate
+        the body, then load the client, then return 400 if missing.", or a test docstring that
+        repeats the test's assertions, such as "A missing client returns 400.".
+  - flags: An added line describes an error with hand-written text that names a cause the error value does not state.
+    good:
+      - >-
+        Added code reports the error value as it is, for example "{error}" or by passing the error
+        on unchanged, or adds only context the code at that line knows for certain, such as the
+        path or id it was working on; or the added lines describe no error.
+    bad:
+      - >-
+        Added code logs, prints, formats or wraps an error with a prefix or message such as
+        "failed to read config: {error}" that guesses which operation or cause failed, so the text becomes wrong when the function
+        gains another error case; or text that repeats what the error's own type or variant already
+        says.
+  - flags: Does the added text state a rule as something to avoid, where it could state the desired outcome instead?
+    good:
+      - >-
+        A rule: field of a jev rule set (a YAML file under rules/ with rules: entries), or one
+        of its bad: entries, that describes the violation jev looks for. The schema requires these fields to
+        describe the violation, so wording them as the thing to avoid is the desired outcome.

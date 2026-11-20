@@ -1,0 +1,19 @@
+description: >-
+  Justfile standards: the rule in the user's justfile standard that needs judgment. "set
+  default-list := true" is a whole-file check a diff hunk cannot judge; it is left to a linter.
+  Not calibrated.
+when:
+  - language: [just]
+error_threshold: 0.75
+rules:
+  - flags: An added recipe forwards its variadic arguments in a way that lets the shell split them again.
+    good:
+      - >-
+        Every added recipe that forwards variadic arguments has the [positional-arguments]
+        attribute and passes them as "$@", or as the equivalent for a recipe that runs under
+        another shell; or no added recipe forwards variadic arguments.
+    bad:
+      - >-
+        An added recipe with a variadic parameter such as *args or +args forwards it by
+        interpolating {{args}} into a recipe line, or uses $@ or $* unquoted, so an argument that
+        contains a space reaches the command as two arguments.

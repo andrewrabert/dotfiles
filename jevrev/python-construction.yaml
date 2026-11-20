@@ -1,0 +1,261 @@
+description: >-
+  Python correct by construction: a value is parsed into a type that holds its invariant once, where
+  it enters the program, and code past that point trusts the type instead of checking the value
+  again. Generalized from the models-and-validation rules of aardwolf-mcp.yaml for any Python
+  repo. Not calibrated.
+when:
+  - language: [python]
+error_threshold: 0.75
+rules:
+  - flags: |-
+      A value from outside the program (a response, a library result, a file, an environment variable, a request, a tool's or handler's arguments) is parsed whole into a type where it enters, before the code that uses it runs, so that code receives a typed value and never a raw one. A raw dict whose fields the code picks out one at a time, converting or validating each as it goes, is not correct by construction: nothing guarantees it is valid until partway through the code that uses it.
+      Added code handles a value from outside the program in its raw form, as str, int, dict, list or tuple of them, reading or converting its parts where they are used, when the value has a known shape that a type could hold.
+    good:
+      - >-
+        A handler whose parameter is an input model the caller or framework validated before calling it,
+        such as async def clone(self, value: CloneInput). One place at the edge that validates the whole raw
+        value into a model, such as Model.model_validate(arguments) or TypeAdapter(Event).validate_json(body),
+        then hands the typed value on. Free text whose content the code does not rely on. A value passed
+        straight through to another external system without the code reading it.
+    bad:
+      - >-
+        A handler or tool that receives its arguments as a raw dict and reads them one at a time, with
+        arguments['x'], arguments.get('x'), int(...) or helpers such as string_arg(arguments, 'x'), including
+        building a model by hand from those reads inside a try/except ValidationError; def handle(event: dict)
+        that later reads event['type'] and event['id']; a value from a third-party result, decoded JSON,
+        os.environ, argv, a header or a database row passed on typed with a bare primitive while the code
+        relies on a closed set or format, such as status: str copied from a response and compared against
+        'active' or 'paused' elsewhere.
+  - flags: An added function or constructor annotates a parameter with a wider type than it accepts, and converts or checks it inside the body, so the signature lets callers pass values that fail at run time.
+    good:
+      - >-
+        The parameter is typed with the narrow type, such as denied_by: tuple[ThrottleWindow, ...], and the
+        caller converts at the edge. A pydantic field or validator, where validating is the type's job. A
+        function at the program's edge whose purpose is to parse, such as parse_args or from_env, that
+        returns the narrow type.
+    bad:
+      - >-
+        def __init__(self, denied_by: tuple[str, ...] = ()) whose body does
+        self.denied_by = tuple(ThrottleWindow(name) for name in denied_by), raising ValueError on an unknown
+        name; def set_port(port: int) whose body raises when port is not 1-65535; def f(mode: str) whose body
+        does Mode(mode). Worse when the conversion can raise inside an except branch or while building an
+        exception, so the original failure is replaced by a ValueError.
+  - flags: Added code converts a str field of a model or dataclass after the object is built, instead of the field having a type that converts it during construction.
+    good:
+      - >-
+        The field is typed with the parsed type, such as datetime.datetime, uuid.UUID, an enum or a custom
+        type whose validator parses it. Formatting a typed value for output. Parsing a value that comes from
+        no model.
+    bad:
+      - >-
+        Code calls datetime.datetime.fromisoformat, int, float, uuid.UUID, decimal.Decimal, json.loads,
+        pathlib.Path, an enum constructor or a regex match on obj.<field> where the field is typed str, often
+        with except ValueError around it, or a method on the model that parses its own str field.
+  - flags: Added code checks the type or allowed values of an already parsed value, instead of its type making the check unnecessary.
+    good:
+      - >-
+        The same constraint on the type: typing.Literal or enum fields, strict types, field validators, or a
+        subclass for the narrower case. match or if on an enum or Literal to pick behavior. Checks of user
+        input at the point it is first parsed. isinstance to tell apart the members of a modeled union.
+    bad:
+      - >-
+        isinstance checks, try/except TypeError, ValueError or KeyError fallbacks, membership or equality
+        checks on fields of a model or dataclass the code already built from the source: if
+        isinstance(record.total, int) with a fallback, or if record.kind != 'page': raise after Record is
+        built from the response.
+
+  - flags: |-
+      A constraint on a value lives in the value's type, such as an Annotated alias with pydantic.StringConstraints, pydantic.Field constraints or a pydantic.AfterValidator, a model, or an enum, so every value of that type already holds it. A standalone check that callers must remember to run on a bare str, int or tuple of them leaves the value unchecked wherever a caller forgets, and gets repeated by callers that do not trust that someone else ran it.
+      Added code runs a standalone check on a bare value, or calls one, and keeps using the value as the same bare type, instead of the value's type enforcing the check.
+    good:
+      - >-
+        The check attached to a type: Annotated[str, pydantic.StringConstraints(...)],
+        Annotated[str, pydantic.AfterValidator(_check)], a field_validator, or a model the value is parsed
+        into, including the private function that such a type's validator calls. Code that takes the
+        already typed value and uses it without checking again. A check whose result picks behavior rather
+        than guarding validity.
+    bad:
+      - >-
+        A module function such as check_name(value) or ensure_safe(parts) that raises or returns the same
+        str, called by code that then passes the str on; a call of such a function before using a value,
+        such as check_segments((host, org, name)) before building a path from them; or an inline if not
+        PATTERN.fullmatch(value): raise ... where the value keeps its bare type afterwards and other code
+        receives it unchecked.
+      - A separate, public value is defined and used separately from the type to validate constraints.
+
+  - flags: Added code writes members of a fixed vocabulary as bare strings or string constants, instead of an enum or a single typing.Literal alias.
+    good:
+      - >-
+        Members of an enum.StrEnum or enum.Enum, such as ThrottleWindow.MINUTE or list(ThrottleWindow). The
+        enum class body defining them. A string allowlist defined once as a typing.Literal alias, such as
+        WindowLiteral = typing.Literal['minute', 'hour'], used directly as a field or parameter type, with
+        its runtime values derived by typing.get_args(WindowLiteral).
+        A comparison such as if window == 'minute': where window is typed with that alias, since the
+        type checker checks the string. A pydantic discriminator field typed with an enum member, such
+        as kind: typing.Literal[Kind.CAT] = Kind.CAT.
+        Dict keys of a JSON payload, header
+        names, log or error text, and tests comparing against the wire string. A single constant not part of
+        a set.
+    bad:
+      - >-
+        A value from a fixed set the code compares against, sends, stores or keys on, written as a string at
+        a use site where the value is not typed with a Literal alias:
+        if status == 'paused' on a str status, limits={'minute': ..., 'hour': ...}, the same
+        typing.Literal['minute', 'hour'] spelled out again at several sites instead of one alias, a field
+        that accepts one value written twice as typing.Literal['X'] = 'X' instead of a single-member
+        StrEnum (typed typing.Literal[Enum.X] = Enum.X when the field is a pydantic discriminator),
+        or a frozenset({'minute', 'hour'}) of allowed names written by hand instead of derived from
+        the enum or the Literal alias. Or two or more module constants naming members of one set, such as
+        MINUTE = 'minute' and HOUR = 'hour'.
+  - flags: Added code narrows a value to a known set where it is used, by a membership check, a fallback bucket or a default branch, instead of the value's type already being that set.
+    good:
+      - >-
+        The value is already an enum or Literal and the code uses it directly. A check at the point raw input
+        first enters, which raises on an unknown value. Filtering an open set by design, such as headers or
+        user-supplied tags.
+    bad:
+      - >-
+        name if name in _ALLOWED else 'other', if kind not in VALID_KINDS: continue, or a match whose case _:
+        returns a placeholder, applied to a value that came from elsewhere in the program typed as str or
+        int. Example: the handler maps each denied_by name outside frozenset({'minute', 'hour'}) to 'other'
+        before building a metric name, where the throttle client could have produced
+        tuple[ThrottleWindow, ...].
+  - flags: Added code reads a fixed internal mapping with .get(key, default), so an unknown key passes through silently where a mismatch should raise.
+    good:
+      - >-
+        A plain subscript such as _LABELS[state], which raises KeyError on an unknown value, or a dict keyed by
+        an enum with every member present. .get() on an open dict where absence is normal: headers,
+        os.environ, optional JSON fields, a cache or registry. .get() followed by if value is None: raise.
+    bad:
+      - >-
+        The mapping is a module-level dict the code defines over a closed set of values, such as states,
+        kinds or codes, and the lookup has a fallback: _LABELS.get(state, state), _LABELS.get(kind, 'Unknown')
+        or _TYPES.get(name) or 'html'.
+
+  - flags: An added class, model or return type lets combinations of fields exist that the code treats as impossible, instead of a union of types where each holds only valid combinations.
+    good:
+      - >-
+        A union of separate types such as Success | Failure, a pydantic discriminated union, or a model whose
+        validator rejects the invalid combinations. Optional fields that are independent of each other.
+    bad:
+      - >-
+        A model or dataclass with a status or kind field plus optional fields that are set only for some
+        values, such as ok: bool, result: T | None, error: str | None; a tuple of parallel lists that must be
+        the same length; two bools where both True is invalid; a return of (value, error) where exactly one is
+        set. Code that reads it asserts or checks which combination it got.
+  - flags: An added field or parameter is declared optional with T | None = None when the value is always present or a missing value must be an error.
+    good:
+      - >-
+        A required field. A field absent by design: a pagination cursor, a field present only when requested,
+        a value the source documents as nullable, or a patch model field where None means leave unchanged.
+    bad:
+      - >-
+        A field the code always sets, or that identifies the record, is | None = None; a container of
+        Model | None where a null entry should fail; a parameter with = None that every caller passes and the
+        body checks with if x is None: raise; or a class whose every field is | None = None.
+  - flags: An added field or parameter is typed X | None = None only so None can mean "not passed", accepting an explicit None that has no meaning, instead of a real default or a separate sentinel.
+    good:
+      - >-
+        A real default, such as items: tuple[str, ...] = () or enabled: bool = False. A required value.
+        pydantic's model_fields_set, or a module sentinel object, to tell whether a value was passed. A value
+        where None has its own meaning.
+    bad:
+      - >-
+        name: str | None = None or items: list[str] | None = None where None is not a valid value, with code
+        that folds None back into "absent", such as {k: v for k, v in data if v is not None} or
+        if items is None: items = [].
+
+  - flags: Added code builds or changes a validated object in a way that skips its validation.
+    good:
+      - >-
+        Model(...), Model.model_validate(...), or a frozen model or dataclass built through its constructor.
+        model_construct in tests, or on data that was validated by the same model a line earlier.
+    bad:
+      - >-
+        Model.model_construct(...), object.__setattr__ on a frozen instance, copy or model_copy(update=...)
+        with values that are not validated again, assigning a field of a pydantic model that does not set
+        validate_assignment, or a dataclass whose __post_init__ checks fields that later code reassigns.
+  - flags: An added validator enforces an invariant only when extra context is passed, so an object built without that context skips it.
+    good:
+      - >-
+        Validators that check only the object's own data. Validators that require the context and raise when
+        it is absent. Context used only for something that does not decide validity.
+    bad:
+      - >-
+        A field_validator or model_validator reads info.context and returns early when the context or a key
+        is missing, such as if not info.context: return self, before checking the invariant; or a __init__
+        that checks a field only when an optional keyword is given.
+  - flags: Added code tells the type checker a value has a narrower type without checking it, so nothing enforces the claim at run time.
+    good:
+      - >-
+        Parsing that raises on a bad value, such as Window(name) or Model.model_validate(payload). cast to work
+        around a stub or checker limitation where the runtime type is already known, with a comment that says
+        so. Asserts in tests.
+    bad:
+      - >-
+        typing.cast(Window, name), typing.cast(dict[str, int], payload), a # type: ignore on an assignment or
+        call that the narrow type would reject, or assert isinstance(x, T) used in production code as the only
+        thing that narrows a value from outside the program.
+
+  - flags: An added function takes, returns or stores a dict with fixed keys as a record, instead of a model or dataclass.
+    good:
+      - >-
+        A model, dataclass or NamedTuple. A dict keyed by data, such as counts by id. A dict built only to
+        serialize at the edge, such as a JSON body or query parameters from a model. **kwargs forwarding.
+    bad:
+      - >-
+        A parameter or return typed dict, dict[str, Any] or dict[str, object] whose keys the code reads or
+        writes by fixed names, such as return {'id': ..., 'name': ..., 'count': ...} read later as
+        result['count']; or a list of such dicts passed between functions.
+  - flags: |-
+      A value with a known format or range is held in a type that enforces it, everywhere it is held: fields, parameters and return values. Where the program already has a domain type for a value, such as the constrained type of the model field it comes from or goes into, every function that takes or returns that value uses the same type, not str or int.
+      An added field, parameter or return type holds a value with a known format or range as a bare str, int or float, with no type or constraint that enforces it.
+    good:
+      - >-
+        yarl.URL, pathlib.Path, uuid.UUID, datetime.datetime, datetime.timedelta, an enum, an Annotated alias
+        with a constraint such as OrgName or PRNumber, or pydantic.Field(pattern=..., ge=..., gt=...). Free
+        text such as a title, body, message or log label. str(value) at the final call that needs a string.
+    bad:
+      - >-
+        A URL, email, path, UUID, id or name of a known format, pull request or record number, duration,
+        timestamp, port, percentage or positive count typed str, int or float, such as url: str,
+        timeout: int where negative values are invalid, created_at: str holding ISO 8601, or pr: int for a
+        number that must be positive. Also a parameter typed str or int whose value comes from or goes into
+        a field the code already types with a constrained alias, such as def team_repo(org: str) -> Repo
+        whose body passes org into Repo(org=...) where Repo.org is OrgName.
+
+  - flags: |-
+      Values that belong together travel as the model or dataclass that holds them. Functions, constructors and other models take that object whole, and code reads a field only where it uses that value, so the grouping and its invariants reach as far toward the program's edges as they can. Splitting the object into its fields, as separate parameters, local variables, a tuple or fields copied into another class, throws the grouping away.
+      Added code splits a model or dataclass into several of its fields to pass, store or hold them separately, instead of passing the object itself.
+    good:
+      - >-
+        Passing the object whole, such as connect(cfg) or Task(repo=src.repo). A function that takes the
+        object and reads its fields where it finally needs them, such as building a URL or a path from
+        repo.host, repo.org and repo.name. Using single fields for unrelated purposes, such as logging
+        user.id and mailing user.email. Serializing the object at the program's edge, including the final
+        call to a third-party API that cannot take the object, such as psycopg.connect(host=cfg.host,
+        port=cfg.port). A function or class the code defines itself does not count as such an API.
+    bad:
+      - >-
+        A call or constructor that takes several fields of one object as separate arguments, such as
+        connect(cfg.host, cfg.port, cfg.user) or Task(host=src.host, org=src.org, name=src.name); a new
+        function, dataclass or model whose parameters or fields repeat the fields of an existing model
+        instead of holding it; unpacking into locals, such as host, org, name = repo.host, repo.org,
+        repo.name; or a method that returns the fields as a tuple for callers to unpack.
+  - flags: |-
+      Each fixed fact about where a specific resource lives (the host, owner, name or path that identify one repo, bucket, queue, service or account) has exactly one owner: a function or value that builds the whole identity, typically as a model, such as def standards_repo(org) -> Repo. Code that needs any part of it asks that owner. Module constants that each hold one piece of the identity, read by several sites that recombine or compare them, spread the fact across the program, and every new site must remember to reuse them.
+      Added code holds a piece of one specific resource's identity, such as its host or name, in a module constant that two or more places read, instead of one function or value that owns the whole identity.
+    good:
+      - >-
+        One function or value that owns the whole identity, such as def standards_repo(org: OrgName) ->
+        Repo: return Repo(host=Host.INTERNAL, org=org, name='standards'), with callers using
+        standards_repo(repo.org) or its .host. A constant read at exactly one site. Tuning values, limits,
+        timeouts and defaults. Enum classes and their members used as members of a set. A whole identity
+        held in one constant, such as PLUGIN_REPO = Repo(host=..., org=..., name=...).
+    bad:
+      - >-
+        STANDARDS_HOST = 'git.example.com' and STANDARDS_REPO = 'standards', then one function compares
+        repo.host != STANDARDS_HOST while another builds f'{STANDARDS_HOST}/{org}/{STANDARDS_REPO}' or
+        Repo(host=STANDARDS_HOST, org=org, name=STANDARDS_REPO); a REPORTS_BUCKET constant joined into
+        keys in one function and named in an error message in another; an enum member aliased to a new
+        constant, such as AUDIT_HOST = Host.INTERNAL, read at several sites.
