@@ -14,6 +14,7 @@ from dotfiles.commands import (
     jellium_desktop,
     krita,
     link_bin,
+    moon,
     noted,
     redump_verifier,
     syncthing,
@@ -26,6 +27,7 @@ PASSTHROUGH = {
     "bertbox",
     "bxwrp",
     "cloneholio",
+    "moon",
     "noted",
     "redump-verifier",
     "uncomment",
@@ -63,6 +65,7 @@ def main():
         "link-bin", help="link dotfiles scripts into the dotfiles bin"
     )
     subparsers.add_parser("macos", help="install expected homebrew packages")
+    add_passthrough("moon", "Manage moon")
     add_passthrough("noted", "Manage noted")
     add_passthrough("redump-verifier", "verify dumps against redump")
     subparsers.add_parser("syncthing", help="write .stignore includes")
@@ -123,6 +126,8 @@ def main():
                 from dotfiles.macos import packages
 
                 asyncio.run(packages.main([]))
+            case "moon":
+                asyncio.run(moon.main(rest))
             case "noted":
                 asyncio.run(noted.main(rest))
             case "redump-verifier":

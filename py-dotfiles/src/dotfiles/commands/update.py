@@ -45,6 +45,7 @@ SCRIPTS = {
     "60-git-sync": "dotfiles.full_update.git_sync:main",
     "60-kde": "dotfiles.kde.settings:main",
     "60-krita": "dotfiles.commands.krita:main",
+    "60-moon": "dotfiles.commands.moon:main_update",
     "60-mpv": "dotfiles.full_update.mpv:main",
     "60-neovim": "dotfiles.full_update.neovim:main",
     "60-networkmanager": "dotfiles.full_update.networkmanager:main",
