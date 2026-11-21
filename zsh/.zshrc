@@ -96,7 +96,12 @@ function zle-line-init zle-keymap-select {
 zle -N zle-line-init
 zle -N zle-keymap-select
 
-fpath=("$DOTFILES/.local/zcomp" "$DOTFILES/zsh/functions" "$fpath[@]")
+fpath=(
+    "$DOTFILES/.local/zcomp"
+    "$DOTFILES/zsh/functions"
+    "${XDG_DATA_HOME:-$HOME/.local/share}/bertbox/zsh"
+    "$fpath[@]"
+)
 
 host_dir="$DOTFILES/zsh/hosts/$HOST_DOTFILES"
 if [ -r "$host_dir/.zshrc" ]; then

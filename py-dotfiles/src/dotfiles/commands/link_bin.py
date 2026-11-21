@@ -4,14 +4,10 @@ import pathlib
 from dotfiles import fs, host
 
 HOST_DIRS = {
-    "aweber": ["scripts/mcp", ".local/zoekt-simple/bin"],
-    "mars": ["scripts/media", ".local/zoekt-simple/bin"],
-    "sol": ["scripts/media", ".local/zoekt-simple/bin"],
-    "phobos": [
-        "scripts/mcp",
-        "scripts/media",
-        ".local/zoekt-simple/bin",
-    ],
+    "aweber": ["scripts/mcp"],
+    "mars": ["scripts/media"],
+    "sol": ["scripts/media"],
+    "phobos": ["scripts/mcp", "scripts/media"],
 }
 
 
@@ -54,13 +50,6 @@ def collect_sources(primary, extras, hostname, dest):
     )
 
     sources.append(primary / "scripts/terminal")
-    sources.append(primary / ".local/noted/bin")
-    sources.append(primary / ".local/bertbox/bin")
-    sources.append(primary / ".local/bertbox/install")
-    sources.append(primary / ".local/bxwrp/bin")
-    sources.append(primary / ".local/cloneholio/bin")
-    sources.append(primary / ".local/uncomment/bin")
-    sources.append(primary / ".local/moon/bin")
     sources.extend(root / "scripts/terminal" for root in extras)
     sources.extend(primary / d for d in HOST_DIRS.get(hostname, []))
     return sources

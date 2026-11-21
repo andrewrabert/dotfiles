@@ -1,0 +1,52 @@
+description: >-
+  Rust silent failures: a failure must reach the user through the returned error, the exit status
+  or the result they see. Judged by outcome, not syntax; standards.yaml covers the syntax of
+  discarding an error. Not calibrated.
+when:
+  - language: [rust]
+error_threshold: 0.75
+rules:
+  - flags: Added code lets a failed operation end the same way a successful one does, so neither the exit status nor the output tells the user it failed.
+    good:
+      - >-
+        Every failure the added code meets travels up as an Err until the code that reports to the
+        user prints it and exits with a failure status.
+      - >-
+        The case handled is not a failure but an ordinary outcome the code was built to expect, for
+        example a map lookup miss, or an optional file whose absence (NotFound) is documented to mean
+        "no settings", while any other error from reading it is still returned.
+    bad:
+      - >-
+        Added code turns a failed I/O, parse, network or system call into a normal-looking result,
+        such as an empty Vec, an empty matcher, a default value, the unresolved input, Ok(()), None
+        or false, and execution continues to a success exit status.
+      - >-
+        Added code meets a failure and only logs it, with tracing at any level or eprintln!, then
+        carries on as if the operation had succeeded; a log line is not where the user reads the
+        result.
+  - flags: Added code drops an item from the work it was asked to do because handling that item failed, and the omission does not reach the user's result.
+    good:
+      - >-
+        Every input item, such as a file, path, archive entry, record or request, is either processed,
+        or its failure is returned as an error, or it is listed in the result the user sees, such as
+        a summary of skipped files with the reason.
+      - >-
+        The item is left out by a selection the user asked for or the command documents, for
+        example ignore rules, an --include glob, or a file kind the command never handles.
+    bad:
+      - >-
+        A loop or iterator skips an item whose decoding, reading or parsing failed, through continue,
+        filter_map, flatten over Results, or let Ok(x) = ... else { continue }, so the command
+        finishes with a partial result that looks complete; for example a non-UTF-8 path, an
+        unreadable file or a malformed archive entry dropped with at most a log line.
+  - flags: Added code loses a second failure that happens while cleaning up after a first one.
+    good:
+      - >-
+        A failure during cleanup, rollback or undo after an error is attached to the error the code
+        returns, for example as context on it, so the user learns both what failed and what was left
+        behind; or the cleanup cannot fail.
+    bad:
+      - >-
+        After an operation fails, added code tries to remove a partial file, delete a pending remote
+        object or roll back a change, and if that also fails it only logs it or ignores it, so the
+        user is not told that a partial file or a stray remote object remains.

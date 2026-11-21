@@ -8,7 +8,9 @@ confirm-close-surface = false
 
 font-family = Hack
 
-app-notifications = no-clipboard-copy
+app-notifications = false
+desktop-notifications = false
+notify-on-command-finish = never
 clipboard-read = allow
 link-previews = osc8
 

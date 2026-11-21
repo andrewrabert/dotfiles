@@ -18,6 +18,7 @@ done
 
 path=(
     "${DOTFILES}/.local/bin"
+    "${XDG_DATA_HOME:-$HOME/.local/share}/bertbox/bin"
     "$path[@]"
 )
 
