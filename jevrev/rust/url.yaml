@@ -1,0 +1,25 @@
+description: >-
+  Rust URL handling: URLs are built and parsed with the url crate. Not calibrated.
+when:
+  - language: [rust]
+error_threshold: 0.75
+rules:
+  - flags: An added line builds, parses or edits a URL as a string instead of through the url crate's Url type.
+    good:
+      - >-
+        Added code parses a URL with Url::parse or Url::join, builds or changes one with methods
+        such as set_path, path_segments_mut, set_query or query_pairs_mut, reads its parts with
+        accessors such as scheme, host_str, port, path or query_pairs, and passes the Url itself
+        on; or the added lines handle no URL.
+      - >-
+        A string literal holding a complete fixed URL that is passed straight to Url::parse, or to
+        a library call that takes the URL as text and parses it itself.
+    bad:
+      - >-
+        Added code assembles a URL with format!, concat!, push_str, + or join, for example
+        format!("{base}/api/{id}?q={query}"), or appends a path, query string or fragment to a
+        URL held as a String, so separators, escaping and percent-encoding are left to chance.
+      - >-
+        Added code takes a URL apart or inspects it with string operations, such as split on "/",
+        "?" or "#", starts_with("https://"), strip_prefix, find or a regex, or stores or passes a
+        URL as a String or &str where a Url would carry it.
