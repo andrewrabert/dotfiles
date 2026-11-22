@@ -126,17 +126,6 @@ rules:
         number,
         so adding, removing or reordering a variant still compiles while the mapping silently
         goes wrong; a hand-written array length such as [T; 9] is a sign of this.
-  - flags: An added line describes an error with hand-written text that names a cause the error value does not state.
-    good:
-      - >-
-        Added code reports the error value as it is, for example "{error}" or ?, or adds only
-        context the code at that line knows for certain, such as the path or id it was working on.
-    bad:
-      - >-
-        Added code logs, prints, formats or wraps an error with a prefix or message such as
-        "failed to read config: {error}" that guesses which operation or cause failed, so the text becomes wrong when the function
-        gains another error case; or text that repeats what the error's own type or variant already
-        says.
   - flags: An added function, closure or parameter returns bool to say which kind a value is, where an enum or a typed value would carry that kind.
     good:
       - >-
@@ -161,22 +150,6 @@ rules:
         for example a public constant holding the fallback, a public constructor for one specific
         default value called from another module, so other modules can pick or repeat the default
         themselves.
-  - flags: An added comment only repeats, defends or narrates what the code beside it already shows.
-    good:
-      - >-
-        Every added comment names a non-obvious fact about the code as it stands whose absence
-        would cause a specific wrong edit, or the added lines contain no comments. A function,
-        method, class or module docstring or doc comment that summarizes what the thing does or
-        is, even when its code shows the same, such as "Fetch a subscriber from a list." on
-        fetch_subscriber.
-    bad:
-      - >-
-        An added comment restates what the next line does, labels it, vouches
-        that it is safe or correct, cites where the design came from, or narrates what the code
-        used to do, and deleting it would not lead a competent reader to write a wrong line. Or
-        an added docstring or doc comment that narrates the body step by step, such as "Validate
-        the body, then load the client, then return 400 if missing.", or a test docstring that
-        repeats the test's assertions, such as "A missing client returns 400.".
   - flags: An added function, method or type only forwards to, wraps, or repeats a path the code already has.
     good:
       - >-

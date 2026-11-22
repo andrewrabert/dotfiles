@@ -1,8 +1,9 @@
 description: >-
   apis/aardwolf-mcp standards: the defects review feedback pointed out on aardwolf-mcp pull
   requests opened 2026-08-04 to 2026-11-04, mostly ones the AI agent opened (#100-#161), generalized
-  into rules a single hunk can decide. Error propagation, correct-by-construction models, app-owned
-  configuration and dependencies, and comments. Applies to Python under src/ of a repo that has src/aardwolf_mcp/, not its tests.
+  into rules a single hunk can decide. Error propagation, models, app-owned configuration and
+  dependencies, and comments. Rules that hold for any Python repo live in construction.yaml, and
+  rules that hold for any text live in prose.yaml; neither is repeated here. Applies to Python under src/ of a repo that has src/aardwolf_mcp/, not its tests.
   Not calibrated.
 when:
   - matches: ["/src/**", "!/tests/**", "!/acceptance/**"]
@@ -114,19 +115,6 @@ rules:
         as except ValueError, zoneinfo.ZoneInfoNotFoundError: return timezone, or except ValueError:
         return [], [] around int() parsing of RRULE values, with nothing in the hunk showing the failure can
         happen.
-  - flags: Added code reads a fixed internal mapping with .get(key, default), so an unknown key passes through silently where a mismatch should raise.
-    good:
-      - >-
-        A plain subscript such as _STATE_DISPLAY[raw_state], which raises KeyError on a value the table does
-        not know. .get() on an open dict where absence is normal: HTTP headers, os.environ, optional JSON
-        fields, query parameters, a cache or registry. .get() followed by if value is None: raise. A
-        membership filter such as [d for d in days if d in _RRULE_DAY_MAP].
-    bad:
-      - >-
-        The mapping is a module-level dict the code defines over a closed set of values such as states,
-        action types or day codes, and the lookup has a fallback: _STATE_DISPLAY.get(raw_state, raw_state),
-        _RRULE_DAY_MAP.get(code, code), _ACTION_LABELS.get(action.type, 'Unknown') or
-        CONTENT_TYPES.get(name) or 'html'.
   - flags: Added code reports every validation error from building a model with several fallible fields as a failure of one named field.
     good:
       - >-
@@ -179,19 +167,6 @@ rules:
         ToolExecutionError(problem.detail), ToolExecutionError(e.response.body.decode()), or an f-string that
         puts error.message, detail or faults into the text the MCP client gets.
 
-  - flags: An added pydantic field is declared optional with T | None = None, or a list holds Model | None, when the value is always present or a missing value must be an error.
-    good:
-      - >-
-        A required field. A field absent by design: a pagination cursor, a field returned only when the
-        request selects it (body_html when content_types can exclude html), a field the upstream OpenAPI
-        schema marks nullable, or a PATCH model field where None means leave unchanged.
-    bad:
-      - >-
-        A new field that the code always sets or that identifies the record is | None = None, such as
-        list_id: int | None = None or subject: str | None = None on a tool response, or
-        aardwolf_www_url: str | None = None filled from a required setting; messages:
-        list[MessageContent | None] where a null entry should fail the call; or a model whose every field is
-        | None = None.
   - flags: The change makes a required field of a model that parses an upstream response optional, so records that lack a value they need to be valid now pass.
     good:
       - >-
@@ -204,56 +179,6 @@ rules:
         required to optional: "-    uuid: str" becomes "+    uuid: str | None = None", often with a comment
         that legacy or some upstream records return null. Also an identifier, foreign key or status field
         given | None or = None only so bad upstream data validates.
-  - flags: An added tool input field is typed X | None = None only so None can mean "not passed", adding an explicit-null input that the tool does not accept, instead of a real default or model_fields_set.
-    good:
-      - >-
-        A field with a real default, such as apply: list[str] = [] or discard: bool = False. A required field.
-        Code that reads self.model_fields_set to tell whether a field was passed. A field where null has its
-        own meaning, such as clearing a value upstream.
-    bad:
-      - >-
-        Input fields such as name: str | None = None or apply: list[str] | None = None where null is not a
-        valid input, with code that folds None back into "absent": a helper such as _present(model) returning
-        {k for k, v in model if v is not None}, or if input.status is not None: deciding whether to change a
-        field.
-  - flags: An added pydantic field holds an identifier with a known format as bare str or list[str], with no constrained type or pattern.
-    good:
-      - >-
-        Id fields typed with a constrained alias or pattern, such as list[MessageId] or
-        pydantic.Field(pattern=WORKFLOW_ID_PATTERN). Free text such as name, subject or description. Ids whose
-        upstream format is documented as any string.
-    bad:
-      - >-
-        A new field whose name or description shows it holds ids of a known format, such as processed:
-        list[str] holding 24-hex Message-Editor ids, message_id: str or workflow_id: str, with no
-        pydantic.Field(pattern=...) or Annotated alias such as MessageId.
-  - flags: Added code writes members of a fixed vocabulary as bare strings or string constants, instead of a StrEnum or a single typing.Literal alias.
-    good:
-      - >-
-        Members of an enum such as CodeChallengeMethod.S256, MessageField.SUBJECT or
-        list[MessageContentType]. The StrEnum class body defining them. A string allowlist defined once as a
-        typing.Literal alias, such as ContentTypeLiteral = typing.Literal['html', 'text'], used directly as a
-        field type, with its runtime values derived by typing.get_args(ContentTypeLiteral).
-        A comparison such as if content_type == 'html': where content_type is typed with that alias,
-        since the type checker checks the string. A pydantic discriminator field typed with an enum
-        member, such as kind: typing.Literal[MessageKind.HTML] = MessageKind.HTML.
-        JSON body keys,
-        header names, log or error text, Field descriptions, and tests comparing against the wire string. A
-        single constant not part of a set, such as MAX_CONCURRENT_BROADCAST_FETCHES = 10.
-    bad:
-      - >-
-        A value from a fixed set the server compares against, sends or advertises written as a string at a
-        use site where the value is not typed with a Literal alias:
-        {'fields': 'subject'} or 'list_id,subject,body_text,body_html', 'S256' as a default,
-        comparison or metadata entry, a field that accepts one value written twice as
-        typing.Literal['S256'] = 'S256' instead of a single-member StrEnum
-        (typed typing.Literal[Enum.X] = Enum.X when the field is a pydantic discriminator),
-        or the same
-        typing.Literal['html', 'text'] spelled out again at several sites instead of one alias. Or two or more added
-        module constants naming members of one set, such as _HTML = 'html', _TEXT = 'text', _AMP = 'amp', or
-        a constant that only wraps a token under a name that hides it, such as
-        DEFAULT_CODE_CHALLENGE_METHOD = 'S256', including constants added to satisfy a duplicate-string lint
-        rule.
   - flags: Added code states the supported values of an enum by naming some of its members, instead of deriving them from the enum.
     good:
       - >-
@@ -280,42 +205,6 @@ rules:
         try: CodeChallengeMethod(value) except ValueError: ... before passing the same raw value to a model
         whose field is CodeChallengeMethod; or self.get_argument(..., default) repeating the model field's
         default.
-  - flags: Added code converts a str field of a pydantic model after the model is built, instead of the field having a type that converts it during validation.
-    good:
-      - >-
-        A field typed datetime.datetime, AwareDatetime or a custom type whose validator parses the value, and
-        a method on that type that only computes from the parsed value, such as to_datetime(). Formatting a
-        typed value for output. Parsing a value that comes from no model.
-    bad:
-      - >-
-        Tool logic or a model method calls datetime.datetime.fromisoformat, isodate.parse_duration, int or
-        uuid.UUID on input.<field> or on an upstream model's str field, often with except ValueError mapped to
-        an invalid-params error or a fix for naive datetimes. Examples: resolve_scheduled_for() parsing
-        self.scheduled_for: str, so a pattern-valid 2024-13-45T10:00:00+00:00 fails inside the tool; a
-        _modified_timestamp helper parsing a Workflow's modified_at: str.
-  - flags: Added code checks the type or allowed values of an upstream response value after it is parsed, instead of the upstream pydantic model making it correct by construction.
-    good:
-      - >-
-        The same constraints on the model: typing.Literal['page'] fields, strict types, field validators, or a
-        subclass such as UniversalPageRecord. match or if on an already typed enum or Literal to pick
-        behavior. Checks on tool input. Telling apart two modeled upstream shapes with isinstance.
-    bad:
-      - >-
-        isinstance checks, try/except TypeError, ValueError or KeyError fallbacks, or equality checks on fields
-        of an upstream response or client model: a _total_size_and_has_more helper checking
-        isinstance(total_size, int) with a fallback, or _require_universal_page(record) testing
-        record.type != 'page' or record.builder != 'universal' after ContentRecord is built.
-  - flags: An added pydantic validator enforces an invariant only when a validation context is passed, so a model built without that context skips it.
-    good:
-      - >-
-        Validators that check only the model's own data. Validators that require the context and raise when
-        it is absent. Context used only for something that does not decide validity, such as a display
-        format.
-    bad:
-      - >-
-        A field_validator or model_validator reads info.context and returns early when the context or key is
-        missing, for example if not info.context or 'account_uuid' not in info.context: return self, before
-        checking self.account == info.context['account_uuid'].
   - flags: Added client code sends an upstream JSON request body built as an ad-hoc dict, instead of from a pydantic request model.
     good:
       - >-
@@ -481,23 +370,6 @@ rules:
         if not meapi_ids: return {}, if not ids: return [] or a similar guard at the top of a function whose
         following batch request, loop or comprehension also works for the empty case.
 
-  - flags: An added comment or docstring sentence only says again what the nearby code or test assertions already show.
-    good:
-      - >-
-        A comment giving a fact the code cannot show: why it is there, a limit an outside system sets, or a
-        non-obvious upstream behavior such as "the list endpoint does not return rulesets". A function,
-        method, class or module docstring that summarizes what the thing does or is, even when its code
-        shows the same, such as "Fetch a subscriber from a list." on fetch_subscriber, and its Args or
-        Raises sections. Tool docstrings that describe the tool to MCP clients.
-    bad:
-      - >-
-        # Initialize Web-Content client for landing page tools. above web_content.Client(...);
-        # WEB_CONTENT_URL defaults to aardwolf_api_url above os.environ.get('WEB_CONTENT_URL', aardwolf_api_url);
-        "Reject cleanly rather than let the pydantic.ValidationError surface as an uncaught 500" above a
-        try/except that raises a 400; "# Load registered client" above
-        registered_client = await store.get_client(client_id). A docstring that narrates the body step by
-        step, such as "Validate the body, then load the client, then return 400 if missing.", or a test
-        docstring that repeats the test's assertions, such as "A missing client returns 400.".
   - flags: An added docstring describes who builds, calls or uses the thing, or details callers own such as TTL and lifecycle wiring, instead of what the thing is.
     good:
       - >-
