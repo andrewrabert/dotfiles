@@ -58,4 +58,4 @@ echo "Downloading $url"
 curl -fsSL -o "$scratch/bertbox.zip" "$url"
 extract_zip "$scratch/bertbox.zip" "$scratch"
 chmod +x "$scratch/bertbox"
-BERTBOX_AS_BERTBOX=1 "$scratch/bertbox" bertbox install bertbox
+"$scratch/bertbox" install bertbox
