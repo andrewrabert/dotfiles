@@ -69,14 +69,6 @@ end
 set -g fish_key_bindings fish_vi_key_bindings
 set -g fish_escape_delay_ms 10 # zsh: KEYTIMEOUT=1
 
-# block cursor in every vi mode (zsh never changed it)
-set -g fish_cursor_default block
-set -g fish_cursor_insert block
-set -g fish_cursor_replace_one block
-set -g fish_cursor_replace block
-set -g fish_cursor_visual block
-set -g fish_cursor_external block
-
 # Normal-mode ' wraps the command line in single quotes (zsh: quote-line)
 function __dotfiles_quote_line
     set -l buf "$(commandline)"
