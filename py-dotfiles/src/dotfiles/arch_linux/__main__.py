@@ -181,7 +181,6 @@ if HOSTNAME in ("mars", "phobos"):
             "ark",
             "audacity",
             "avidemux-qt",
-            "base16-shell-preview",
             "chromium",
             "discimagecreator",
             "discover",
