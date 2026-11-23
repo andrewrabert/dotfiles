@@ -1,6 +1,3 @@
-# Positionals: config file (*.toml), workflow directory. File completion is
-# left on for both. zsh's mutual exclusion of the project selectors has no
-# fish equivalent.
 complete -c imbi-automations -l project-id -x -d 'Process a single project by Project ID'
 complete -c imbi-automations -l project-type -x -d 'Process all projects of a specific type slug'
 complete -c imbi-automations -l all-projects -d 'Process all projects'

@@ -1,5 +1,3 @@
-# Test names from unittest-findtests. A single prefix match is expanded one
-# level further, as in the zsh completion.
 function __unittest_tests
     set -l cur (commandline -ct)
     set -l results
