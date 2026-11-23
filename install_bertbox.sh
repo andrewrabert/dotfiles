@@ -1,9 +1,10 @@
 #!/bin/sh
-# Download the bertbox binary from CI and write it to the path given as the only argument.
+# Download the bertbox binary from CI and run its `install bertbox` command.
+# With --output PATH, only save the binary to PATH.
 set -eu
 
 die() {
-    echo "download_bertbox.sh: $*" >&2
+    echo "install_bertbox.sh: $*" >&2
     exit 1
 }
 
@@ -31,7 +32,22 @@ extract_zip() {
     fi
 }
 
-out=$1
+usage() {
+    echo "usage: install_bertbox.sh [--output PATH]" >&2
+    exit 2
+}
+
+out=
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -o | --output)
+            [ $# -ge 2 ] || usage
+            out=$2
+            shift 2
+            ;;
+        *) usage ;;
+    esac
+done
 
 system=$(uname -s)
 machine=$(uname -m)
@@ -70,4 +86,8 @@ echo "Downloading $url"
 download "$url" "$scratch/bertbox.zip"
 extract_zip "$scratch/bertbox.zip" "$scratch"
 chmod +x "$scratch/bertbox"
-mv "$scratch/bertbox" "$out"
+if [ -n "$out" ]; then
+    mv "$scratch/bertbox" "$out"
+else
+    "$scratch/bertbox" install bertbox
+fi

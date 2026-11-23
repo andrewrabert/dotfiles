@@ -4,8 +4,7 @@ repo=${0:A:h}
 bin_dir=${XDG_DATA_HOME:-$HOME/.local/share}/bertbox/bin
 bertbox=$bin_dir/bertbox
 if [[ ! -e $bertbox ]]; then
-    mkdir -p $bin_dir || exit
-    $repo/download_bertbox.sh $bertbox || exit
+    $repo/install_bertbox.sh || exit
 fi
 
 for name in .zshenv .zshrc; do
