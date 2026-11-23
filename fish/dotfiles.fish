@@ -47,6 +47,9 @@ end
 set -l data_home $HOME/.local/share
 test -n "$XDG_DATA_HOME"; and set data_home $XDG_DATA_HOME
 fish_add_path -Pm $DOTFILES/.local/bin $data_home/bertbox/bin
+if status is-interactive; and test -r $data_home/bertbox/fish/bertbox.fish
+    source $data_home/bertbox/fish/bertbox.fish
+end
 
 set -l host_dir $DOTFILES/fish/hosts/$HOST_DOTFILES
 if test -r $host_dir/env.fish
