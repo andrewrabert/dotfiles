@@ -7,6 +7,16 @@ die() {
     exit 1
 }
 
+download() {
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL -o "$2" "$1"
+    elif command -v wget >/dev/null 2>&1; then
+        wget -q -O "$2" "$1"
+    else
+        die "need curl or wget to download $1"
+    fi
+}
+
 extract_zip() {
     if command -v unzip >/dev/null 2>&1; then
         unzip -q -o "$1" -d "$2"
@@ -55,7 +65,7 @@ trap 'exit 1' HUP INT TERM
 
 url="https://nightly.link/andrewrabert/tools/workflows/ci/main/bertbox-$target.zip"
 echo "Downloading $url"
-curl -fsSL -o "$scratch/bertbox.zip" "$url"
+download "$url" "$scratch/bertbox.zip"
 extract_zip "$scratch/bertbox.zip" "$scratch"
 chmod +x "$scratch/bertbox"
 "$scratch/bertbox" install bertbox
