@@ -59,7 +59,11 @@ function fish_mode_prompt
     printf ' '
 end
 
+# Re-emit OSC 7 as a plain path, overriding fish's built-in file:// URL form
+# (written before this runs), so tmux's pane_path works with split-window -c
+# and keeps the symlinked PWD.
 function fish_prompt
+    printf '\e]7;%s\e\\' "$PWD"
 end
 
 # Right: cwd, hidden once the line is accepted (zsh: TRANSIENT_RPROMPT;
