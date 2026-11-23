@@ -8,6 +8,13 @@
 
 set -g fish_greeting
 
+set -g fish_autosuggestion_enabled 0
+for color in normal command keyword quote redirection end error param \
+        valid_path option comment operator escape autosuggestion cancel
+    set -g fish_color_$color normal
+end
+set -e color
+
 # zsh set no terminal title
 function fish_title
 end
@@ -68,6 +75,9 @@ end
 # --- key bindings -----------------------------------------------------------
 set -g fish_key_bindings fish_vi_key_bindings
 set -g fish_escape_delay_ms 10 # zsh: KEYTIMEOUT=1
+set -g fish_cursor_insert block
+set -g fish_cursor_replace_one block
+set -g fish_cursor_replace block
 
 # Normal-mode ' wraps the command line in single quotes (zsh: quote-line)
 function __dotfiles_quote_line
