@@ -13,7 +13,7 @@ RESET_COLOR = "\033[0m"
 BREW_GNUBIN = pathlib.Path("/opt/homebrew/opt/coreutils/libexec/gnubin")
 DOTFILES_SCRIPT = "00-dotfiles"
 PIKVM = "pikvm"
-PIKVM_SCRIPTS = ["00-dotfiles", "10-pikvm", "60-tmux", "60-fish"]
+PIKVM_SCRIPTS = ["00-dotfiles", "10-pikvm", "60-tmux"]
 # Local conf.d files may override HOST_DOTFILES; skip the dotfiles config itself
 FISH_OVERRIDE = (
     "for f in $__fish_config_dir/conf.d/*.fish;"
@@ -37,7 +37,6 @@ SCRIPTS = {
     "60-dash": "dotfiles.full_update.dash:main",
     "60-discord": "dotfiles.commands.discord:main",
     "60-dosbox": "dotfiles.full_update.dosbox:main",
-    "60-fish": "dotfiles.full_update.fish:main",
     "60-fontconfig": "dotfiles.full_update.fontconfig:main",
     "60-foot": "dotfiles.full_update.foot:main",
     "60-fwupd": "dotfiles.full_update.fwupd:main",

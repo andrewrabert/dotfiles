@@ -1,9 +1,9 @@
 #!/bin/sh
-# Install bertbox: fetch the bertbox binary from CI, then have it run `bertbox install bertbox`.
+# Download the bertbox binary from CI and write it to the path given as the only argument.
 set -eu
 
 die() {
-    echo "install.sh: $*" >&2
+    echo "download_bertbox.sh: $*" >&2
     exit 1
 }
 
@@ -30,6 +30,8 @@ extract_zip() {
         die "need unzip, bsdtar, python3, or busybox to extract $1"
     fi
 }
+
+out=$1
 
 system=$(uname -s)
 machine=$(uname -m)
@@ -59,7 +61,7 @@ case "$target" in
     *) die "unsupported platform: $system $machine" ;;
 esac
 
-scratch=$(mktemp -d "${TMPDIR:-/tmp}/bertbox-install.XXXXXX")
+scratch=$(mktemp -d "${TMPDIR:-/tmp}/bertbox-download.XXXXXX")
 trap 'rm -rf "$scratch"' EXIT
 trap 'exit 1' HUP INT TERM
 
@@ -68,4 +70,4 @@ echo "Downloading $url"
 download "$url" "$scratch/bertbox.zip"
 extract_zip "$scratch/bertbox.zip" "$scratch"
 chmod +x "$scratch/bertbox"
-"$scratch/bertbox" install bertbox
+mv "$scratch/bertbox" "$out"
