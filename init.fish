@@ -10,11 +10,5 @@ if not test -e $bertbox
     $repo/download_bertbox.sh $bertbox; or exit
 end
 
-set name dotfiles.fish
-set conf_d $__fish_config_dir/conf.d
-set target $repo/fish/$name
-set link $conf_d/$name
-
-mkdir -p $conf_d; or exit
-ln -sf $target $link; or exit
-echo "$link -> $target"
+$repo/link_fish.fish; or exit
+$repo/install_py_dotfiles.sh; or exit
