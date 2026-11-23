@@ -2,5 +2,5 @@
 Description=Run sol-status-email
 
 [Service]
-ExecStart=zsh -lc sol-status-email
+ExecStart=fish -lc sol-status-email
 SyslogIdentifier=sol-status-email

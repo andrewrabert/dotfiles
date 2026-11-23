@@ -4,7 +4,7 @@ StartLimitInterval=1d
 StartLimitBurst=3
 
 [Service]
-ExecStart=zsh -lc sol-update-remotes
+ExecStart=fish -lc sol-update-remotes
 SyslogIdentifier=sol-update-remotes
 Restart=on-failure
 RestartSec=15m

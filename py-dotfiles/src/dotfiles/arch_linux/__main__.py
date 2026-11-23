@@ -56,6 +56,7 @@ if HOSTNAME in ("sol", "mars", "phobos"):
             "exfatprogs",
             "fd",
             "ffmpeg",
+            "fish",
             "fzf",
             "gifsicle",
             "git",
@@ -140,7 +141,6 @@ if HOSTNAME in ("sol", "mars", "phobos"):
             "yt-dlp",
             "zip",
             "zola",
-            "zsh",
         }
     )
 

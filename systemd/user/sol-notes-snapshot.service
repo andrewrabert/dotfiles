@@ -2,5 +2,5 @@
 Description=Run sol-notes-snapshot
 
 [Service]
-ExecStart=zsh -lc sol-notes-snapshot
+ExecStart=fish -lc sol-notes-snapshot
 SyslogIdentifier=sol-notes-snapshot

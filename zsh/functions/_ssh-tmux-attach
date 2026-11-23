@@ -1,6 +1,0 @@
-#compdef ssh-tmux-attach
-
-_arguments : \
-    '(-n --new-tab)'{-n,--new-tab}'[Create new tmux tab]' \
-    '(-h --help)'{-h,--help}'[Show help message]' \
-    '1:SSH host:_ssh_hosts'

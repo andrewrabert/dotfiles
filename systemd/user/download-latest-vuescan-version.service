@@ -2,5 +2,5 @@
 Description=Run download-latest-vuescan-version
 
 [Service]
-ExecStart=zsh -lc /home/ar/.dotfiles/public/scripts/download-latest-vuescan-version
+ExecStart=fish -lc /home/ar/.dotfiles/public/scripts/download-latest-vuescan-version
 SyslogIdentifier=download-latest-vuescan-version

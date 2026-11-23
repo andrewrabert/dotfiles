@@ -1,0 +1,22 @@
+# Positionals: config file (*.toml), workflow directory. File completion is
+# left on for both. zsh's mutual exclusion of the project selectors has no
+# fish equivalent.
+complete -c imbi-automations -l project-id -x -d 'Process a single project by Project ID'
+complete -c imbi-automations -l project-type -x -d 'Process all projects of a specific type slug'
+complete -c imbi-automations -l all-projects -d 'Process all projects'
+complete -c imbi-automations -l github-repository -x -d 'Process a single GitHub repository by URL'
+complete -c imbi-automations -l github-organization -x -d 'Process all repositories in a GitHub organization'
+complete -c imbi-automations -l all-github-repositories -d 'Process all GitHub repositories across all organizations'
+complete -c imbi-automations -l resume -x -a '(__fish_complete_directories)' -d 'Resume from previous error state directory'
+complete -c imbi-automations -l start-from-project -x -d 'Skip all projects up to and including this project'
+complete -c imbi-automations -l max-concurrency -x -d 'How many concurrent tasks to run at a time'
+complete -c imbi-automations -l exit-on-error -d 'Exit immediately when any action fails'
+complete -c imbi-automations -l preserve-on-error -d 'Preserve working directory on error for debugging'
+complete -c imbi-automations -l dry-run -d 'Save repository state instead of pushing changes or creating pull requests'
+complete -c imbi-automations -l cache-dir -x -a '(__fish_complete_directories)' -d 'Directory for caching Imbi metadata'
+complete -c imbi-automations -l dry-run-dir -x -a '(__fish_complete_directories)' -d 'Directory to save repository state when --dry-run is used'
+complete -c imbi-automations -l error-dir -x -a '(__fish_complete_directories)' -d 'Directory to save error states when --preserve-on-error is used'
+complete -c imbi-automations -s v -l verbose -d 'Show action start/end INFO messages'
+complete -c imbi-automations -l debug -d 'Enable debug logging (shows all debug messages)'
+complete -c imbi-automations -s V -l version -d 'Show program version number and exit'
+complete -c imbi-automations -s h -l help -d 'Show help message and exit'

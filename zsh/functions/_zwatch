@@ -1,5 +1,0 @@
-#compdef zwatch
-_arguments : \
-    '-n':timeout \
-    --help \
-    '*::command arguments:_normal'

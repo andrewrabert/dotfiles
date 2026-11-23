@@ -1,5 +1,0 @@
-#compdef wh
-_arguments \
-  '-n[do not resolve symlinks]' \
-  '(-h --help)'{-h,--help}'[show help]' \
-  '*:command:_command_names -e'

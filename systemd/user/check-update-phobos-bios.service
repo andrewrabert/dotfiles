@@ -2,5 +2,5 @@
 Description=Run check-update-phobos-bios
 
 [Service]
-ExecStart=zsh -lc check-update-phobos-bios
+ExecStart=fish -lc check-update-phobos-bios
 SyslogIdentifier=check-update-phobos-bios
