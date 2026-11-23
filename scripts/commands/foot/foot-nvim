@@ -18,5 +18,5 @@ case $# in
 esac
 foot \
     --working-dir="$WORKING_DIR" \
-    -- fish -lic "source ~/.base16_theme.fish; nvim ${NVIM_ARGS}" 2> /dev/null > /dev/null &
+    -- zsh -lic ". ~/.base16_theme; nvim ${NVIM_ARGS}" 2> /dev/null > /dev/null &
 disown

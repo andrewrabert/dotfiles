@@ -2,5 +2,5 @@
 Description=Run harmonize-library
 
 [Service]
-ExecStart=fish -lc harmonize-library
+ExecStart=zsh -lc harmonize-library
 SyslogIdentifier=harmonize-library

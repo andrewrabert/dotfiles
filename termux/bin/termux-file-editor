@@ -1,3 +1,4 @@
-#!/data/data/com.termux/files/usr/bin/fish
-# fish loads the dotfiles config (conf.d/dotfiles.fish) for scripts too
-exec nvim $argv
+#!/data/data/com.termux/files/usr/bin/zsh
+. ~/.zshenv
+. ~/.zshrc
+exec nvim "$@"

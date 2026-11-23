@@ -2,5 +2,5 @@
 Description=Run gog-update
 
 [Service]
-ExecStart=fish -lc gog-update
+ExecStart=zsh -lc gog-update
 SyslogIdentifier=gog-update

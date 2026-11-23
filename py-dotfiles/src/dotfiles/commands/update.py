@@ -13,12 +13,10 @@ RESET_COLOR = "\033[0m"
 BREW_GNUBIN = pathlib.Path("/opt/homebrew/opt/coreutils/libexec/gnubin")
 DOTFILES_SCRIPT = "00-dotfiles"
 PIKVM = "pikvm"
-PIKVM_SCRIPTS = ["00-dotfiles", "10-pikvm", "60-tmux"]
-# Local conf.d files may override HOST_DOTFILES; skip the dotfiles config itself
-FISH_OVERRIDE = (
-    "for f in $__fish_config_dir/conf.d/*.fish;"
-    " test (path basename $f) = dotfiles.fish; or source $f;"
-    " end; echo $HOST_DOTFILES"
+PIKVM_SCRIPTS = ["00-dotfiles", "10-pikvm", "60-tmux", "60-zsh"]
+ZSH_OVERRIDE = (
+    "if [ -f ~/.zshenv.local ]; then . ~/.zshenv.local; fi"
+    ' && echo "$HOST_DOTFILES"'
 )
 SCRIPTS = {
     "00-dotfiles": "dotfiles.full_update.dotfiles:main",
@@ -83,11 +81,7 @@ async def capture_if_installed(*command, env=None):
 async def resolve_host():
     name = socket.gethostname()
     override = await capture_if_installed(
-        "fish",
-        "--no-config",
-        "-c",
-        FISH_OVERRIDE,
-        env={**os.environ, "HOST_DOTFILES": name},
+        "zsh", "-lic", ZSH_OVERRIDE, env={**os.environ, "HOST_DOTFILES": name}
     )
     if override is not None:
         name = override

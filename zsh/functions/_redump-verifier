@@ -1,0 +1,15 @@
+#compdef redump-verifier
+typeset -A opt_args
+
+_redump-verifier() {
+
+  _arguments \
+    '(-h --help)'{-h,--help}'[show this help message and exit]' \
+    '--hashes=: :_files' \
+    '--update' \
+    '--rename' \
+    '--verbose' \
+    '*:: :_files'
+
+}
+_redump-verifier

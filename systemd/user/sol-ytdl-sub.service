@@ -2,5 +2,5 @@
 Description=Run sol-ytdl-sub
 
 [Service]
-ExecStart=fish -lc sol-ytdl-sub
+ExecStart=zsh -lc sol-ytdl-sub
 SyslogIdentifier=sol-ytdl-sub

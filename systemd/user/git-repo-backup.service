@@ -2,5 +2,5 @@
 Description=Run git-repo-backup
 
 [Service]
-ExecStart=fish -lc git-host-backup
+ExecStart=zsh -lc git-host-backup
 SyslogIdentifier=git-repo-backup

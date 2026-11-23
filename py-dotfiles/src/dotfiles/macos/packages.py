@@ -15,7 +15,6 @@ EXPECTED_PACKAGES = {
     "exiftool",
     "exiv2",
     "fd",
-    "fish",
     "font-hack",
     "font-hack-nerd-font",
     "fzf",
@@ -49,6 +48,7 @@ EXPECTED_PACKAGES = {
     "vips",
     "yazi",
     "zip",
+    "zsh",
     "zstd",
 }
 

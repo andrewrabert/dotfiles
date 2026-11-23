@@ -1,0 +1,14 @@
+#compdef base16-shell-preview
+
+typeset -A opt_args
+
+_base16-shell-preview() {
+
+  _arguments \
+    '(-h --help)'{-h,--help}'[show this help message and exit]' \
+    '--version' \
+    '--sort-bg' \
+    '*:: :_files'
+
+}
+_base16-shell-preview

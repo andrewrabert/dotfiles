@@ -1,0 +1,2 @@
+#compdef ssh-sudo
+compdef ssh-sudo=ssh

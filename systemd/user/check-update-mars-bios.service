@@ -2,5 +2,5 @@
 Description=Run check-update-mars-bios
 
 [Service]
-ExecStart=fish -lc check-update-mars-bios
+ExecStart=zsh -lc check-update-mars-bios
 SyslogIdentifier=check-update-mars-bios

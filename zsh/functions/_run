@@ -1,0 +1,2 @@
+#compdef run
+_arguments : '*::command arguments:_normal'

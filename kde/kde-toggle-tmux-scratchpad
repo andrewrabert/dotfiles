@@ -6,5 +6,5 @@ exec kwinctrl \
     --toggle \
     --center=initial \
     --filter "${APP_ID}" \
-    -- ghostty --title="${TITLE}" --class="${APP_ID}" -e fish -ic 'tmux-attach --prompt'
+    -- ghostty --title="${TITLE}" --class="${APP_ID}" -e zsh -ic 'tmux-attach --prompt'
     #-- foot --title="${TITLE}" --app-id="${APP_ID}" -- zsh -ic 'tmux-attach --prompt'

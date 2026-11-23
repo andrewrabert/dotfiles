@@ -1,0 +1,13 @@
+#compdef convert-to-mkv
+
+typeset -A opt_args
+
+_convert-to-mkv() {
+  _arguments \
+    '(-h --help)'{-h,--help}'[show this help message and exit]' \
+    '--force[include files ending in .mkv]' \
+    '--keep[keep original files after conversion]' \
+    '*:path:_files'
+}
+
+_convert-to-mkv

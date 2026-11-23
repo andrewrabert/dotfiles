@@ -1,0 +1,82 @@
+#compdef claude
+
+_claude() {
+  local context state line
+
+  _arguments -C \
+    '(-d --debug)'{-d,--debug}'[Enable debug mode with optional category filtering]:filter:' \
+    '--verbose[Override verbose mode setting from config]' \
+    '(-p --print)'{-p,--print}'[Print response and exit (useful for pipes)]' \
+    '--output-format[Output format (only works with --print)]:format:(text json stream-json)' \
+    '--include-partial-messages[Include partial message chunks as they arrive]' \
+    '--input-format[Input format (only works with --print)]:format:(text stream-json)' \
+    '--mcp-debug[Enable MCP debug mode (shows MCP server errors)]' \
+    '--dangerously-skip-permissions[Bypass all permission checks]' \
+    '--replay-user-messages[Re-emit user messages from stdin back on stdout]' \
+    '--allowedTools[Comma or space-separated list of tool names to allow]:tools:' \
+    '--allowed-tools[Comma or space-separated list of tool names to allow]:tools:' \
+    '--disallowedTools[Comma or space-separated list of tool names to deny]:tools:' \
+    '--disallowed-tools[Comma or space-separated list of tool names to deny]:tools:' \
+    '--mcp-config[Load MCP servers from JSON files or strings]:configs:_files' \
+    '--append-system-prompt[Append a system prompt to the default system prompt]:prompt:' \
+    '--permission-mode[Permission mode to use for the session]:mode:(acceptEdits sandboxBashMode bypassPermissions default plan)' \
+    '(-c --continue)'{-c,--continue}'[Continue the most recent conversation]' \
+    '(-r --resume)'{-r,--resume}'[Resume a conversation]:sessionId:' \
+    '--fork-session[When resuming, create a new session ID instead of reusing the original]' \
+    '--model[Model for the current session]:model:' \
+    '--fallback-model[Enable automatic fallback to specified model]:model:' \
+    '--settings[Path to a settings JSON file or a JSON string]:file-or-json:_files' \
+    '--add-dir[Additional directories to allow tool access to]:directories:_directories' \
+    '--ide[Automatically connect to IDE on startup if exactly one valid IDE is available]' \
+    '--strict-mcp-config[Only use MCP servers from --mcp-config]' \
+    '--session-id[Use a specific session ID for the conversation]:uuid:' \
+    '--agents[JSON object defining custom agents]:json:' \
+    '--setting-sources[Comma-separated list of setting sources to load]:sources:' \
+    '(-v --version)'{-v,--version}'[Output the version number]' \
+    '(-h --help)'{-h,--help}'[Display help for command]' \
+    '1: :_claude_commands' \
+    '*::arg:->args'
+
+  case $state in
+    args)
+      case $line[1] in
+        config)
+          _arguments \
+            'set[Set configuration value]' \
+            'get[Get configuration value]' \
+            'list[List configuration]' \
+            'reset[Reset configuration]' \
+            '-g[Global configuration]'
+          ;;
+        mcp)
+          _arguments \
+            'list[List MCP servers]' \
+            'add[Add MCP server]' \
+            'remove[Remove MCP server]' \
+            'test[Test MCP server]'
+          ;;
+        install)
+          _arguments \
+            '--force[Force installation]' \
+            '*:target:(stable latest)'
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_claude_commands() {
+  local commands
+  commands=(
+    'config:Manage configuration'
+    'mcp:Configure and manage MCP servers'
+    'migrate-installer:Migrate from global npm installation to local installation'
+    'setup-token:Set up a long-lived authentication token'
+    'doctor:Check the health of your Claude Code auto-updater'
+    'update:Check for updates and install if available'
+    'install:Install Claude Code native build'
+  )
+  _describe 'commands' commands
+}
+
+_claude "$@"

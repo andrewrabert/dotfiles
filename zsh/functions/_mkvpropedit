@@ -1,0 +1,42 @@
+#compdef mkvpropedit
+
+typeset -A opt_args
+
+_mkvpropedit() {
+  _arguments \
+    '(-h --help)'{-h,--help}'[show help message and exit]' \
+    '(-V --version)'{-V,--version}'[show version information]' \
+    '(-l --list-property-names)'{-l,--list-property-names}'[list all valid property names and exit]' \
+    '(-p --parse-mode)'{-p,--parse-mode}'[set Matroska parser mode]:mode:(fast full)' \
+    '--enable-legacy-font-mime-types[use legacy font MIME types for attachments]' \
+    '(-e --edit)'{-e,--edit}'[set file section for following actions]:selector:' \
+    '(-a --add)'{-a,--add}'[add property with value]:name=value:' \
+    '(-s --set)'{-s,--set}'[set property to value]:name=value:' \
+    '(-d --delete)'{-d,--delete}'[delete all occurrences of property]:name:' \
+    '(-t --tags)'{-t,--tags}'[add/replace tags]:selector\:filename:' \
+    '(-c --chapters)'{-c,--chapters}'[add/replace chapters]:filename:_files' \
+    '--chapter-charset[charset for reading chapter files]:charset:' \
+    '--add-track-statistics-tags[calculate and add track statistics tags]' \
+    '--delete-track-statistics-tags[delete existing track statistics tags]' \
+    '--add-attachment[add file as new attachment]:filename:_files' \
+    '--replace-attachment[replace attachment with file]:selector\:filename:' \
+    '--update-attachment[update attachment properties]:selector:' \
+    '--delete-attachment[delete attachment]:selector:' \
+    '--attachment-name[set name for attachment]:name:' \
+    '--attachment-description[set description for attachment]:description:' \
+    '--attachment-mime-type[set MIME type for attachment]:mime-type:' \
+    '--attachment-uid[set UID for attachment]:uid:' \
+    '--disable-language-ietf[do not change LanguageIETF elements when language property changes]' \
+    '--normalize-language-ietf[normalize IETF BCP 47 language tags]:mode:(canonical extlang off)' \
+    '(-v --verbose)'{-v,--verbose}'[increase verbosity]' \
+    '(-q --quiet)'{-q,--quiet}'[suppress status output]' \
+    '--ui-language[force translations for language code]:code:' \
+    '--command-line-charset[charset for command line strings]:charset:' \
+    '--output-charset[output messages in charset]:charset:' \
+    '(-r --redirect-output)'{-r,--redirect-output}'[redirect messages to file]:file:_files' \
+    '--flush-on-close[flush cached data when closing files]' \
+    '--abort-on-warnings[abort after first warning]' \
+    '*:matroska file:_files -g "*.mkv(-.)"'
+}
+
+_mkvpropedit

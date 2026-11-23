@@ -1,0 +1,2 @@
+#compdef cde
+_arguments : '*::command arguments:_normal'

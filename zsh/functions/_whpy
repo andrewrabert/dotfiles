@@ -1,0 +1,21 @@
+#compdef whpy
+# ----------------------------------------------------------------------------------------
+# Zsh completion file for whpy
+#
+# Show Python module filesystem paths
+#
+# This file was generated with help from Zargparse (https://github.com/ctil/zargparse)
+# ----------------------------------------------------------------------------------------
+
+typeset -A opt_args
+
+_whpy() {
+
+  # Global flags (i.e. ones not associated with a subcommand)
+  _arguments \
+    '(-h --help)'{-h,--help}'[show this help message and exit]' \
+    '-d[output dir name]' \
+    '*:: :->args'
+
+}
+_whpy
